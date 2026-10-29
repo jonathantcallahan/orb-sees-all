@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
-import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, ProjectPriority } from "../schema";
+import type { Assessment, Automation, FollowUp, ManualAssessment, ProjectPriority } from "../schema";
 import { formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
@@ -36,15 +36,6 @@ export interface CardTask {
   assessment?: Assessment | null;
   done: boolean;
 }
-
-const FOLLOW_UP_LABEL: Record<FollowUpKind, string> = {
-  reply: "Reply",
-  review: "Review",
-  decide: "Decide",
-  do: "Do",
-  schedule: "Schedule",
-  share: "Share",
-};
 
 const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null } as const;
 
@@ -211,25 +202,40 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
   claude: "Claude can do it",
 };
 
-/** The single next action ("Reply: …", "Do: …"). */
-function NextAction({ followUp, label }: { followUp: FollowUp; label: string }) {
+/**
+ * A high-level view of the plan: each step's title beside a numbered circle.
+ * With no plan yet, the next action stands in as step one. `action` (e.g.
+ * Approve & start) sits inside, under the steps.
+ */
+function PlanOutline({ steps, action }: { steps: string[]; action?: ReactNode }) {
+  if (steps.length === 0 && !action) return null;
   return (
-    <div className={`follow-up ${followUp.kind}`}>
-      <span className="follow-up-kind">{label}</span>
-      <span className="small">{followUp.action}</span>
+    <div className="plan-outline">
+      <span className="follow-up-kind">Plan</span>
+      <ol className="plan-outline-steps">
+        {steps.map((step, i) => (
+          <li key={i}>
+            <span className="step-circle" aria-hidden>
+              {i + 1}
+            </span>
+            <span className="small">{step}</span>
+          </li>
+        ))}
+      </ol>
+      {action}
     </div>
   );
 }
 
 function AssessmentView({
   assessment,
-  next,
+  steps,
   onAddDetails,
   onStart,
 }: {
   assessment: Assessment;
-  /** The next action, shown inside the assessment. */
-  next?: ReactNode;
+  /** Plan step titles (or the next action), shown inside the assessment. */
+  steps: string[];
   onAddDetails?: () => void;
   /** Approve Claude's approach and start on it; offered when Claude can help or do it. */
   onStart?: () => void;
@@ -249,16 +255,20 @@ function AssessmentView({
       <div className={`automation ${assessment.automation}`}>
         <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
         <span className="small">{assessment.suggestion}</span>
-        {next}
-        {onStart && (
-          <button
-            className="link-button small approve-start"
-            onClick={onStart}
-            title="Mark this in progress and open a Claude Code session to start on it"
-          >
-            Approve & start
-          </button>
-        )}
+        <PlanOutline
+          steps={steps}
+          action={
+            onStart && (
+              <button
+                className="link-button small approve-start"
+                onClick={onStart}
+                title="Mark this in progress and open a Claude Code session to start on it"
+              >
+                Approve & start
+              </button>
+            )
+          }
+        />
       </div>
     </>
   );
@@ -305,6 +315,8 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
+  // The plan's step titles, or the next action as a one-step plan until there's a real one.
+  const planSteps = plan ? plan.plan.steps.map((st) => st.title) : followUp ? [followUp.action] : [];
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
@@ -414,7 +426,7 @@ export function TaskCard({
       {assessment ? (
         <AssessmentView
           assessment={assessment}
-          next={followUp && <NextAction followUp={followUp} label={task.follow_up ? FOLLOW_UP_LABEL[followUp.kind] : "Next"} />}
+          steps={planSteps}
           onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
           onStart={assessment.automation !== "human" ? approveAndStart : undefined}
         />
@@ -426,7 +438,7 @@ export function TaskCard({
             </div>
           )}
           {/* No assessment to nest it in yet. */}
-          {followUp && <NextAction followUp={followUp} label={task.follow_up ? FOLLOW_UP_LABEL[followUp.kind] : "Next"} />}
+          <PlanOutline steps={planSteps} />
         </>
       )}
 
