@@ -166,3 +166,31 @@ export function taskPriority(assessed: Priority | null | undefined, projectPrior
   if (projectPriority === "P0") return "critical";
   return assessed ?? null;
 }
+
+export type PriorityFilter = Priority | "unrated";
+
+export interface TaskFilter {
+  statuses: TaskStatus[];
+  priorities: PriorityFilter[];
+  recommendedOnly: boolean;
+}
+
+export const NO_FILTER: TaskFilter = { statuses: [], priorities: [], recommendedOnly: false };
+
+export function isFiltering(f: TaskFilter): boolean {
+  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
+}
+
+/**
+ * Whether a task passes the filter. Within a dimension any selected value
+ * matches; across dimensions all must match. An empty dimension matches all.
+ */
+export function matchesFilter(
+  t: { status: TaskStatus; priority: Priority | null; recommended?: boolean },
+  f: TaskFilter,
+): boolean {
+  if (f.statuses.length && !f.statuses.includes(t.status)) return false;
+  if (f.priorities.length && !f.priorities.includes(t.priority ?? "unrated")) return false;
+  if (f.recommendedOnly && !t.recommended) return false;
+  return true;
+}

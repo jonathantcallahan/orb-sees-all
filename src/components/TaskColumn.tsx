@@ -2,12 +2,13 @@ import { useState } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment } from "../schema";
-import { applyTaskState, formatMinutes, splitToday, type TaskState } from "../tasks";
+import { applyTaskState, formatMinutes, isFiltering, matchesFilter, splitToday, taskPriority, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
 import { setTaskState } from "../db";
 import { Inbox } from "./Inbox";
+import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
 import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
@@ -18,11 +19,14 @@ function Group({
   plans,
   assessments,
   running,
+  filtered = false,
   onChange,
 }: {
   title: string;
   tasks: CardTask[];
   empty: string;
+  /** A filter is on, so say so when nothing is left. */
+  filtered?: boolean;
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
   running: string[];
@@ -33,7 +37,7 @@ function Group({
   return (
     <>
       <h4 className="section-title">{title}</h4>
-      {tasks.length === 0 && <p className="muted small">{empty}</p>}
+      {tasks.length === 0 && <p className="muted small">{filtered ? "Nothing matches the filters." : empty}</p>}
       {tasks.map((t) => (
         <TaskCard
           key={t.id}
@@ -82,8 +86,15 @@ export function TaskColumn({
 }) {
   const [draft, setDraft] = useState("");
   const tasksStatus = useJobStatus("adhoc", "assess");
+  const [filter, setFilter] = useTaskFilter();
+  const filtering = isFiltering(filter);
+  /** Effective priority, matching the card's badge: tasks in P0 projects are critical. */
+  const priorityOf = (t: CardTask) =>
+    taskPriority((t.source === "manual" ? assessments.get(t.id) : t.assessment)?.priority, t.projectPriority);
+  const keep = <T extends CardTask>(list: T[]) =>
+    filtering ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended }, filter)) : list;
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
-  const shared = { plans, assessments, running, onChange };
+  const shared = { plans, assessments, running, onChange, filtered: filtering };
   const today = localDate(new Date());
 
   // Slack and email items share one inbox; dated items first, soonest first.
@@ -125,7 +136,7 @@ export function TaskColumn({
   );
 
   // Today's plan pulls from every group; open tasks first.
-  const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
+  const planned = keep([...mine.planned, ...projectTasks.planned, ...inbox.planned]).sort(
     (a, b) => Number(a.done) - Number(b.done),
   );
   const estimate = (t: (typeof planned)[number]) =>
@@ -142,7 +153,7 @@ export function TaskColumn({
         )}
       </h4>
       {planned.length === 0 ? (
-        <p className="muted small">Drag tasks here to plan your day.</p>
+        <p className="muted small">{filtering ? "Nothing planned matches the filters." : "Drag tasks here to plan your day."}</p>
       ) : (
         planned.map((t) => (
           <TaskCard
@@ -213,6 +224,8 @@ export function TaskColumn({
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" />
       </form>
 
+      <TaskFilters filter={filter} onChange={setFilter} />
+
       {filterProject ? (
         <>
           <div className="filter-chip">
@@ -226,23 +239,23 @@ export function TaskColumn({
           {todayGroup}
           <Group
             title="Project"
-            tasks={projectTasks.rest}
+            tasks={keep(projectTasks.rest)}
             empty={filterProject.snapshot ? "Nothing on you for this project." : "Refresh this project to find your tasks."}
             {...shared}
           />
-          {mine.rest.length > 0 && <Group title="All tasks" tasks={mine.rest} empty="" {...shared} />}
+          {mine.rest.length > 0 && <Group title="All tasks" tasks={keep(mine.rest)} empty="" {...shared} />}
         </>
       ) : (
         <>
           {todayGroup}
-          <Group title="All tasks" tasks={mine.rest} empty="No tasks of your own." {...shared} />
+          <Group title="All tasks" tasks={keep(mine.rest)} empty="No tasks of your own." {...shared} />
           <Group
             title="Projects"
-            tasks={projectTasks.rest}
+            tasks={keep(projectTasks.rest)}
             empty="No project tasks on you. Refresh projects to find them."
             {...shared}
           />
-          <Group title="Requests" tasks={inbox.rest} empty="No requests from Slack or email." {...shared} />
+          <Group title="Requests" tasks={keep(inbox.rest)} empty="No requests from Slack or email." {...shared} />
         </>
       )}
     </section>

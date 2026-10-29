@@ -4,9 +4,24 @@ import { draftReply } from "../jobs";
 import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
 import { useJobStatus } from "../useAppData";
+import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
+
+/** "3:12 PM" today, "Yesterday 3:12 PM", or "Oct 27, 9:05 AM"; older refreshes stored only a date. */
+function when(received: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(received)) {
+    return new Date(`${received}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  const d = new Date(received);
+  if (Number.isNaN(d.getTime())) return received;
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = localDate(d);
+  if (day === localDate(new Date())) return time;
+  if (day === localDate(new Date(Date.now() - 86_400_000))) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
 
 function Draft({ reply, text, onRegenerate }: { reply: QuickReply; text: string; onRegenerate: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -44,7 +59,7 @@ function DraftingStatus({ id }: { id: string }) {
   );
 }
 
-/** Messages that only need a quick reply, with Claude-drafted responses to copy. */
+/** Slack messages and emails waiting on the user, with Claude-drafted responses to copy. */
 export function Inbox({
   replies,
   states,
@@ -69,18 +84,24 @@ export function Inbox({
       <h4 className="section-title">
         Inbox <span className="muted">{open.length}</span>
       </h4>
+      <div className="inbox-list">
       {open.map((r) => {
         const drafting = running.includes(`draft:${r.id}`);
         const draft = drafts.get(r.id);
         const draftIt = () => draftReply(r).catch(() => {});
         return (
           <div key={r.id} className="card inbox-item">
-            <div className="inbox-row" title={[r.where, r.received].filter(Boolean).join(" · ")}>
+            <div className="inbox-row" title={r.where ?? undefined}>
               <span className={`source ${r.source}`}>{SOURCE_LABEL[r.source]}</span>
               <span className="inbox-from">{r.from}</span>
               <ExternalLink href={r.link} className="inbox-summary">
                 {r.summary}
               </ExternalLink>
+              {r.received && (
+                <span className="inbox-time" title={new Date(r.received).toLocaleString()}>
+                  {when(r.received)}
+                </span>
+              )}
               {drafting ? (
                 <DraftingStatus id={r.id} />
               ) : (
@@ -106,6 +127,7 @@ export function Inbox({
           </div>
         );
       })}
+      </div>
     </section>
   );
 }

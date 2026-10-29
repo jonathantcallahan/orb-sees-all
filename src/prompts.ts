@@ -112,8 +112,8 @@ Look for new items since ${since.date}:
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
 Sort what's still open into two lists:
-- replies: messages that only need a quick reply the user could write in a few minutes without research, e.g. a yes/no, a date, a quick opinion, an acknowledgement, a pointer to a doc they know. Only messages addressed to the user that they haven't answered.
-- tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply.
+- replies: every Slack message and email addressed to the user that is waiting on a response from them and that they haven't answered, quick or not.
+- tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply. A message that needs both a response and real work goes in both lists, with the same id.
 
 Return the full lists of what's still open: carried-over items that aren't resolved, plus new ones.
 - id: for Slack, the message permalink; for email, "gmail:<thread id>". Reuse the existing id for carried-over tasks.
@@ -126,10 +126,10 @@ Return the full lists of what's still open: carried-over items that aren't resol
 For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is YYYY-MM-DD. At most eight, most important first.
 
 For each reply:
-- id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: YYYY-MM-DD. link: as for tasks.
+- id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: when the message was sent, as ISO 8601 date-time with offset (e.g. "2026-10-29T14:05:00-07:00"). link: as for tasks.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": "YYYY-MM-DD"|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": "YYYY-MM-DD"|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": "YYYY-MM-DD"|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": string|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {

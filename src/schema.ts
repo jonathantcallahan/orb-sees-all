@@ -112,7 +112,7 @@ export const AdhocTask = Task.extend({
 });
 export type AdhocTask = z.infer<typeof AdhocTask>;
 
-/** A message waiting on a reply that takes a few minutes at most: too small to be a task. */
+/** A Slack message or email waiting on the user's response. */
 export const QuickReply = z.object({
   /** Slack permalink, or "gmail:<thread id>". */
   id: z.string(),
@@ -122,6 +122,7 @@ export const QuickReply = z.object({
   summary: z.string(),
   /** Where it was sent: "#channel", "DM", or the email subject. */
   where: z.string().nullish(),
+  /** When it was sent: ISO date-time (older refreshes stored YYYY-MM-DD). */
   received: z.string().nullish(),
   link: z.string().nullish(),
 });

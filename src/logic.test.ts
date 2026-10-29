@@ -5,7 +5,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, NO_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -346,5 +346,26 @@ describe("task priority", () => {
   it("counts open P0 tasks as critical pressure even when the project is on track", () => {
     const p = pressure([{ status: "on_track", priority: "P0", tasks: [{ id: "a" }, { id: "b" }] }], [], new Map(), new Date(2026, 9, 29));
     expect(p.criticalTasks).toBe(2);
+  });
+});
+
+describe("task filters", () => {
+  const t = (status: "todo" | "in_progress" | "waiting" | "done", priority: "critical" | "high" | "medium" | "low" | null, recommended = false) => ({ status, priority, recommended });
+
+  it("lets everything through with no filter", () => {
+    expect(matchesFilter(t("done", null), NO_FILTER)).toBe(true);
+  });
+
+  it("matches any selected value within a dimension and all dimensions together", () => {
+    const f = { statuses: ["todo" as const, "in_progress" as const], priorities: ["critical" as const], recommendedOnly: false };
+    expect(matchesFilter(t("in_progress", "critical"), f)).toBe(true);
+    expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
+    expect(matchesFilter(t("waiting", "critical"), f)).toBe(false);
+  });
+
+  it("treats unassessed tasks as unrated, and can require recommended", () => {
+    expect(matchesFilter(t("todo", null), { ...NO_FILTER, priorities: ["unrated"] })).toBe(true);
+    expect(matchesFilter(t("todo", "low"), { ...NO_FILTER, recommendedOnly: true })).toBe(false);
+    expect(matchesFilter(t("todo", "low", true), { ...NO_FILTER, recommendedOnly: true })).toBe(true);
   });
 });

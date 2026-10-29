@@ -445,8 +445,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .inbox-row .source { flex-shrink: 0; font-size: 11px; }
 .inbox-from { flex-shrink: 0; color: var(--muted); }
 .inbox-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inbox-action { flex-shrink: 0; visibility: hidden; }
-.inbox-item:hover .inbox-action { visibility: visible; }
+/* Actions take no room until hover, so the time sits at the far right and slides over. */
+.inbox-action {
+  flex-shrink: 0;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+  transition: max-width 0.18s ease, opacity 0.18s ease;
+}
+.inbox-item:hover .inbox-action { max-width: 120px; opacity: 1; }
 .reply-draft { margin-top: 6px; padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); }
 .reply-draft p { margin: 0 0 6px; white-space: pre-wrap; }
 .reply-draft-actions { display: flex; gap: 12px; }
@@ -506,3 +514,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
 
 .motto { color: var(--muted); font-size: 13px; margin-left: 2px; }
+
+/* Task filters */
+.task-filters { display: flex; flex-direction: column; gap: 4px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.filter-chip-toggle { font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--muted); background: transparent; }
+.filter-chip-toggle.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
+.filter-chip-toggle.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.filter-sep { width: 6px; }
+.filter-clear { margin-left: 4px; }
+.inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: var(--muted); }
+/* Five rows of about 39px with 6px gaps; more scroll. */
+.inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.inbox-item { flex-shrink: 0; }

@@ -348,7 +348,7 @@ export function refreshAll(): Promise<void> {
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
       // The reading summarizes everything above, so it goes last.
-      status("Writing the daily reading");
+      status("Writing the daily briefing");
       await refreshReading().catch(() => {});
     },
     false,

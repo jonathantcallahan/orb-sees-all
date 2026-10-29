@@ -112,13 +112,13 @@ export function DailyReading({
   return (
     <section className="reading">
       <header className="column-header">
-        <h4 className="section-title">Daily reading</h4>
-        <RefreshButton busy={busy} status={status} title="Write today's reading again" onClick={() => refreshReading().catch(() => {})} />
+        <h4 className="section-title">Daily briefing</h4>
+        <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
       </header>
       {current ? (
         <p className="reading-text">{current.text}</p>
       ) : (
-        <p className="muted small">{busy ? "The Orb is reading your day…" : "No reading yet today. It's written after Refresh all."}</p>
+        <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
       )}
 
       {updates.length > 0 && (
