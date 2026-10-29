@@ -251,9 +251,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .project .reason { color: var(--muted); margin-top: 4px; }
 .blockers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .blockers .what { display: block; }
-.blockers { margin-top: 8px; }
-.owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.owners h4 { margin: 0 2px 0 0; }
+.owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
 .owner { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--grey-bg); }
 .owner.me { background: var(--red-bg); color: var(--red); }
 .blockers .age { font-size: 11px; color: var(--amber); }

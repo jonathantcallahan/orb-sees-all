@@ -106,24 +106,26 @@ export function ProjectCard({
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
           {s.blockers?.length > 0 && (
-            <ul className="blockers">
-              {s.blockers.map((b) => (
-                <li key={b.id}>
-                  <div className="owners">
-                    <h4>Blocked by</h4>
-                    {b.owners.map((o) => (
-                      <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
-                        {o.is_me ? "You" : o.name}
-                      </span>
-                    ))}
-                    {b.since && <span className="age">{age(b.since)}</span>}
-                  </div>
-                  <ExternalLink href={b.link} className="what">
-                    {b.what}
-                  </ExternalLink>
-                </li>
-              ))}
-            </ul>
+            <section>
+              <h4>Blocked by</h4>
+              <ul className="blockers">
+                {s.blockers.map((b) => (
+                  <li key={b.id}>
+                    <ExternalLink href={b.link} className="what">
+                      {b.what}
+                    </ExternalLink>
+                    <div className="owners">
+                      {b.owners.map((o) => (
+                        <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
+                          {o.is_me ? "You" : o.name}
+                        </span>
+                      ))}
+                      {b.since && <span className="age">{age(b.since)}</span>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           {openTasks > 0 && (
