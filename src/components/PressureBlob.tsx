@@ -96,7 +96,9 @@ void main() {
   float warp = snoise(vPos * 1.2 + vec3(t, -t, t * 0.5));
   float swirl = 0.5 + 0.5 * snoise(vPos * 2.0 + warp * 1.5 - t);
 
-  vec3 cool = mix(mix(vec3(0.16, 0.42, 0.95), vec3(0.50, 0.33, 0.95), swirl), vec3(0.08, 0.75, 0.70), smoothstep(0.55, 1.0, warp));
+  // Calm: pale, icy tones (frost blue, glacier cyan, lavender) over a deeper periwinkle.
+  vec3 cool = mix(mix(vec3(0.62, 0.80, 1.00), vec3(0.78, 0.72, 1.00), swirl), vec3(0.62, 0.96, 0.98), smoothstep(0.55, 1.0, warp));
+  cool = mix(vec3(0.36, 0.46, 0.92), cool, smoothstep(-0.6, 0.4, warp));
   vec3 warm = mix(mix(vec3(1.00, 0.42, 0.10), vec3(0.93, 0.13, 0.22), swirl), vec3(1.00, 0.78, 0.15), smoothstep(0.55, 1.0, warp));
   vec3 color = mix(cool, warm, smoothstep(0.0, 1.0, uStress));
   // Spike tips run hotter.
@@ -107,7 +109,18 @@ void main() {
   vec3 light = normalize(vec3(0.4, 0.7, 0.6));
   float diffuse = 0.55 + 0.45 * max(dot(n, light), 0.0);
   float rim = pow(1.0 - max(dot(n, normalize(-vViewPos)), 0.0), 2.5);
-  gl_FragColor = vec4(color * diffuse + rim * 0.35 * color + rim * 0.15, 1.0);
+  vec3 lit = color * diffuse + rim * 0.35 * color + rim * 0.15;
+
+  // When calm the orb turns ethereal: a soft blue-white halo, a faint thin-film
+  // shimmer that shifts with the viewing angle, and a translucent core. All of
+  // it fades out as stress rises.
+  float calm = 1.0 - smoothstep(0.0, 0.5, uStress);
+  vec3 shimmer = 0.5 + 0.5 * cos(6.2831 * (rim * 1.5 + swirl * 0.3 + vec3(0.55, 0.65, 0.8)));
+  lit = mix(lit, mix(lit, shimmer, 0.18 * rim), calm);
+  lit += calm * rim * vec3(0.55, 0.75, 1.0) * 0.55;
+  float alpha = mix(1.0, 0.72 + 0.28 * rim, calm);
+  // The canvas uses premultiplied alpha.
+  gl_FragColor = vec4(lit * alpha, alpha);
 }
 `;
 
@@ -131,7 +144,16 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
     camera.position.z = 6.4;
 
     const uniforms = { uTime: { value: 0 }, uStress: { value: target.current } };
-    const material = new THREE.ShaderMaterial({ vertexShader: VERTEX, fragmentShader: FRAGMENT, uniforms });
+    const material = new THREE.ShaderMaterial({
+      vertexShader: VERTEX,
+      fragmentShader: FRAGMENT,
+      uniforms,
+      // The calm orb is partly see-through; the fragment shader outputs premultiplied color.
+      transparent: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+    });
     const geometry = new THREE.IcosahedronGeometry(1, 64);
     const blob = new THREE.Mesh(geometry, material);
     scene.add(blob);
