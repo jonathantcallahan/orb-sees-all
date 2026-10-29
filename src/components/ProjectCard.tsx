@@ -1,14 +1,28 @@
 import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
-import type { ProjectStatus, PullRequest } from "../schema";
+import type { Priority, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
-import { Checklist, ExternalLink, RefreshButton, Updated } from "./common";
+import { ExternalLink, RefreshButton, Updated } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   blocked: "Blocked",
   at_risk: "At risk",
   on_track: "On track",
   idle: "Idle",
+};
+
+const PRIORITY_LABEL: Record<Priority, string> = {
+  critical: "Critical",
+  high: "High priority",
+  medium: "Medium priority",
+  low: "Low priority",
+};
+
+const RACI_LABEL: Record<Raci, string> = {
+  responsible: "Responsible",
+  accountable: "Accountable",
+  consulted: "Consulted",
+  informed: "Informed",
 };
 
 function prLabel(pr: PullRequest) {
@@ -21,20 +35,32 @@ export function ProjectCard({
   project,
   busy,
   taskStates,
+  selected,
+  onSelect,
   onChange,
 }: {
   project: Project;
   busy: boolean;
   taskStates: Map<string, TaskState>;
+  /** Whether the Tasks column is filtered to this project. */
+  selected: boolean;
+  onSelect: () => void;
   onChange: () => void;
 }) {
   const s = project.snapshot;
   const status = s?.status;
   const repo = project.repo_state;
-  const tasks = applyTaskState(s?.my_tasks ?? [], taskStates);
+  const openTasks = applyTaskState(s?.my_tasks ?? [], taskStates).filter((t) => !t.done).length;
 
   return (
-    <article className={`card project ${status ?? "unknown"}`}>
+    <article
+      className={`card project ${status ?? "unknown"}${selected ? " selected" : ""}`}
+      onClick={(e) => {
+        // Links, buttons and the summary toggle keep their own behavior.
+        if (!(e.target as HTMLElement).closest("a, button, input, summary")) onSelect();
+      }}
+      title={selected ? "Showing only this project's tasks. Click to show all." : "Click to show only this project's tasks"}
+    >
       <header className="card-header">
         <div>
           <h3>#{project.name}</h3>
@@ -61,29 +87,50 @@ export function ProjectCard({
 
       {s && (
         <>
-          <p className="reason">{s.status_reason}</p>
+          <div className="badges">
+            {s.priority && (
+              <span className={`badge priority ${s.priority.level}`} title={s.priority.reason}>
+                {PRIORITY_LABEL[s.priority.level]}
+              </span>
+            )}
+            {s.raci && (
+              <span className={`badge raci ${s.raci.role}`} title={s.raci.reason}>
+                <strong>{s.raci.role[0].toUpperCase()}</strong> {RACI_LABEL[s.raci.role]}
+              </span>
+            )}
+          </div>
 
-          {s.waiting_on.length > 0 && (
+          {s.description && <p className="project-description">{s.description}</p>}
+          {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
+
+          {s.blockers?.length > 0 && (
             <section>
-              <h4>Waiting on</h4>
-              <ul className="waiting">
-                {s.waiting_on.map((w, i) => (
-                  <li key={i}>
-                    <strong>{w.person}</strong>
-                    {w.since && <span className="age">{age(w.since)}</span>}
-                    <ExternalLink href={w.link} className="what">
-                      {w.what}
+              <h4>Blocked by</h4>
+              <ul className="blockers">
+                {s.blockers.map((b) => (
+                  <li key={b.id}>
+                    <ExternalLink href={b.link} className="what">
+                      {b.what}
                     </ExternalLink>
+                    <div className="owners">
+                      {b.owners.map((o) => (
+                        <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
+                          {o.is_me ? "You" : o.name}
+                        </span>
+                      ))}
+                      {b.since && <span className="age">{age(b.since)}</span>}
+                    </div>
                   </li>
                 ))}
               </ul>
             </section>
           )}
 
-          <section>
-            <h4>My tasks</h4>
-            <Checklist tasks={tasks} onChange={onChange} empty="Nothing on you." />
-          </section>
+          {openTasks > 0 && (
+            <p className="small task-count">
+              {openTasks} task{openTasks === 1 ? "" : "s"} for you {selected ? "· shown in Tasks" : "→"}
+            </p>
+          )}
 
           <details>
             <summary className="muted small">Summary</summary>

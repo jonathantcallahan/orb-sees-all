@@ -37,34 +37,39 @@ ${JSON.stringify(p.previous)}
 Read only what changed since then:
 - slack_read_channel on ${p.channelId} with oldest=${since.unix} for new top-level messages.
 - slack_search_public_and_private with query "in:<#${p.channelId}> after:${since.date}" to catch new replies in older threads. Open a thread with slack_read_thread only when the new reply matters for status, blockers, or requests of the user.
-- If a waiting_on item or task in the snapshot may have been resolved, check its thread.
-Then update the snapshot: keep items that still hold, drop resolved ones, add new ones, and revise status, summary and last_activity. If nothing changed, return the snapshot as is.`
-    : `Read the last 14 days of the channel (slack_read_channel with oldest=${since.unix}, response_format "concise"), and open every thread that has replies with slack_read_thread.`;
+- If a blocker or task in the snapshot may have been resolved, check its thread.
+Then update the snapshot: keep items that still hold, drop resolved ones, add new ones, and revise the rest. Fill in any field the previous snapshot is missing. If nothing changed, return the snapshot as is.`
+    : `Read the last 14 days of the channel (slack_read_channel with oldest=${since.unix}, response_format "concise"), and open every thread that has replies with slack_read_thread. Read the channel's topic and purpose too (slack_search_channels), and pinned or early messages that define the project if they help.`;
 
   const repos =
     p.repoState && (p.repoState.local.length || p.repoState.prs.length)
-      ? `\nLocal repo and GitHub PR state for this project (from git and gh): ${JSON.stringify(p.repoState)}\nPRs waiting on review count as waiting_on the reviewer when the channel shows who it is.`
+      ? `\nLocal repo and GitHub PR state for this project (from git and gh): ${JSON.stringify(p.repoState)}\nA PR waiting on review is a blocker owned by the reviewer when the channel shows who it is.`
       : "";
 
-  return `You maintain a status snapshot of one project for the user, Slack user ${p.userId}.
+  return `You maintain a status snapshot of one project for the user, Slack user ${p.userId}, a product manager on Unity's Asset Store.
 The project channel is #${p.channelName} (${p.channelId}). Do not look at other channels.
 
 ${reading}
 ${repos}
 
-Definitions:
-- status: "blocked" = progress cannot continue until someone else acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.
-- status_reason: one or two sentences explaining the status, naming the specific late item or dependency.
-- waiting_on: people other than the user who owe an answer, review, decision, or deliverable that the project needs. "since" is the date it was asked or promised; "link" is the message permalink.
-- my_tasks: things the user was asked to do or committed to and hasn't visibly done. "id" is the permalink of the message that created the task, so it stays stable across refreshes. "due" is YYYY-MM-DD or null.
+Fields:
+- description: what the project is and what it delivers, at most two short lines (about 160 characters). No status here.
+- status: "blocked" = progress cannot continue until someone acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.
+- status_reason: one sentence naming the specific late item or dependency.
+- raci: the user's role, inferred from how they participate. "accountable" = they own the outcome (they set direction, make the calls, report status upward, or others ask them for decisions). "responsible" = they do the work but someone else owns the outcome. "consulted" = people ask their input but they don't drive. "informed" = they mostly read along. reason: one short sentence of evidence.
+- priority: strategic priority to the business, not urgency. "critical" = exec-visible, revenue or legal/compliance impact, or a hard external date; "high" = a committed roadmap item or a dependency for other teams; "medium" = planned work with moderate impact; "low" = exploratory, nice-to-have, or social. reason: one short sentence.
+- blockers: the tasks currently holding the project up (an unanswered question, a missing decision, review, ticket, or deliverable). what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
+- my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null.
 - summary: three to five sentences on where the project stands.
 - last_activity: YYYY-MM-DD of the latest message.
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape:
-{"status": "on_track"|"at_risk"|"blocked"|"idle", "status_reason": string,
- "waiting_on": [{"person": string, "slack_user_id": string|null, "what": string, "since": "YYYY-MM-DD"|null, "link": string|null}],
- "my_tasks": [{"id": string, "title": string, "link": string|null, "due": "YYYY-MM-DD"|null}],
+{"description": string, "status": "on_track"|"at_risk"|"blocked"|"idle", "status_reason": string,
+ "raci": {"role": "responsible"|"accountable"|"consulted"|"informed", "reason": string},
+ "priority": {"level": "critical"|"high"|"medium"|"low", "reason": string},
+ "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
+ "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
 }
 

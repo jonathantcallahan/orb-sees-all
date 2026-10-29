@@ -6,15 +6,6 @@ import { z } from "zod";
 export const ProjectStatus = z.enum(["on_track", "at_risk", "blocked", "idle"]);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
 
-export const WaitingOn = z.object({
-  person: z.string(),
-  slack_user_id: z.string().nullish(),
-  what: z.string(),
-  since: z.string().nullish(),
-  link: z.string().nullish(),
-});
-export type WaitingOn = z.infer<typeof WaitingOn>;
-
 export const Task = z.object({
   id: z.string(),
   title: z.string(),
@@ -22,22 +13,6 @@ export const Task = z.object({
   due: z.string().nullish(),
 });
 export type Task = z.infer<typeof Task>;
-
-export const ProjectSnapshot = z.object({
-  status: ProjectStatus,
-  status_reason: z.string(),
-  waiting_on: z.array(WaitingOn),
-  my_tasks: z.array(Task),
-  summary: z.string(),
-  last_activity: z.string().nullish(),
-});
-export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
-
-export const Discovery = z.object({
-  user_id: z.string(),
-  channels: z.array(z.object({ channel_id: z.string(), name: z.string() })),
-});
-export type Discovery = z.infer<typeof Discovery>;
 
 export const FollowUpKind = z.enum(["reply", "review", "decide", "do", "schedule", "share"]);
 export type FollowUpKind = z.infer<typeof FollowUpKind>;
@@ -48,6 +23,56 @@ export const FollowUp = z.object({
   action: z.string(),
 });
 export type FollowUp = z.infer<typeof FollowUp>;
+
+/** The user's inferred role on a project. */
+export const Raci = z.enum(["responsible", "accountable", "consulted", "informed"]);
+export type Raci = z.infer<typeof Raci>;
+
+export const Priority = z.enum(["critical", "high", "medium", "low"]);
+export type Priority = z.infer<typeof Priority>;
+
+export const Person = z.object({
+  name: z.string(),
+  slack_user_id: z.string().nullish(),
+  is_me: z.boolean(),
+});
+export type Person = z.infer<typeof Person>;
+
+/** A task that's holding the project up, and who owns it. */
+export const Blocker = z.object({
+  /** Permalink of the message that raised it; matches the my_tasks id when the user owns it. */
+  id: z.string(),
+  what: z.string(),
+  owners: z.array(Person),
+  since: z.string().nullish(),
+  link: z.string().nullish(),
+});
+export type Blocker = z.infer<typeof Blocker>;
+
+export const ProjectTask = Task.extend({
+  description: z.string().nullish(),
+  follow_up: FollowUp.nullish(),
+});
+export type ProjectTask = z.infer<typeof ProjectTask>;
+
+export const ProjectSnapshot = z.object({
+  description: z.string(),
+  status: ProjectStatus,
+  status_reason: z.string(),
+  raci: z.object({ role: Raci, reason: z.string() }),
+  priority: z.object({ level: Priority, reason: z.string() }),
+  blockers: z.array(Blocker),
+  my_tasks: z.array(ProjectTask),
+  summary: z.string(),
+  last_activity: z.string().nullish(),
+});
+export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
+
+export const Discovery = z.object({
+  user_id: z.string(),
+  channels: z.array(z.object({ channel_id: z.string(), name: z.string() })),
+});
+export type Discovery = z.infer<typeof Discovery>;
 
 export const AdhocTask = Task.extend({
   source: z.enum(["slack", "email"]),

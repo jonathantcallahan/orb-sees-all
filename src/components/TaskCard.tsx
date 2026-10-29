@@ -12,7 +12,10 @@ export interface CardTask {
   due?: string | null;
   requester?: string | null;
   follow_up?: FollowUp | null;
-  source: "manual" | "slack" | "email";
+  source: "manual" | "slack" | "email" | "project";
+  project?: { id: string; name: string };
+  /** The task is holding its project up. */
+  blocking?: boolean;
   done: boolean;
 }
 
@@ -25,7 +28,7 @@ const FOLLOW_UP_LABEL: Record<FollowUpKind, string> = {
   share: "Share",
 };
 
-const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email" } as const;
+const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null } as const;
 
 function Plan({ stored }: { stored: StoredPlan }) {
   const { plan } = stored;
@@ -122,7 +125,12 @@ export function TaskCard({
       description: task.description ?? null,
       link: task.link ?? null,
       requester: task.requester ?? null,
-      source: task.source === "manual" ? "the user's own to-do list" : task.source,
+      source:
+        task.source === "manual"
+          ? "the user's own to-do list"
+          : task.project
+            ? `project channel #${task.project.name}${task.blocking ? " (this task is blocking the project)" : ""}`
+            : task.source,
     }).catch(() => {});
   };
 
@@ -153,8 +161,10 @@ export function TaskCard({
         </button>
       </header>
 
-      {(SOURCE_LABEL[task.source] || task.requester || task.due) && (
+      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
         <div className="muted small task-meta">
+          {task.project && <span className="badge project-badge">#{task.project.name}</span>}
+          {task.blocking && <span className="badge blocking">Blocking</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}
           {task.due && <span className="due">due {task.due}</span>}

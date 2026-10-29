@@ -42,6 +42,7 @@ export default function App() {
   const { data, reload } = useAppData();
   const running = useRunningJobs();
   const [showSettings, setShowSettings] = useState(false);
+  const [filterProject, setFilterProject] = useState<string | null>(null);
   useScheduler();
 
   // Pick up anything written to the database while the window was in the background.
@@ -101,12 +102,24 @@ export default function App() {
               project={p}
               busy={running.includes(`project:${p.channel_id}`)}
               taskStates={data.taskStates}
+              selected={filterProject === p.channel_id}
+              onSelect={() => setFilterProject((cur) => (cur === p.channel_id ? null : p.channel_id))}
               onChange={reload}
             />
           ))}
         </section>
 
-        <TaskColumn adhoc={data.adhoc} manual={data.manual} taskStates={data.taskStates} plans={data.plans} running={running} onChange={reload} />
+        <TaskColumn
+          adhoc={data.adhoc}
+          manual={data.manual}
+          projects={projects}
+          filterProject={projects.find((p) => p.channel_id === filterProject) ?? null}
+          onClearFilter={() => setFilterProject(null)}
+          taskStates={data.taskStates}
+          plans={data.plans}
+          running={running}
+          onChange={reload}
+        />
       </main>
 
       <Mist />

@@ -4,6 +4,17 @@ import { extractJson, runClaude } from "./claude";
 import type { CliRunner } from "./cli";
 import { ProjectSnapshot } from "./schema";
 
+const MIN_SNAPSHOT = JSON.stringify({
+  description: "d",
+  status: "idle",
+  status_reason: "",
+  raci: { role: "informed", reason: "" },
+  priority: { level: "low", reason: "" },
+  blockers: [],
+  my_tasks: [],
+  summary: "",
+});
+
 const reply = (result: string, extra: object = {}) => ({
   code: 0,
   stdout: JSON.stringify({ is_error: false, result, total_cost_usd: 0.5, duration_ms: 1000, session_id: "s1", ...extra }),
@@ -25,12 +36,15 @@ describe("runClaude", () => {
     const run: CliRunner = async () => ({ code: 0, stdout: JSON.stringify(envelope), stderr: "" });
     const { data } = await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
     expect(data.status).toBe("at_risk");
-    expect(data.waiting_on.length).toBeGreaterThan(0);
-    expect(data.my_tasks.every((t) => t.id.startsWith("https://"))).toBe(true);
+    expect(data.raci.role).toBe("accountable");
+    expect(data.blockers.flatMap((b) => b.owners).some((o) => o.is_me)).toBe(true);
+    // A blocker the user owns is also one of their tasks, under the same id.
+    const mine = data.blockers.filter((b) => b.owners.some((o) => o.is_me));
+    expect(mine.every((b) => data.my_tasks.some((t) => t.id === b.id))).toBe(true);
   });
 
   it("passes read-only tools and denies built-in tools", async () => {
-    const run = vi.fn<CliRunner>(async () => reply('{"status":"idle","status_reason":"","waiting_on":[],"my_tasks":[],"summary":""}'));
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
     await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: ["mcp__x__read"] }, run);
     const args = run.mock.calls[0][1];
     expect(args.slice(args.indexOf("--allowedTools"), args.indexOf("--disallowedTools"))).toEqual(["--allowedTools", "mcp__x__read"]);
@@ -41,7 +55,7 @@ describe("runClaude", () => {
     const run = vi
       .fn<CliRunner>()
       .mockResolvedValueOnce(reply('{"status":"fine"}'))
-      .mockResolvedValueOnce(reply('{"status":"on_track","status_reason":"ok","waiting_on":[],"my_tasks":[],"summary":"s"}'));
+      .mockResolvedValueOnce(reply(MIN_SNAPSHOT.replace('"idle"', '"on_track"')));
     const result = await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
     expect(result.data.status).toBe("on_track");
     expect(result.costUsd).toBe(1);
@@ -51,7 +65,7 @@ describe("runClaude", () => {
   });
 
   it("overrides gateway credentials so the claude.ai connectors load", async () => {
-    const run = vi.fn<CliRunner>(async () => reply('{"status":"idle","status_reason":"","waiting_on":[],"my_tasks":[],"summary":""}'));
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
     await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
     const args = run.mock.calls[0][1];
     expect(JSON.parse(args[args.indexOf("--settings") + 1]).env).toEqual({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" });
