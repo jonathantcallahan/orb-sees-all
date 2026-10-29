@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import envelope from "./__fixtures__/project-envelope.json";
-import { extractJson, runClaude } from "./claude";
-import type { CliRunner } from "./cli";
+import { describeTool, extractJson, findEnvelope, runClaude } from "./claude";
+import type { StreamingCliRunner as CliRunner } from "./cli";
 import { ProjectSnapshot } from "./schema";
 
 const MIN_SNAPSHOT = JSON.stringify({
@@ -85,5 +85,39 @@ describe("runClaude", () => {
   it("surfaces CLI errors such as being logged out", async () => {
     const run: CliRunner = async () => reply("Not logged in · Please run /login", { is_error: true });
     await expect(runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run)).rejects.toThrow(/Not logged in/);
+  });
+});
+
+describe("streaming", () => {
+  it("finds the result line in a stream-json transcript", () => {
+    const stdout = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "x", input: {} }] } }),
+      JSON.stringify({ type: "result", is_error: false, result: "{}", total_cost_usd: 0.1 }),
+    ].join("\n");
+    expect(findEnvelope(stdout)).toMatchObject({ type: "result", total_cost_usd: 0.1 });
+    expect(findEnvelope("not json")).toBeNull();
+  });
+
+  it("reports each tool call as a status while Claude works", async () => {
+    const statuses: string[] = [];
+    const run: CliRunner = async (_p, _a, onLine) => {
+      const lines = [
+        { type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__claude_ai_Slack__slack_search_public_and_private", input: { keywords: ["refunds"], filters: "after:2026-10-20" } }] } },
+        { type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__mcp-jira__jira_get_issue", input: { issue_key: "CPS-6931" } }] } },
+        { type: "result", is_error: false, result: MIN_SNAPSHOT },
+      ].map((l) => JSON.stringify(l));
+      lines.forEach((l) => onLine?.(l));
+      return { code: 0, stdout: lines.join("\n"), stderr: "" };
+    };
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [], onStatus: (s) => statuses.push(s) }, run);
+    expect(statuses).toEqual(['Searching Slack for "refunds after:2026-10-20"', "Reading CPS-6931"]);
+  });
+
+  it("describes tools from every connector", () => {
+    expect(describeTool("mcp__claude_ai_Gmail__search_threads", { query: "from:sean" })).toBe('Searching email for "from:sean"');
+    expect(describeTool("mcp__claude_ai_Google_Calendar__list_events", {})).toBe("Reading your calendar");
+    expect(describeTool("mcp__claude_ai_U-Know__ask_uknow", {})).toBe("Asking U-Know");
+    expect(describeTool("mcp__something__unknown", {})).toBe("Working");
   });
 });

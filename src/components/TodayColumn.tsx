@@ -9,6 +9,7 @@ import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, RefreshButton, Updated } from "./common";
 import { DailyReading } from "./DailyReading";
 import { PressureBlob } from "./PressureBlob";
+import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
 const PX_PER_MIN = 1.2;
@@ -158,6 +159,7 @@ export function TodayColumn({
   onChange: () => void;
 }) {
   const now = useNow();
+  const calendarStatus = useJobStatus("calendar");
   const events = calendar?.day.events ?? [];
   // Prep only matters for meetings that haven't ended.
   const upcomingPrep = [...events]
@@ -173,7 +175,7 @@ export function TodayColumn({
           <h2>Today</h2>
           <Updated at={calendar?.refreshed_at} />
         </div>
-        <RefreshButton busy={busy} title="Refresh calendar" onClick={() => refreshCalendar().catch(() => {})} />
+        <RefreshButton busy={busy} status={calendarStatus} title="Refresh calendar" onClick={() => refreshCalendar().catch(() => {})} />
       </header>
 
       {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}

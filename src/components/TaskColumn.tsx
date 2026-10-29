@@ -8,6 +8,7 @@ import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
 import { setTaskState } from "../db";
 import { Inbox } from "./Inbox";
+import { useJobStatus } from "../useAppData";
 import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
 function Group({
@@ -78,6 +79,7 @@ export function TaskColumn({
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  const tasksStatus = useJobStatus("adhoc", "assess");
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const shared = { plans, assessments, running, onChange };
   const today = localDate(new Date());
@@ -185,7 +187,7 @@ export function TaskColumn({
           <h2>Tasks</h2>
           <Updated at={adhoc.refreshed_at} />
         </div>
-        <RefreshButton busy={running.includes("adhoc") || running.includes("assess")} title="Refresh tasks" onClick={() => {
+        <RefreshButton busy={running.includes("adhoc") || running.includes("assess")} status={tasksStatus} title="Refresh tasks" onClick={() => {
             refreshAdhoc().catch(() => {});
             assessPendingTasks().catch(() => {});
           }} />

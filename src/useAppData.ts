@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as db from "./db";
-import { dataVersion, queue } from "./jobs";
+import { dataVersion, jobStatus, queue } from "./jobs";
 import { localDate } from "./scheduler";
 import type { CalendarDay, ManualAssessment } from "./schema";
 import type { TaskState } from "./tasks";
@@ -55,4 +55,14 @@ export function useAppData() {
 /** Keys of queued and running jobs, e.g. "project:C123", "adhoc", "all". */
 export function useRunningJobs(): string[] {
   return useSyncExternalStore(queue.subscribe, queue.keys);
+}
+
+/** What a running job is doing right now, e.g. "Reading a Slack thread"; undefined when idle. */
+export function useJobStatus(...keys: string[]): string | undefined {
+  const statuses = useSyncExternalStore(jobStatus.subscribe, jobStatus.get);
+  for (const key of keys) {
+    const s = statuses.get(key);
+    if (s) return s;
+  }
+  return undefined;
 }

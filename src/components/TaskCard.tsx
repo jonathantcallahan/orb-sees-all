@@ -3,6 +3,7 @@ import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from
 import { assessPendingTasks, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority } from "../schema";
 import { formatMinutes, type TaskStatus } from "../tasks";
+import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
 
@@ -235,6 +236,7 @@ export function TaskCard({
   onChange: () => void;
 }) {
   const [showPlan, setShowPlan] = useState(false);
+  const planStatus = useJobStatus(`plan:${task.id}`);
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const manual = task.source === "manual";
@@ -362,7 +364,7 @@ export function TaskCard({
         )}
         {planning ? (
           <span className="muted small">
-            <span className="spin">↻</span> Claude is researching a plan…
+            <span className="spin">↻</span> {planStatus ?? "Researching a plan"}…
           </span>
         ) : plan ? (
           <>

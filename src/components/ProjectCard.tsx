@@ -3,6 +3,7 @@ import { refreshProject } from "../jobs";
 import type { ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
 import { projectName, slackChannelUrl } from "../projects";
+import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton, Updated } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -45,6 +46,7 @@ export function ProjectCard({
   const s = project.snapshot;
   const status = s?.status;
   const repo = project.repo_state;
+  const refreshStatus = useJobStatus(`project:${project.channel_id}`);
   const openTasks = applyTaskState(s?.my_tasks ?? [], taskStates).filter((t) => !t.done).length;
 
   return (
@@ -83,7 +85,7 @@ export function ProjectCard({
             Untrack
           </button>
           {status && <span className={`pill ${status}`}>{STATUS_LABEL[status]}</span>}
-          <RefreshButton busy={busy} title={`Refresh ${projectName(project)}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
+          <RefreshButton busy={busy} status={refreshStatus} title={`Refresh ${projectName(project)}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
         </div>
       </header>
 

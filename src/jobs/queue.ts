@@ -38,6 +38,10 @@ export class JobQueue {
     return job;
   }
 
+  has(key: string): boolean {
+    return this.jobs.has(key);
+  }
+
   /** Keys of queued and running jobs. Stable between changes, for useSyncExternalStore. */
   keys = (): string[] => this.snapshot;
 

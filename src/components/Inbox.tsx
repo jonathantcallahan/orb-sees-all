@@ -3,6 +3,7 @@ import { setTaskState } from "../db";
 import { draftReply } from "../jobs";
 import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
+import { useJobStatus } from "../useAppData";
 import { ExternalLink } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
@@ -31,6 +32,15 @@ function Draft({ reply, text, onRegenerate }: { reply: QuickReply; text: string;
         </button>
       </div>
     </div>
+  );
+}
+
+function DraftingStatus({ id }: { id: string }) {
+  const status = useJobStatus(`draft:${id}`);
+  return (
+    <span className="muted small inbox-drafting" title={status}>
+      <span className="spin">✦</span> {status ?? "Drafting"}…
+    </span>
   );
 }
 
@@ -72,9 +82,7 @@ export function Inbox({
                 {r.summary}
               </ExternalLink>
               {drafting ? (
-                <span className="muted small">
-                  <span className="spin">✦</span> Drafting…
-                </span>
+                <DraftingStatus id={r.id} />
               ) : (
                 !draft && (
                   <button className="link-button small inbox-action" onClick={draftIt}>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { runCli, type CliRunner } from "./cli";
+import { runCliStreaming, type StreamingCliRunner } from "./cli";
 
 // Read-only connector tools. Nothing here can send, post, draft or edit.
 const SLACK = "mcp__claude_ai_Slack__";
@@ -46,6 +46,65 @@ export interface ClaudeOptions<T> {
   tools: string[];
   model?: string;
   maxTurns?: number;
+  /** Called with a plain-language description of each step Claude takes. */
+  onStatus?: (status: string) => void;
+}
+
+const quoted = (text: string, max = 40) => {
+  const t = text.replace(/\s+/g, " ").trim();
+  return `"${t.length > max ? `${t.slice(0, max - 1)}…` : t}"`;
+};
+
+/** What a tool call is doing, in words, for the refresh status line. */
+export function describeTool(name: string, input: Record<string, unknown>): string {
+  // "mcp__claude_ai_Slack__slack_read_channel" -> "slack_read_channel"
+  const tool = name.split("__").pop() ?? name;
+  const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : "");
+  switch (tool) {
+    case "slack_search_public_and_private":
+    case "slack_search_public": {
+      const keywords = Array.isArray(input.keywords) ? (input.keywords as string[]).join(" ") : "";
+      const query = [keywords, str("filters")].filter(Boolean).join(" ");
+      return query ? `Searching Slack for ${quoted(query)}` : "Searching Slack";
+    }
+    case "slack_read_channel":
+      return "Reading a Slack channel";
+    case "slack_read_thread":
+      return "Reading a Slack thread";
+    case "slack_list_user_channels":
+      return "Listing your Slack channels";
+    case "slack_search_channels":
+      return "Finding Slack channels";
+    case "slack_read_user_profile":
+    case "slack_search_users":
+      return "Looking people up in Slack";
+    case "search_threads":
+      return str("query") ? `Searching email for ${quoted(str("query"))}` : "Searching email";
+    case "get_thread":
+    case "get_message":
+      return "Reading an email thread";
+    case "list_events":
+    case "search_events":
+      return "Reading your calendar";
+    case "get_event":
+      return "Reading a meeting";
+    case "list_calendars":
+      return "Finding your calendars";
+    case "search_files":
+      return "Searching Google Drive";
+    case "read_file_content":
+    case "get_file_metadata":
+      return "Reading a doc";
+    case "jira_search":
+      return str("jql") ? `Searching Jira for ${quoted(str("jql"))}` : "Searching Jira";
+    case "jira_get_issue":
+      return str("issue_key") ? `Reading ${str("issue_key")}` : "Reading a Jira issue";
+    case "ask_uknow":
+    case "ask_uknow_session":
+      return "Asking U-Know";
+    default:
+      return "Working";
+  }
 }
 
 export interface ClaudeResult<T> {
@@ -70,10 +129,42 @@ interface Envelope {
   session_id?: string;
 }
 
+/**
+ * The final summary from a stream-json transcript: the line with type "result".
+ * Falls back to a single JSON object, which is what --output-format json prints.
+ */
+export function findEnvelope(stdout: string): Envelope | null {
+  const lines = stdout.trim().split("\n").reverse();
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (obj && (obj.type === "result" || ("is_error" in obj && "result" in obj))) return obj as Envelope;
+    } catch {
+      // Not JSON (a stray log line); keep looking.
+    }
+  }
+  return null;
+}
+
+/** Reports each tool call in a streamed transcript line as a status. */
+function reportLine(line: string, onStatus: (s: string) => void) {
+  try {
+    const obj = JSON.parse(line);
+    if (obj.type === "assistant") {
+      for (const part of obj.message?.content ?? []) {
+        if (part.type === "tool_use") onStatus(describeTool(part.name, part.input ?? {}));
+        else if (part.type === "text") onStatus("Writing it up");
+      }
+    }
+  } catch {
+    // Ignore partial or non-JSON lines.
+  }
+}
+
 async function callOnce(
   prompt: string,
   opts: ClaudeOptions<unknown>,
-  run: CliRunner,
+  run: StreamingCliRunner,
   resumeSession?: string,
 ): Promise<Envelope> {
   const args = [
@@ -81,7 +172,8 @@ async function callOnce(
     "-p",
     prompt,
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--settings",
     USE_CLAUDE_AI_LOGIN,
     "--model",
@@ -93,13 +185,10 @@ async function callOnce(
     "--disallowedTools",
     ...DISALLOWED,
   ];
-  const out = await run("claude", args);
-  let envelope: Envelope;
-  try {
-    envelope = JSON.parse(out.stdout);
-  } catch {
-    throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(0, 500)}`);
-  }
+  const onStatus = opts.onStatus;
+  const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
+  const envelope = findEnvelope(out.stdout);
+  if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   if (envelope.is_error) throw new Error(`claude: ${envelope.result}`);
   return envelope;
 }
@@ -109,7 +198,7 @@ async function callOnce(
  * On a schema failure it resumes the same session once and asks for a fix,
  * so the connector reads aren't repeated.
  */
-export async function runClaude<T>(opts: ClaudeOptions<T>, run: CliRunner = runCli): Promise<ClaudeResult<T>> {
+export async function runClaude<T>(opts: ClaudeOptions<T>, run: StreamingCliRunner = runCliStreaming): Promise<ClaudeResult<T>> {
   let prompt = opts.prompt;
   let session: string | undefined;
   let costUsd = 0;

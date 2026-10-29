@@ -38,11 +38,29 @@ export function ExternalLink({
   );
 }
 
-export function RefreshButton({ busy, onClick, title }: { busy: boolean; onClick: () => void; title: string }) {
+export function RefreshButton({
+  busy,
+  onClick,
+  title,
+  status,
+}: {
+  busy: boolean;
+  onClick: () => void;
+  title: string;
+  /** What the refresh is doing, shown beside the spinner while it runs. */
+  status?: string;
+}) {
   return (
-    <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>
-      <span className={busy ? "spin" : undefined}>↻</span>
-    </button>
+    <span className="refresh-wrap">
+      {busy && status && (
+        <span className="refresh-status" title={status}>
+          {status}…
+        </span>
+      )}
+      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>
+        <span className={busy ? "spin" : undefined}>↻</span>
+      </button>
+    </span>
   );
 }
 

@@ -445,3 +445,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reply-draft-actions { display: flex; gap: 12px; }
 
 .group-title-plain { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
+
+/* What a running refresh is doing, beside its spinner */
+.refresh-wrap { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.refresh-status {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+.inbox-drafting { flex-shrink: 1; min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

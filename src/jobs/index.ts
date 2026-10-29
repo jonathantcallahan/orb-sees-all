@@ -24,6 +24,41 @@ function bump() {
   versionListeners.forEach((l) => l());
 }
 
+/** What each running job is doing right now, keyed like the queue ("project:C123", "adhoc", ...). */
+let statuses = new Map<string, string>();
+const statusListeners = new Set<() => void>();
+export const jobStatus = {
+  get: () => statuses,
+  subscribe: (l: () => void) => {
+    statusListeners.add(l);
+    return () => statusListeners.delete(l);
+  },
+};
+function setStatus(key: string, text: string | null) {
+  statuses = new Map(statuses);
+  if (text) statuses.set(key, text);
+  else statuses.delete(key);
+  statusListeners.forEach((l) => l());
+}
+
+/** Runs a job through the queue, reporting what it's doing under its key until it ends. */
+function track<T>(key: string, fn: (status: (text: string) => void) => Promise<T>, limited = true): Promise<T> {
+  if (!queue.has(key)) setStatus(key, "Waiting for a free slot");
+  return queue.run(
+    key,
+    async () => {
+      const status = (text: string) => setStatus(key, text);
+      status("Starting");
+      try {
+        return await fn(status);
+      } finally {
+        setStatus(key, null);
+      }
+    },
+    limited,
+  );
+}
+
 async function model(): Promise<string> {
   return (await db.getSetting("model")) ?? "opus";
 }
@@ -51,9 +86,10 @@ async function userId(): Promise<string> {
 }
 
 export function discoverProjects(): Promise<void> {
-  return queue.run("discover", () =>
+  return track("discover", (status) =>
     logged("discover", null, async () => {
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: discoveryPrompt(),
         schema: Discovery,
         tools: TOOLS.slackRead,
@@ -71,11 +107,12 @@ export function discoverProjects(): Promise<void> {
 export async function refreshProject(channelId: string): Promise<void> {
   // Resolve before taking a queue slot: discovery needs a slot of its own.
   const uid = await userId();
-  return queue.run(`project:${channelId}`, () =>
+  return track(`project:${channelId}`, (status) =>
     logged("project", channelId, async () => {
       const project = await db.getProject(channelId);
       if (!project) throw new Error(`Unknown project ${channelId}`);
       try {
+        if (project.local_repos.length || project.gh_repos.length) status("Checking repos and PRs");
         const repoState =
           project.local_repos.length || project.gh_repos.length
             ? await collectRepoState(project.local_repos, project.gh_repos)
@@ -84,6 +121,7 @@ export async function refreshProject(channelId: string): Promise<void> {
 
         const startedAt = new Date();
         const { data, costUsd } = await runClaude({
+        onStatus: status,
           prompt: projectPrompt({
             channelId,
             channelName: project.name,
@@ -111,11 +149,12 @@ export async function refreshProject(channelId: string): Promise<void> {
 
 export async function refreshAdhoc(): Promise<void> {
   const uid = await userId();
-  return queue.run("adhoc", () =>
+  return track("adhoc", (status) =>
     logged("adhoc", null, async () => {
       const previous = await db.getAdhoc();
       const startedAt = new Date();
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: adhocPrompt({
           userId: uid,
           previous: previous.tasks,
@@ -136,10 +175,11 @@ export async function refreshAdhoc(): Promise<void> {
 }
 
 export function refreshCalendar(): Promise<void> {
-  return queue.run("calendar", () =>
+  return track("calendar", (status) =>
     logged("calendar", null, async () => {
       const projects = await db.listProjects();
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: calendarPrompt({
           date: localDate(new Date()),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -164,7 +204,7 @@ const ASSESS_BATCH = 12;
  * rechecks between them, so tasks added mid-run are picked up.
  */
 export function assessPendingTasks(): Promise<void> {
-  return queue.run("assess", async () => {
+  return track("assess", async (status) => {
     for (;;) {
       const [tasks, assessed, states] = await Promise.all([db.listManualTasks(), db.getAssessments(), db.getTaskStates()]);
       const pending = tasks.filter((t) => !assessed.has(t.id) && !states.get(t.id)?.done && !states.get(t.id)?.dismissed);
@@ -172,6 +212,7 @@ export function assessPendingTasks(): Promise<void> {
       const batch = pending.slice(0, ASSESS_BATCH);
       await logged("assess", `${batch.length} tasks`, async () => {
         const { data, costUsd } = await runClaude({
+        onStatus: status,
           prompt: assessPrompt({
             userId: await db.getSetting("slack_user_id"),
             tasks: batch.map((t) => ({ id: t.id, title: t.title, description: t.description })),
@@ -193,9 +234,10 @@ export function assessPendingTasks(): Promise<void> {
 
 /** Has Claude draft a reply to an Inbox message, for the user to copy. Never sends anything. */
 export function draftReply(reply: QuickReply): Promise<void> {
-  return queue.run(`draft:${reply.id}`, () =>
+  return track(`draft:${reply.id}`, (status) =>
     logged("draft", reply.id, async () => {
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: draftReplyPrompt(reply, await db.getSetting("slack_user_id")),
         schema: ReplyDraft,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
@@ -210,7 +252,7 @@ export function draftReply(reply: QuickReply): Promise<void> {
 
 /** Writes today's reading from what the app already knows; no connector reads. */
 export function refreshReading(): Promise<void> {
-  return queue.run("reading", () =>
+  return track("reading", (status) =>
     logged("reading", null, async () => {
       const today = localDate(new Date());
       const [projects, adhoc, manual, assessments, states, calendar] = await Promise.all([
@@ -222,6 +264,7 @@ export function refreshReading(): Promise<void> {
         db.getCalendarDay(today),
       ]);
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: readingPrompt(readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today })),
         schema: DailyReading,
         tools: [],
@@ -238,9 +281,10 @@ export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };
 
 /** Asks Claude to research a task and propose a plan; the latest plan per task is kept. */
 export function planTask(task: PlanTask): Promise<void> {
-  return queue.run(`plan:${task.id}`, () =>
+  return track(`plan:${task.id}`, (status) =>
     logged("plan", task.id, async () => {
       const { data, costUsd } = await runClaude({
+        onStatus: status,
         prompt: planPrompt({ ...task, userId: await db.getSetting("slack_user_id") }),
         schema: TaskPlan,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow],
@@ -254,16 +298,18 @@ export function planTask(task: PlanTask): Promise<void> {
 
 /** Rediscovers channels, then refreshes the calendar, ad-hoc tasks and every visible project. */
 export function refreshAll(): Promise<void> {
-  return queue.run(
+  return track(
     "all",
-    async () => {
+    async (status) => {
       await db.setSetting("last_full_refresh_date", localDate(new Date()));
+      status("Finding your project channels");
       try {
         await discoverProjects();
       } catch {
         // Still refresh the projects we already know about.
       }
       const projects = (await db.listProjects()).filter((p) => !p.hidden);
+      status(`Refreshing ${projects.length} project${projects.length === 1 ? "" : "s"}, your calendar and tasks`);
       await Promise.allSettled([
         refreshCalendar(),
         refreshAdhoc(),
@@ -271,6 +317,7 @@ export function refreshAll(): Promise<void> {
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
       // The reading summarizes everything above, so it goes last.
+      status("Writing the daily reading");
       await refreshReading().catch(() => {});
     },
     false,

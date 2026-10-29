@@ -4,6 +4,7 @@ import type { Project, StoredReading } from "../db";
 import { refreshReading } from "../jobs";
 import { projectName } from "../projects";
 import { localDate } from "../scheduler";
+import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton } from "./common";
 
 interface Update {
@@ -44,6 +45,7 @@ export function DailyReading({
   busy: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
   const updates = collectUpdates(projects, news);
   const shown = showAll ? updates : updates.slice(0, 4);
@@ -52,7 +54,7 @@ export function DailyReading({
     <section className="reading">
       <header className="column-header">
         <h4 className="reading-title">Daily reading</h4>
-        <RefreshButton busy={busy} title="Write today's reading again" onClick={() => refreshReading().catch(() => {})} />
+        <RefreshButton busy={busy} status={status} title="Write today's reading again" onClick={() => refreshReading().catch(() => {})} />
       </header>
       {current ? (
         <p className="reading-text">{current.text}</p>

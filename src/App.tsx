@@ -9,7 +9,7 @@ import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { compareProjects, pressure } from "./tasks";
 import { isDark, useTheme } from "./theme";
-import { useAppData, useRunningJobs } from "./useAppData";
+import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
 
@@ -45,6 +45,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [filterProject, setFilterProject] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
+  const allStatus = useJobStatus("all");
   useScheduler();
 
   // Pick up anything written to the database while the window was in the background.
@@ -83,7 +84,11 @@ export default function App() {
           {counts.at_risk > 0 && <span className="pill at_risk">{counts.at_risk} at risk</span>}
         </div>
         <div className="row">
-          {running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>}
+          {allStatus ? (
+            <span className="muted small refresh-status">{allStatus}…</span>
+          ) : (
+            running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>
+          )}
           <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title="Refresh everything (⌘R)">
             {refreshingAll ? "Refreshing…" : "Refresh all"}
           </button>
