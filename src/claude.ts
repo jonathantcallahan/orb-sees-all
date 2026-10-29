@@ -18,7 +18,24 @@ export const TOOLS = {
   ],
   gmailRead: [`${GMAIL}search_threads`, `${GMAIL}get_thread`, `${GMAIL}get_message`],
   calendarRead: [`${GCAL}list_calendars`, `${GCAL}list_events`, `${GCAL}get_event`, `${GCAL}search_events`],
+  driveRead: [
+    "mcp__claude_ai_Google_Drive__search_files",
+    "mcp__claude_ai_Google_Drive__read_file_content",
+    "mcp__claude_ai_Google_Drive__get_file_metadata",
+  ],
+  jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
+  uknow: [
+    "mcp__claude_ai_U-Know__ask_uknow",
+    "mcp__claude_ai_U-Know__ask_uknow_session",
+    "mcp__claude_ai_U-Know__list_knowledge_bases",
+  ],
 };
+
+// User settings can route Claude Code through a gateway (ANTHROPIC_BASE_URL and
+// ANTHROPIC_AUTH_TOKEN in ~/.claude/settings.json). That replaces the claude.ai
+// login, which disables the claude.ai connectors these jobs depend on, so blank
+// them for the app's runs only.
+const USE_CLAUDE_AI_LOGIN = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" } });
 
 // Belt and braces: built-in tools that could touch the machine are denied outright.
 const DISALLOWED = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent"];
@@ -65,6 +82,8 @@ async function callOnce(
     prompt,
     "--output-format",
     "json",
+    "--settings",
+    USE_CLAUDE_AI_LOGIN,
     "--model",
     opts.model ?? "opus",
     "--max-turns",

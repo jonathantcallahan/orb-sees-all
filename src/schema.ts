@@ -39,9 +39,21 @@ export const Discovery = z.object({
 });
 export type Discovery = z.infer<typeof Discovery>;
 
+export const FollowUpKind = z.enum(["reply", "review", "decide", "do", "schedule", "share"]);
+export type FollowUpKind = z.infer<typeof FollowUpKind>;
+
+export const FollowUp = z.object({
+  kind: FollowUpKind,
+  /** Imperative and specific, e.g. "Reply in the thread with the Nov 17 date". */
+  action: z.string(),
+});
+export type FollowUp = z.infer<typeof FollowUp>;
+
 export const AdhocTask = Task.extend({
   source: z.enum(["slack", "email"]),
   requester: z.string().nullish(),
+  description: z.string().nullish(),
+  follow_up: FollowUp.nullish(),
 });
 export type AdhocTask = z.infer<typeof AdhocTask>;
 
@@ -72,6 +84,14 @@ export const CalendarDay = z.object({
   events: z.array(CalendarEvent),
 });
 export type CalendarDay = z.infer<typeof CalendarDay>;
+
+export const TaskPlan = z.object({
+  approach: z.string(),
+  steps: z.array(z.object({ title: z.string(), detail: z.string().nullish(), link: z.string().nullish() })),
+  open_questions: z.array(z.string()),
+  sources: z.array(z.object({ title: z.string(), link: z.string() })),
+});
+export type TaskPlan = z.infer<typeof TaskPlan>;
 
 // Collected locally from git and gh, not by Claude.
 

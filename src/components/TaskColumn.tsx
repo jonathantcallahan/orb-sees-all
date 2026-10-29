@@ -1,28 +1,58 @@
 import { useState } from "react";
-import { addManualTask, type AdhocStore, type ManualTask } from "../db";
+import { addManualTask, type AdhocStore, type ManualTask, type StoredPlan } from "../db";
 import { refreshAdhoc } from "../jobs";
 import { applyTaskState, type TaskState } from "../tasks";
-import { Checklist, RefreshButton, Updated } from "./common";
+import { RefreshButton, Updated } from "./common";
+import { TaskCard, type CardTask } from "./TaskCard";
+
+function Group({
+  title,
+  tasks,
+  empty,
+  plans,
+  running,
+  onChange,
+}: {
+  title: string;
+  tasks: CardTask[];
+  empty: string;
+  plans: Map<string, StoredPlan>;
+  running: string[];
+  onChange: () => void;
+}) {
+  return (
+    <>
+      <h4>{title}</h4>
+      {tasks.length === 0 && <p className="muted small">{empty}</p>}
+      {tasks.map((t) => (
+        <TaskCard key={t.id} task={t} plan={plans.get(t.id)} planning={running.includes(`plan:${t.id}`)} onChange={onChange} />
+      ))}
+    </>
+  );
+}
 
 export function TaskColumn({
   adhoc,
   manual,
   taskStates,
-  busy,
+  plans,
+  running,
   onChange,
 }: {
   adhoc: AdhocStore;
   manual: ManualTask[];
   taskStates: Map<string, TaskState>;
-  busy: boolean;
+  plans: Map<string, StoredPlan>;
+  running: string[];
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
-  const fromSource = (source: "slack" | "email") =>
-    applyTaskState(
-      adhoc.tasks.filter((t) => t.source === source).map((t) => ({ ...t, detail: t.requester })),
-      taskStates,
-    );
+  // Slack and email items share one inbox; dated items first, soonest first.
+  const inbox = applyTaskState(
+    [...adhoc.tasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
+    taskStates,
+  );
+  const shared = { plans, running, onChange };
 
   return (
     <section className="column">
@@ -31,7 +61,7 @@ export function TaskColumn({
           <h2>Tasks</h2>
           <Updated at={adhoc.refreshed_at} />
         </div>
-        <RefreshButton busy={busy} title="Refresh tasks" onClick={() => refreshAdhoc().catch(() => {})} />
+        <RefreshButton busy={running.includes("adhoc")} title="Refresh tasks" onClick={() => refreshAdhoc().catch(() => {})} />
       </header>
 
       <form
@@ -47,18 +77,13 @@ export function TaskColumn({
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" />
       </form>
 
-      <div className="card">
-        <h4>Mine</h4>
-        <Checklist tasks={applyTaskState(manual, taskStates)} onChange={onChange} empty="No manual tasks." />
-      </div>
-      <div className="card">
-        <h4>Slack</h4>
-        <Checklist tasks={fromSource("slack")} onChange={onChange} empty="Nothing waiting in DMs or mentions." />
-      </div>
-      <div className="card">
-        <h4>Email</h4>
-        <Checklist tasks={fromSource("email")} onChange={onChange} empty="No emails need action." />
-      </div>
+      <Group
+        title="Mine"
+        tasks={applyTaskState(manual, taskStates).map((t) => ({ ...t, source: "manual" as const }))}
+        empty="No tasks of your own."
+        {...shared}
+      />
+      <Group title="Inbox" tasks={inbox} empty="Nothing waiting on you in Slack or email." {...shared} />
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, CalendarDay, ProjectSnapshot, RepoState } from "./schema";
+import type { AdhocTask, CalendarDay, ProjectSnapshot, RepoState, TaskPlan } from "./schema";
 import type { TaskState } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -132,6 +132,7 @@ export async function saveCalendarDay(day: CalendarDay) {
 export interface ManualTask {
   id: string;
   title: string;
+  description: string | null;
   project_id: string | null;
   created_at: string;
 }
@@ -147,6 +148,30 @@ export async function addManualTask(title: string, projectId: string | null = nu
     projectId,
     nowIso(),
   ]);
+}
+
+export async function updateManualTask(id: string, fields: { title: string; description: string | null }) {
+  await (await db()).execute("UPDATE manual_tasks SET title = $1, description = $2 WHERE id = $3", [fields.title, fields.description, id]);
+}
+
+export interface StoredPlan {
+  plan: TaskPlan;
+  created_at: string;
+  cost_usd: number | null;
+}
+
+export async function getTaskPlans(): Promise<Map<string, StoredPlan>> {
+  const rows = await (await db()).select<{ task_id: string; plan: string; created_at: string; cost_usd: number | null }[]>(
+    "SELECT * FROM task_plans",
+  );
+  return new Map(rows.map((r) => [r.task_id, { plan: JSON.parse(r.plan), created_at: r.created_at, cost_usd: r.cost_usd }]));
+}
+
+export async function saveTaskPlan(taskId: string, plan: TaskPlan, costUsd: number) {
+  await (await db()).execute(
+    "INSERT INTO task_plans (task_id, plan, created_at, cost_usd) VALUES ($1, $2, $3, $4) ON CONFLICT(task_id) DO UPDATE SET plan = excluded.plan, created_at = excluded.created_at, cost_usd = excluded.cost_usd",
+    [taskId, JSON.stringify(plan), nowIso(), costUsd],
+  );
 }
 
 export async function getTaskStates(): Promise<Map<string, TaskState>> {

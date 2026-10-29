@@ -105,7 +105,7 @@ export default function App() {
           ))}
         </section>
 
-        <TaskColumn adhoc={data.adhoc} manual={data.manual} taskStates={data.taskStates} busy={running.includes("adhoc")} onChange={reload} />
+        <TaskColumn adhoc={data.adhoc} manual={data.manual} taskStates={data.taskStates} plans={data.plans} running={running} onChange={reload} />
       </main>
 
       {showSettings && <Settings projects={data.projects} onClose={() => setShowSettings(false)} onSaved={reload} />}

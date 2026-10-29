@@ -50,6 +50,13 @@ describe("runClaude", () => {
     expect(retryArgs[3]).toContain("status");
   });
 
+  it("overrides gateway credentials so the claude.ai connectors load", async () => {
+    const run = vi.fn<CliRunner>(async () => reply('{"status":"idle","status_reason":"","waiting_on":[],"my_tasks":[],"summary":""}'));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
+    const args = run.mock.calls[0][1];
+    expect(JSON.parse(args[args.indexOf("--settings") + 1]).env).toEqual({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" });
+  });
+
   it("gives up after the retry fails", async () => {
     const run: CliRunner = async () => reply("{}");
     await expect(runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run)).rejects.toThrow(/schema/);

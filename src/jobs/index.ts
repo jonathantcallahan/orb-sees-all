@@ -1,8 +1,8 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, calendarPrompt, discoveryPrompt, projectPrompt } from "../prompts";
+import { adhocPrompt, calendarPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, CalendarDay, Discovery, ProjectSnapshot } from "../schema";
+import { AdhocSnapshot, CalendarDay, Discovery, ProjectSnapshot, TaskPlan } from "../schema";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 
@@ -146,6 +146,24 @@ export function refreshCalendar(): Promise<void> {
         model: await model(),
       });
       await db.saveCalendarDay(data);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };
+
+/** Asks Claude to research a task and propose a plan; the latest plan per task is kept. */
+export function planTask(task: PlanTask): Promise<void> {
+  return queue.run(`plan:${task.id}`, () =>
+    logged("plan", task.id, async () => {
+      const { data, costUsd } = await runClaude({
+        prompt: planPrompt({ ...task, userId: await db.getSetting("slack_user_id") }),
+        schema: TaskPlan,
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow],
+        model: await model(),
+      });
+      await db.saveTaskPlan(task.id, data, costUsd);
       return { value: undefined, costUsd };
     }),
   );

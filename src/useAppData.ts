@@ -11,19 +11,21 @@ export interface AppData {
   manual: db.ManualTask[];
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
+  plans: Map<string, db.StoredPlan>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
     db.getCalendarDay(localDate(new Date())),
     db.getTaskStates(),
+    db.getTaskPlans(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

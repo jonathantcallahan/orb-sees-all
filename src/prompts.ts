@@ -91,9 +91,11 @@ Return the full list of tasks that are still open: carried-over ones that aren't
 - id: for Slack, the message permalink; for email, "gmail:<thread id>". Reuse the existing id for carried-over tasks.
 - title: a short imperative, e.g. "Reply to Ana about the Q4 refund numbers".
 - requester: the person's name. due: YYYY-MM-DD or null. link: permalink or Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>".
+- description: two to four sentences: what exactly is being asked, by whom and why, and any context or constraints from the thread. Keep a carried-over task's description unless the thread added something.
+- follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"tasks": [{"id": string, "title": string, "source": "slack"|"email", "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {
@@ -114,4 +116,31 @@ export function calendarPrompt(p: CalendarPromptInput): string {
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": string, "start": string, "end": string, "attendees": [string], "link": string|null, "related_project": string|null, "prep": [{"id": string, "title": string, "link": string|null}]}]}`;
+}
+
+export interface PlanPromptInput {
+  title: string;
+  description: string | null;
+  link: string | null;
+  requester: string | null;
+  source: string;
+  userId: string | null;
+}
+
+export function planPrompt(p: PlanPromptInput): string {
+  return `The user (a product manager on Unity's Asset Store${p.userId ? `, Slack user ${p.userId}` : ""}) has this task and wants a proposed plan for getting it done.
+
+Task: ${p.title}
+${p.description ? `Description: ${p.description}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
+
+First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and ask U-Know for Unity-specific context when the task depends on internal systems, teams or processes. Spend effort in proportion to the task: a quick reply needs little research.
+
+Then propose a plan:
+- approach: two to four sentences on how to tackle it and what "done" looks like.
+- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one.
+- open_questions: what's unclear or needs a decision before or during the work. Empty if none.
+- sources: the threads, docs and tickets you relied on.
+
+${READ_ONLY} Don't take any of the steps yourself; only propose them.
+${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
 }

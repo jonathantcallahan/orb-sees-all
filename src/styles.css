@@ -156,3 +156,33 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure-blob { width: 100%; height: 190px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 .pressure-label { margin-top: -6px; }
+
+.task-card { display: flex; flex-direction: column; gap: 6px; }
+.task-card.done { opacity: 0.6; }
+.task-card.done .task-title { text-decoration: line-through; }
+.task-card-header { display: flex; gap: 8px; align-items: flex-start; }
+.task-card-header input { margin-top: 3px; }
+.task-card-header .task-title { flex: 1; font-weight: 600; }
+.task-card .dismiss { visibility: hidden; }
+.task-card:hover .dismiss { visibility: visible; }
+.task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.source { font-weight: 600; }
+.source.slack { color: #9b5de5; }
+.source.email { color: var(--accent); }
+.description { margin: 0; white-space: pre-wrap; }
+.description.placeholder { cursor: text; font-style: italic; }
+.description:not(.placeholder) { cursor: default; }
+.follow-up { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); }
+.follow-up-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); flex-shrink: 0; }
+.follow-up.reply .follow-up-kind, .follow-up.share .follow-up-kind { color: var(--accent); }
+.follow-up.decide .follow-up-kind { color: var(--red); }
+.follow-up.review .follow-up-kind, .follow-up.schedule .follow-up-kind { color: var(--amber); }
+.follow-up.do .follow-up-kind { color: var(--green); }
+.task-card-actions { display: flex; gap: 12px; }
+.link-button { border: none; background: none; padding: 0; color: var(--accent); }
+.link-button:hover:not(:disabled) { text-decoration: underline; }
+.plan { border-top: 1px solid var(--border); padding-top: 8px; }
+.plan p { margin: 0 0 6px; }
+.plan-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.plan-step-title { font-weight: 600; }
+.plan-list { margin: 0; padding-left: 18px; }

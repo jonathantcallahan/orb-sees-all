@@ -17,6 +17,12 @@ struct CliOutput {
     stderr: String,
 }
 
+/// Environment passed through to child processes. Everything else is dropped:
+/// if the app was started from a shell that carries another tool's Anthropic
+/// credentials (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ...), claude would use
+/// those instead of the user's own login and lose the claude.ai connectors.
+const PASSTHROUGH_ENV: [&str; 8] = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"];
+
 /// Apps launched from Finder don't inherit the login shell's PATH, so add the
 /// usual install locations for claude, gh and git.
 fn search_path() -> String {
@@ -63,9 +69,14 @@ async fn run_cli(
     };
 
     tauri::async_runtime::spawn_blocking(move || {
+        let env = PASSTHROUGH_ENV
+            .iter()
+            .filter_map(|key| std::env::var(key).ok().map(|value| (*key, value)));
         let output = Command::new(exe)
             .args(&args)
             .current_dir(dir)
+            .env_clear()
+            .envs(env)
             .env("PATH", path)
             .stdin(Stdio::null())
             .output()
@@ -89,12 +100,20 @@ fn show_main(app: &AppHandle) {
 }
 
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "init",
-        sql: include_str!("../migrations/001_init.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "init",
+            sql: include_str!("../migrations/001_init.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "task cards",
+            sql: include_str!("../migrations/002_task_cards.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -108,13 +127,13 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![run_cli])
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "Open Day Planner", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Orb Sees All", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &refresh, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Day Planner")
+                .tooltip("Orb Sees All")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -144,7 +163,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Day Planner");
+        .expect("error while building Orb Sees All");
 
     app.run(|app, event| {
         if let RunEvent::Reopen { .. } = event {

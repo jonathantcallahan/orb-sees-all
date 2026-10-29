@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Day Planner",
+  "productName": "Orb Sees All",
   "version": "0.1.0",
   "identifier": "com.jcallahan.dayplanner",
   "build": {
@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "Day Planner", "width": 1440, "height": 920, "minWidth": 1000, "minHeight": 600 }
+      { "label": "main", "title": "Orb Sees All", "width": 1440, "height": 920, "minWidth": 1000, "minHeight": 600 }
     ],
     "security": { "csp": null }
   },
