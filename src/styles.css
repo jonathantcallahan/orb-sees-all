@@ -261,11 +261,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .owners h4 { margin: 0 2px 0 0; }
 .owner { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--grey-bg); }
-.owner.me { background: var(--red-bg); color: var(--red); }
-.work-items .age { font-size: 11px; color: var(--amber); }
-/* Active work isn't holding anyone up, so it stays neutral. */
-.work-item.active .age { color: var(--muted); }
-.work-item.active .owner.me { background: var(--grey-bg); color: var(--text); }
+.owner.me { background: var(--grey-bg); color: var(--text); }
+.work-items .age { font-size: 11px; color: var(--muted); }
 .project-meta { display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
 .task-count { color: var(--accent); }
 .project-summary { margin-top: 6px; }
