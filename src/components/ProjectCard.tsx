@@ -332,7 +332,7 @@ export function ProjectCard({
 
       {s && (
         <>
-          {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
+          {s.status_reason && <p className="reason small">{s.status_reason}</p>}
 
           {(blockers.length > 0 || (s.active?.length ?? 0) > 0) && (
             <div className="work-tabs" role="tablist">
