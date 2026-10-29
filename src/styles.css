@@ -540,11 +540,19 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .group-header h4 { margin: 0; }
 .task-filters { display: flex; gap: 6px; align-items: center; }
+/* Dropdowns and the Recommended button share one box, so their text lines up. */
 .filter-select {
   appearance: none;
   -webkit-appearance: none;
+  box-sizing: border-box;
+  height: 20px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
   font-size: 11px;
-  padding: 1px 8px;
+  line-height: 18px;
+  padding: 0 8px;
   border-radius: 999px;
   color: var(--muted);
   background: transparent;
