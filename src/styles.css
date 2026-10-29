@@ -588,3 +588,23 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-modal-actions { display: flex; gap: 14px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
 /* The orb's stats line: a step fainter than other gray text */
 .pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
+
+/* Relevant links on a task, as Google Docs–style smart chips */
+.relevant-links { display: flex; flex-direction: column; gap: 4px; }
+.link-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px 1px 4px;
+  border-radius: 12px;
+  background: var(--grey-bg);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: none;
+}
+.link-chip:hover { background: var(--border); text-decoration: none; }
+.link-chip-icon { flex: none; }
+.link-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

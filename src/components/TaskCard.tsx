@@ -9,6 +9,8 @@ import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStat
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
+import { LinkChips } from "./LinkChips";
+import { collectLinks } from "../links";
 
 export interface CardTask {
   id: string;
@@ -138,7 +140,7 @@ function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string)
   }
 }
 
-function Description({ text, draft, onEdit }: { text: string; draft: boolean; onEdit?: () => void }) {
+function Description({ text, draft, onEdit, more }: { text: string; draft: boolean; onEdit?: () => void; more?: ReactNode }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   /** Characters shown when collapsed, or null when the whole text fits. */
@@ -157,11 +159,14 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
   }, [text, expanded, onEdit]);
 
   const truncated = !expanded && cut !== null;
+  // More also opens the extra details (relevant links) even when the text fits.
+  const showMore = !expanded && (cut !== null || !!more);
   return (
+    <>
     <p ref={ref} className="description small">
       {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
       <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
-      {truncated && (
+      {showMore && (
         <button className="link-button small inline-action more-link" onClick={() => setExpanded(true)}>
           More
         </button>
@@ -177,6 +182,8 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
         </button>
       )}
     </p>
+    {expanded && more}
+    </>
   );
 }
 
@@ -557,6 +564,22 @@ export function TaskCard({
       .then(onChange)
       .catch(() => {});
   };
+  const links = collectLinks(
+    [
+      { url: task.link },
+      ...(plan?.plan.sources ?? []).map((src) => ({ url: src.link, title: src.title })),
+      ...(plan?.plan.steps ?? []).map((st) => ({ url: st.link, title: null })),
+      ...(check?.evidence ?? []).map((e) => ({ url: e.link, title: e.title })),
+    ],
+    [description],
+  );
+  const relevantLinks =
+    links.length > 0 ? (
+      <div className="relevant-links">
+        <span className="automation-kind">Relevant links</span>
+        <LinkChips links={links} />
+      </div>
+    ) : undefined;
   const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
     await setTaskState(task.id, patch);
     onChange();
@@ -623,7 +646,7 @@ export function TaskCard({
       {editing ? (
         <DescriptionEditor initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       ) : description ? (
-        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} />
+        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} more={relevantLinks} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
