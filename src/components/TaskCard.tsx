@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
+import { clearAssessment, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, ProjectPriority } from "../schema";
 import { formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
@@ -172,7 +172,7 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
         </button>
       )}
       {onEdit && (
-        <button className="link-button small muted inline-action" onClick={onEdit}>
+        <button className="link-button small inline-action more-link" onClick={onEdit}>
           Edit
         </button>
       )}
@@ -180,28 +180,21 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
   );
 }
 
-function DescriptionEditor({ task, initial, onDone }: { task: CardTask; initial: string; onDone: (changed: boolean) => void }) {
+function DescriptionEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string | null) => void; onCancel: () => void }) {
   const [text, setText] = useState(initial);
-  const save = async () => {
-    const next = text.trim() || null;
-    const changed = next !== (task.description ?? null);
-    if (changed) {
-      await updateManualTask(task.id, { title: task.title, description: next });
-      // The old assessment was based on the old text; have Claude look again.
-      await clearAssessment(task.id);
-      assessPendingTasks().catch(() => {});
-    }
-    onDone(changed);
-  };
   return (
     <textarea
       autoFocus
       rows={4}
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={save}
+      onBlur={() => {
+        const next = text.trim() || null;
+        if (next === (initial.trim() || null)) onCancel();
+        else onSave(next);
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") onDone(false);
+        if (e.key === "Escape") onCancel();
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
       }}
       placeholder="What's involved, who it's for, links…"
@@ -269,8 +262,8 @@ function carriedLabel(day: string): string {
 
 const AUTOMATION_LABEL: Record<Automation, string> = {
   human: "You do it",
-  assisted: "Claude can help",
-  claude: "Claude can do it",
+  assisted: "Orb can help",
+  claude: "Orb can do it",
 };
 
 /**
@@ -431,11 +424,25 @@ export function TaskCard({
         )}
       </div>
     ) : null;
-  const runPlan = () => {
+  /** Saves an edited description, then has Claude plan again from it. */
+  const saveDescription = async (next: string | null) => {
+    setEditing(false);
+    if (manual) {
+      await updateManualTask(task.id, { title: task.title, description: next });
+      // The old assessment was based on the old text; have Claude look again.
+      await clearAssessment(task.id);
+      assessPendingTasks().catch(() => {});
+    } else {
+      await saveDescriptionOverride(task.id, next);
+    }
+    onChange();
+    if (next) runPlan(next);
+  };
+  const runPlan = (descriptionText: string | null = description ?? null) => {
     planTask({
       id: task.id,
       title: task.title,
-      description: task.description ?? null,
+      description: descriptionText,
       link: task.link ?? null,
       requester: task.requester ?? null,
       source:
@@ -506,16 +513,9 @@ export function TaskCard({
       )}
 
       {editing ? (
-        <DescriptionEditor
-          task={task}
-          initial={task.description ?? ""}
-          onDone={(changed) => {
-            setEditing(false);
-            if (changed) onChange();
-          }}
-        />
+        <DescriptionEditor initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       ) : description ? (
-        <Description text={description} draft={!!draft} onEdit={manual ? () => setEditing(true) : undefined} />
+        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
@@ -528,7 +528,7 @@ export function TaskCard({
         <AssessmentView
           assessment={assessment}
           steps={outlineSteps}
-          onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
+          onAddDetails={!editing ? () => setEditing(true) : undefined}
           actions={planActions}
         />
       ) : (
@@ -560,15 +560,13 @@ export function TaskCard({
             </button>
           </>
         ) : description ? (
-          <button className="link-button small" onClick={runPlan}>
+          <button className="link-button small" onClick={() => runPlan()}>
             ✦ Plan with Claude
           </button>
-        ) : manual ? (
+        ) : (
           <button className="link-button small muted" onClick={() => setEditing(true)}>
             Add a description to plan with Claude
           </button>
-        ) : (
-          <span className="muted small">Plan with Claude needs a description; refresh to get one.</span>
         )}
       </footer>
 

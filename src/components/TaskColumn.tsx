@@ -71,6 +71,7 @@ export function TaskColumn({
   assessments,
   drafts,
   recommended,
+  descriptionOverrides,
   running,
   onChange,
 }: {
@@ -87,6 +88,8 @@ export function TaskColumn({
   drafts: Map<string, { text: string }>;
   /** Task ids today's reading recommends. */
   recommended: Set<string>;
+  /** Descriptions the user edited on refreshed tasks. */
+  descriptionOverrides: Record<string, string>;
   running: string[];
   onChange: () => void;
 }) {
@@ -109,7 +112,7 @@ export function TaskColumn({
     applyTaskState(
       [...adhoc.tasks]
         .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
-        .map((t) => ({ ...t, recommended: recommended.has(t.id) })),
+        .map((t) => ({ ...t, description: descriptionOverrides[t.id] ?? t.description, recommended: recommended.has(t.id) })),
       taskStates,
     ),
     today,
@@ -122,6 +125,7 @@ export function TaskColumn({
       ...t,
       source: "project" as const,
       project: { id: p.channel_id, name: projectName(p) },
+      description: descriptionOverrides[t.id] ?? t.description,
       blocking: blocking.has(t.id),
       recommended: recommended.has(t.id),
       projectPriority: p.snapshot?.priority?.level,

@@ -17,11 +17,12 @@ export interface AppData {
   drafts: Map<string, { text: string; created_at: string }>;
   reminders: Record<string, db.Reminder>;
   blockerChecks: Record<string, db.StoredBlockerCheck>;
+  descriptionOverrides: Record<string, string>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -33,9 +34,10 @@ async function loadAll(): Promise<AppData> {
     db.getReplyDrafts(),
     db.getReminders(),
     db.getBlockerChecks(),
+    db.getDescriptionOverrides(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

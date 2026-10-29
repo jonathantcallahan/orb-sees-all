@@ -128,6 +128,21 @@ export async function saveReading(reading: StoredReading) {
   await setSetting("daily_reading", JSON.stringify(reading));
 }
 
+/**
+ * Descriptions the user edited on Slack, email and project tasks, by task id.
+ * Those tasks are rewritten on each refresh, so the edits live here.
+ */
+export async function getDescriptionOverrides(): Promise<Record<string, string>> {
+  return json<Record<string, string>>(await getSetting("description_overrides")) ?? {};
+}
+
+export async function saveDescriptionOverride(taskId: string, text: string | null) {
+  const all = await getDescriptionOverrides();
+  if (text) all[taskId] = text;
+  else delete all[taskId];
+  await setSetting("description_overrides", JSON.stringify(all));
+}
+
 export interface StoredBlockerCheck extends BlockerCheck {
   at: string;
 }

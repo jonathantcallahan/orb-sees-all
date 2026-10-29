@@ -172,6 +172,7 @@ export default function App() {
           assessments={data.assessments}
           drafts={data.drafts}
           recommended={recommended}
+          descriptionOverrides={data.descriptionOverrides}
           running={running}
           onChange={reload}
         />
