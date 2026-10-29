@@ -7,6 +7,7 @@ import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
 import { setTaskState } from "../db";
+import { Inbox } from "./Inbox";
 import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
 function Group({
@@ -55,6 +56,7 @@ export function TaskColumn({
   taskStates,
   plans,
   assessments,
+  drafts,
   running,
   onChange,
 }: {
@@ -68,6 +70,7 @@ export function TaskColumn({
   taskStates: Map<string, TaskState>;
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
+  drafts: Map<string, { text: string }>;
   running: string[];
   onChange: () => void;
 }) {
@@ -173,6 +176,7 @@ export function TaskColumn({
       }}
       onDragEnd={() => setDropTarget(null)}
     >
+      <Inbox replies={adhoc.replies} states={taskStates} drafts={drafts} running={running} onChange={onChange} />
       <header className="column-header">
         <div>
           <h2>Tasks</h2>
@@ -227,7 +231,7 @@ export function TaskColumn({
             empty="No project tasks on you. Refresh projects to find them."
             {...shared}
           />
-          <Group title="Inbox" tasks={inbox.rest} empty="Nothing waiting on you in Slack or email." {...shared} />
+          <Group title="Requests" tasks={inbox.rest} empty="No requests from Slack or email." {...shared} />
         </>
       )}
     </section>

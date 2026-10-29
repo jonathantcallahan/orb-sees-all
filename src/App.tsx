@@ -133,6 +133,7 @@ export default function App() {
           taskStates={data.taskStates}
           plans={data.plans}
           assessments={data.assessments}
+          drafts={data.drafts}
           running={running}
           onChange={reload}
         />

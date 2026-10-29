@@ -429,3 +429,17 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .card:hover .refresh,
 .reading:hover .refresh,
 .column:hover > .column-header .refresh { visibility: visible; }
+
+/* Inbox: messages that only need a quick reply */
+.inbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
+.inbox h4 { margin: 0; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
+.inbox-item { padding: 7px 10px; }
+.inbox-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.inbox-row .source { flex-shrink: 0; font-size: 11px; }
+.inbox-from { flex-shrink: 0; color: var(--muted); }
+.inbox-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-action { flex-shrink: 0; visibility: hidden; }
+.inbox-item:hover .inbox-action { visibility: visible; }
+.reply-draft { margin-top: 6px; padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); }
+.reply-draft p { margin: 0 0 6px; white-space: pre-wrap; }
+.reply-draft-actions { display: flex; gap: 12px; }
