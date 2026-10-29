@@ -184,7 +184,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
 .source.slack { color: #9b5de5; }
 .source.email { color: var(--accent); }
-.description { margin: 0; white-space: pre-wrap; }
+.description { margin: 0; white-space: pre-wrap; position: relative; }
 .description.placeholder { cursor: text; font-style: italic; }
 .description:not(.placeholder) { cursor: default; }
 .follow-up-kind, .automation-kind { font-size: 11px; color: var(--muted); flex-shrink: 0; }
@@ -275,7 +275,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 
 /* Task descriptions: two lines until expanded */
-.description.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .draft-label { color: var(--accent); }
 .add-description { align-self: flex-start; font-style: italic; }
 
@@ -569,20 +568,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .cta-primary { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--text); background: var(--text); color: var(--bg); font-size: 12px; }
 .cta-primary:hover { opacity: 0.88; }
 
-/* Description: More inline at the end of line two */
-.description-wrap { position: relative; }
+/* Description: cut to two lines with "…" and a gray More at the end */
 .inline-action { margin-left: 6px; }
-.more-overlay {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  display: inline-flex;
-  gap: 6px;
-  padding-left: 28px;
-  font-size: 12px;
-  line-height: 1.45;
-  background: linear-gradient(to right, transparent, var(--surface) 24px);
-}
+.link-button.more-link { color: var(--muted); }
 
 /* Plan details modal, centered */
 .plan-modal-backdrop { align-items: center; z-index: 30; }

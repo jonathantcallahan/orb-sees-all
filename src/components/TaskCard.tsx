@@ -105,48 +105,80 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
   );
 }
 
-/** A description clamped to two lines, with More/Less when it runs longer. */
+/** A description cut to two lines with "…" and More when it runs longer; Less and Edit follow inline. */
+/**
+ * Longest prefix of `text` that, with "…" and the inline actions after it, fits
+ * in two lines of `p`. Measured on a hidden copy at the same width; null if the
+ * whole text already fits.
+ */
+function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string): number | null {
+  const lineHeight = parseFloat(getComputedStyle(p).lineHeight);
+  const probe = p.cloneNode(false) as HTMLParagraphElement;
+  probe.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;width:${p.clientWidth}px;`;
+  const label = p.querySelector(".draft-label")?.outerHTML ?? "";
+  p.parentElement!.appendChild(probe);
+  const fits = (body: string) => {
+    probe.innerHTML = label;
+    const span = document.createElement("span");
+    span.textContent = body;
+    probe.appendChild(span);
+    probe.insertAdjacentHTML("beforeend", actionsHtml);
+    return probe.offsetHeight <= lineHeight * 2 + 1;
+  };
+  try {
+    if (fits(text)) return null;
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (fits(`${text.slice(0, mid).trimEnd()}…`)) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  } finally {
+    probe.remove();
+  }
+}
+
 function Description({ text, draft, onEdit }: { text: string; draft: boolean; onEdit?: () => void }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el && !expanded) setOverflows(el.scrollHeight - el.clientHeight > 4);
-  }, [text, expanded]);
-  const edit = onEdit && (
-    <button className="link-button small muted inline-action" onClick={onEdit}>
-      Edit
-    </button>
-  );
+  /** Characters shown when collapsed, or null when the whole text fits. */
+  const [cut, setCut] = useState<number | null>(null);
 
+  useLayoutEffect(() => {
+    const p = ref.current;
+    if (!p || expanded) return;
+    const actions = `<button class="link-button small inline-action">More</button>${onEdit ? '<button class="link-button small inline-action">Edit</button>' : ""}`;
+    const measure = () => setCut(fitTwoLines(p, text, actions));
+    measure();
+    // Re-fit when the card changes width.
+    const observer = new ResizeObserver(measure);
+    observer.observe(p);
+    return () => observer.disconnect();
+  }, [text, expanded, onEdit]);
+
+  const truncated = !expanded && cut !== null;
   return (
-    <div className="description-wrap">
-      <p ref={ref} className={`description small${expanded ? "" : " clamped"}`}>
-        {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
-        {text}
-        {/* Expanded, or short enough to fit: actions follow the text inline. */}
-        {(expanded || !overflows) && (
-          <>
-            {expanded && (
-              <button className="link-button small inline-action" onClick={() => setExpanded(false)}>
-                Less
-              </button>
-            )}
-            {edit}
-          </>
-        )}
-      </p>
-      {/* Clamped: More sits at the end of the second line, fading the text under it. */}
-      {overflows && !expanded && (
-        <span className="more-overlay">
-          <button className="link-button small" onClick={() => setExpanded(true)}>
-            More
-          </button>
-          {edit}
-        </span>
+    <p ref={ref} className="description small">
+      {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
+      <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
+      {truncated && (
+        <button className="link-button small inline-action more-link" onClick={() => setExpanded(true)}>
+          More
+        </button>
       )}
-    </div>
+      {expanded && (
+        <button className="link-button small inline-action more-link" onClick={() => setExpanded(false)}>
+          Less
+        </button>
+      )}
+      {onEdit && (
+        <button className="link-button small muted inline-action" onClick={onEdit}>
+          Edit
+        </button>
+      )}
+    </p>
   );
 }
 
