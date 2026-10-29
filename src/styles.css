@@ -198,3 +198,14 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .mist canvas { display: block; width: 100%; height: 100%; }
 .column { padding-bottom: calc(var(--mist-height) - 20px); }
 .modal-backdrop { z-index: 10; }
+
+/* Content blurs and darkens progressively as it nears the mist. The fade zone
+   starts above the mist and runs under it to the bottom edge. */
+:root { --mist-fade-height: 300px; }
+.mist-fade { position: fixed; left: 0; right: 0; bottom: 0; height: var(--mist-fade-height); pointer-events: none; z-index: 4; }
+.mist-fade-layer { position: absolute; inset: 0; }
+.mist-fade-darken {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgb(8 8 16 / 0) 0%, rgb(8 8 16 / 0.15) 35%, rgb(8 8 16 / 0.55) 70%, rgb(8 8 16 / 0.85) 100%);
+}

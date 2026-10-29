@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import * as THREE from "three";
 
 const VERTEX = /* glsl */ `
@@ -52,6 +52,26 @@ void main() {
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
+
+/** Blur radii (px) of the stacked layers, lightest at the top of the fade zone. */
+const BLUR_STEPS = [0.5, 1, 2, 4, 8, 16];
+
+/**
+ * One layer of a progressive blur: each layer blurs what's behind it by a fixed
+ * radius and is masked to its own band, so the blur deepens toward the bottom.
+ */
+function blurLayer(px: number, i: number): CSSProperties {
+  const band = 100 / (BLUR_STEPS.length + 1);
+  const mask = `linear-gradient(to bottom, transparent ${i * band}%, black ${(i + 1) * band}%, black ${(i + 2) * band}%, transparent ${Math.min((i + 3) * band, 100)}%)`;
+  const last = i === BLUR_STEPS.length - 1;
+  return {
+    backdropFilter: `blur(${px}px)`,
+    WebkitBackdropFilter: `blur(${px}px)`,
+    // The deepest layer stays on to the bottom edge.
+    maskImage: last ? `linear-gradient(to bottom, transparent ${i * band}%, black ${(i + 1) * band}%)` : mask,
+    WebkitMaskImage: last ? `linear-gradient(to bottom, transparent ${i * band}%, black ${(i + 1) * band}%)` : mask,
+  };
+}
 
 /** A swirling band of dark mist along the bottom of the window. Purely decorative; clicks pass through. */
 export function Mist() {
@@ -107,5 +127,15 @@ export function Mist() {
     };
   }, []);
 
-  return <div ref={mount} className="mist" aria-hidden />;
+  return (
+    <>
+      <div className="mist-fade" aria-hidden>
+        {BLUR_STEPS.map((px, i) => (
+          <div key={px} className="mist-fade-layer" style={blurLayer(px, i)} />
+        ))}
+        <div className="mist-fade-darken" />
+      </div>
+      <div ref={mount} className="mist" aria-hidden />
+    </>
+  );
 }
