@@ -488,7 +488,7 @@ export function TaskCard({
         )}
         {plan && !planning && (
           <>
-            <button className="link-button small" onClick={() => setShowPlan(true)}>
+            <button className="cta-ghost" onClick={() => setShowPlan(true)}>
               Show plan details
             </button>
             <button

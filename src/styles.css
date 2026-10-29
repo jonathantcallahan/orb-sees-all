@@ -562,6 +562,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Plan panel actions: the Claude-style approve button, then text links */
 .plan-actions { display: flex; gap: 14px; align-items: center; margin-top: 2px; }
 .cta-primary { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #1c1c1a; font-size: 12px; }
+.cta-ghost { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; }
+.cta-ghost:hover { background: var(--grey-bg); }
 .cta-primary:hover { opacity: 0.88; }
 
 /* Description: cut to two lines with "…" and a gray More at the end */
