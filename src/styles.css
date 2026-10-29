@@ -497,10 +497,18 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .p-badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; vertical-align: 1px; }
 
 /* Send a reminder to whoever owns a blocker */
-.work-actions { margin-left: 4px; display: inline-flex; gap: 10px; align-items: baseline; }
-.remind { display: inline-flex; gap: 8px; align-items: baseline; }
-.remind-open, .work-action { visibility: hidden; }
-.work-item:hover .remind-open, .work-item:hover .work-action { visibility: visible; }
+.work-actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: baseline;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: max-width 0.2s ease, opacity 0.15s ease, transform 0.2s ease;
+}
+.work-item:hover .work-actions, .work-actions.open { max-width: 320px; opacity: 1; transform: none; }
 .checking { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Result of a blocker double check */
@@ -518,7 +526,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .finding-mark { width: 10px; flex: none; text-align: center; color: var(--muted); }
 .check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
 .check-result .corrected { color: var(--text); }
-.reminded { font-size: 11px; }
+.reminded { font-size: 12px; }
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }

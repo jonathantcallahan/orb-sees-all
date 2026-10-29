@@ -76,7 +76,7 @@ function CheckAction({ checking, onCheck }: { checking: string | undefined; onCh
     );
   }
   return (
-    <button className="link-button small more-link work-action" onClick={onCheck}>
+    <button className="link-button small more-link" onClick={onCheck}>
       Double check
     </button>
   );
@@ -143,20 +143,15 @@ function RemindAction({
   };
 
   return (
-    <span className="remind">
-      {reminder && (
-        <ExternalLink href={reminder.link} className="timestamp small reminded" title={new Date(reminder.at).toLocaleString()}>
-          Reminded {ago(reminder.at)}
-        </ExternalLink>
-      )}
+    <>
       <button
-        className="link-button small remind-open"
+        className="link-button small"
         onClick={() => {
           setError(null);
           setText(reminderText(others, item.what, item.link));
         }}
       >
-        Send reminder
+        {reminder ? "Send another reminder" : "Send reminder"}
       </button>
       {text !== null && (
         <ReminderModal
@@ -170,7 +165,7 @@ function RemindAction({
           onSend={send}
         />
       )}
-    </span>
+    </>
   );
 }
 
@@ -273,8 +268,14 @@ function WorkItem({
           </span>
         ))}
         {item.since && <span className="age">{age(item.since)}</span>}
+        {remind?.reminder && (
+          <ExternalLink href={remind.reminder.link} className="timestamp reminded" title={new Date(remind.reminder.at).toLocaleString()}>
+            Reminded {ago(remind.reminder.at)}
+          </ExternalLink>
+        )}
         {(check || remind) && (
-          <span className="work-actions">
+          // Slides open on hover; stays open while a double check runs so its status shows.
+          <span className={`work-actions${checking ? " open" : ""}`}>
             {check && (
               <CheckAction
                 checking={checking}
