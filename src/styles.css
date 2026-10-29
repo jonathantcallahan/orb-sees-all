@@ -171,7 +171,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .log-table tr.error td { color: var(--red); }
 .log-error { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; margin-bottom: 16px; }
 .pressure-blob { width: 100%; height: 190px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
