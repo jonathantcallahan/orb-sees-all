@@ -28,6 +28,12 @@ dependencies:
     version: 4.6.7
 
 devDependencies:
+  '@iconify-json/logos':
+    specifier: ^1.2.18
+    version: 1.2.18
+  '@iconify-json/lucide':
+    specifier: ^1.2.149
+    version: 1.2.149
   '@tauri-apps/cli':
     specifier: ^2
     version: 2.12.4
@@ -43,6 +49,9 @@ devDependencies:
   '@vitejs/plugin-react':
     specifier: ^5
     version: 5.2.0(vite@7.3.7)
+  simple-icons:
+    specifier: ^16.36.0
+    version: 16.36.0
   typescript:
     specifier: ^5
     version: 5.9.3
@@ -468,6 +477,22 @@ packages:
     requiresBuild: true
     dev: true
     optional: true
+
+  /@iconify-json/logos@1.2.18:
+    resolution: {integrity: sha512-Qehd7RmUbYM4LSXNHFqulgvmdmqldOxQ3VDbCmzos5IGlo40+cChVdX7GnG9VODBU0H3+Bb8npYOkplooJZvtQ==}
+    dependencies:
+      '@iconify/types': 2.0.0
+    dev: true
+
+  /@iconify-json/lucide@1.2.149:
+    resolution: {integrity: sha512-5NG9YdbtRS03hG1A+EIE6nLhhdAYsf0mKu1ZRi6kLMlCG8DxmDsRM6DAhwlNMLiSiQKFbHpKTJ2VddZdwUkUyw==}
+    dependencies:
+      '@iconify/types': 2.0.0
+    dev: true
+
+  /@iconify/types@2.0.0:
+    resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
+    dev: true
 
   /@jridgewell/gen-mapping@0.3.13:
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1318,6 +1343,11 @@ packages:
 
   /siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
+    dev: true
+
+  /simple-icons@16.36.0:
+    resolution: {integrity: sha512-+VNPPkqSOLidFeSgBKUWX4n50WPpDC09hav+BgS26anIF1oQOlGBb8LvwGR+6fYRjo+B6CiKzNBceMPkSVXANQ==}
+    engines: {node: '>=0.12.18'}
     dev: true
 
   /source-map-js@1.2.2:
