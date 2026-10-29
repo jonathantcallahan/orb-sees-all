@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { Pressure } from "../tasks";
+import { orbMood, type Pressure } from "../tasks";
 
 // Ashima Arts 3D simplex noise (MIT), shared by both shaders.
 const NOISE = /* glsl */ `
@@ -119,7 +119,8 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-    camera.position.z = 5;
+    // Far enough back that fully spiked (radius ~1.7) still fits in frame.
+    camera.position.z = 6.4;
 
     const uniforms = { uTime: { value: 0 }, uStress: { value: target.current } };
     const material = new THREE.ShaderMaterial({ vertexShader: VERTEX, fragmentShader: FRAGMENT, uniforms });
@@ -164,15 +165,17 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
     };
   }, []);
 
-  const label =
+  const mood = orbMood(pressure);
+  const counts =
     pressure.projectsOnMe || pressure.criticalTasks
       ? `${pressure.projectsOnMe} project${pressure.projectsOnMe === 1 ? "" : "s"} waiting on you · ${pressure.criticalTasks} critical`
-      : "Nothing waiting on you";
+      : null;
 
   return (
-    <div className="pressure" title={label}>
+    <div className={`pressure mood-${mood}`} title={counts ?? "Nothing waiting on you"}>
       <div ref={mount} className="pressure-blob" aria-hidden />
-      <div className="muted small pressure-label">{label}</div>
+      <div className="muted small">Orb is {mood}</div>
+      {counts && <div className="muted small">{counts}</div>}
     </div>
   );
 }

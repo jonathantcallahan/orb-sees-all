@@ -140,3 +140,14 @@ export function pressure(
     0.5 * Math.min(projectsOnMe / PROJECTS_AT_MAX, 1) + 0.5 * Math.min(criticalTasks / CRITICAL_AT_MAX, 1);
   return { projectsOnMe, criticalTasks, level };
 }
+
+export type OrbMood = "pleased" | "content" | "restless" | "agitated" | "furious";
+
+/** The orb's mood for a pressure level; pleased only when nothing is waiting on the user. */
+export function orbMood(p: Pressure): OrbMood {
+  if (!p.projectsOnMe && !p.criticalTasks) return "pleased";
+  if (p.level < 0.25) return "content";
+  if (p.level < 0.5) return "restless";
+  if (p.level < 0.75) return "agitated";
+  return "furious";
+}

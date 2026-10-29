@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { JobQueue } from "./jobs/queue";
 import { windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, pressure, splitToday, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -190,5 +190,20 @@ describe("formatMinutes", () => {
     expect(formatMinutes(45)).toBe("45m");
     expect(formatMinutes(60)).toBe("1h");
     expect(formatMinutes(150)).toBe("2h 30m");
+  });
+});
+
+describe("orbMood", () => {
+  const p = (projectsOnMe: number, criticalTasks: number, level: number) => ({ projectsOnMe, criticalTasks, level });
+
+  it("is pleased only when nothing is waiting", () => {
+    expect(orbMood(p(0, 0, 0))).toBe("pleased");
+    expect(orbMood(p(1, 0, 0.08))).toBe("content");
+  });
+
+  it("gets angrier as pressure rises", () => {
+    expect(orbMood(p(2, 2, 0.3))).toBe("restless");
+    expect(orbMood(p(4, 5, 0.6))).toBe("agitated");
+    expect(orbMood(p(6, 8, 1))).toBe("furious");
   });
 });
