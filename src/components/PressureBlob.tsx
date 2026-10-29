@@ -198,7 +198,7 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
   const mood = orbMood(pressure);
   const counts =
     pressure.projectsOnMe || pressure.criticalTasks
-      ? `${pressure.projectsOnMe} project${pressure.projectsOnMe === 1 ? "" : "s"} waiting on you · ${pressure.criticalTasks} critical`
+      ? `${pressure.projectsOnMe} project${pressure.projectsOnMe === 1 ? "" : "s"} waiting on you and ${pressure.criticalTasks} critical task${pressure.criticalTasks === 1 ? "" : "s"}`
       : null;
 
   return (
