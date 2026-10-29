@@ -58,6 +58,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 h1, h2, h3, h4 { margin: 0; }
+/* No bold anywhere: emphasis comes from color and size. */
+h1, h2, h3, h4, h5, h6, strong, b, th { font-weight: 400; }
 h1 { font-size: 17px; }
 h2 { font-size: 14px; }
 h3 { font-size: 13px; font-weight: 400; }
@@ -117,7 +119,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 
 .project .reason { margin: 8px 0 0; }
 
-.pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--grey-bg); }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--grey-bg); }
 .pill.blocked { color: var(--red); background: var(--red-bg); }
 .pill.at_risk { color: var(--amber); background: var(--amber-bg); }
 .pill.on_track { color: var(--green); background: var(--green-bg); }
@@ -158,7 +160,7 @@ summary { cursor: pointer; }
 .settings-grid label { display: flex; flex-direction: column; gap: 4px; }
 .settings-grid label.row { flex-direction: row; }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; }
+th { text-align: left; font-size: 11px; color: var(--muted); }
 td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--border); }
 .projects-table td:first-child { white-space: nowrap; }
 .log-table tr.error td { color: var(--red); }
@@ -178,7 +180,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card .dismiss { visibility: hidden; }
 .task-card:hover .dismiss { visibility: visible; }
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.source { font-weight: 600; }
+.source { }
 .source.slack { color: #9b5de5; }
 .source.email { color: var(--accent); }
 .description { margin: 0; white-space: pre-wrap; }
@@ -237,9 +239,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .project.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
-.badge.priority.critical { color: var(--red); background: var(--red-bg); font-weight: 600; }
+.badge.priority.critical { color: var(--red); background: var(--red-bg); }
 .badge.priority.high { color: var(--amber); background: var(--amber-bg); }
-.badge.raci strong { font-weight: 700; }
 .badge.raci.accountable, .badge.raci.responsible { color: var(--accent); }
 .project-description {
   margin: 8px 0 0;
@@ -253,13 +254,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .blockers .what { display: block; }
 .owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
 .owner { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--grey-bg); }
-.owner.me { background: var(--red-bg); color: var(--red); font-weight: 600; }
+.owner.me { background: var(--red-bg); color: var(--red); }
 .blockers .age { font-size: 11px; color: var(--amber); }
 .task-count { margin: 8px 0 0; color: var(--accent); }
 
 /* Tasks column: project badges and the project filter */
 .project-badge { color: var(--accent); }
-.badge.blocking { color: var(--red); background: var(--red-bg); font-weight: 600; }
+.badge.blocking { color: var(--red); background: var(--red-bg); }
 .filter-chip {
   display: flex;
   justify-content: space-between;
@@ -274,12 +275,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Task descriptions: two lines until expanded */
 .description.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .description-actions { display: flex; gap: 10px; margin-top: 2px; }
-.draft-label { color: var(--accent); font-weight: 600; }
+.draft-label { color: var(--accent); }
 .add-description { align-self: flex-start; font-style: italic; }
 
 /* Claude's assessment of a task */
 .automation { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
-.automation-kind { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.automation-kind { font-size: 11px; flex-shrink: 0; }
 .automation.human .automation-kind { color: var(--muted); }
 .automation.assisted .automation-kind { color: var(--accent); }
 .automation.claude .automation-kind { color: var(--green); }
@@ -294,7 +295,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   flex-shrink: 0;
   text-align: center;
   font-size: 11px;
-  font-weight: 600;
+ 
   padding: 1px 6px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -409,7 +410,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   padding: 0 5px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+ 
   background: var(--grey-bg);
   color: var(--muted);
   vertical-align: 1px;
