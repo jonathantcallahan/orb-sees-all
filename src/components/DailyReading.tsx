@@ -100,7 +100,7 @@ export function DailyReading({
   return (
     <section className="reading">
       <header className="column-header">
-        <h4 className="reading-title">Daily reading</h4>
+        <h4 className="section-title">Daily reading</h4>
         <RefreshButton busy={busy} status={status} title="Write today's reading again" onClick={() => refreshReading().catch(() => {})} />
       </header>
       {current ? (
@@ -111,7 +111,7 @@ export function DailyReading({
 
       {updates.length > 0 && (
         <>
-          <h4 className="reading-title">Updates</h4>
+          <h4 className="section-title">Updates</h4>
           <UpdateStack
             updates={updates}
             onRead={async (u) => {

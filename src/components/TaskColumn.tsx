@@ -13,7 +13,6 @@ import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
 function Group({
   title,
-  plain = false,
   tasks,
   empty,
   plans,
@@ -22,8 +21,6 @@ function Group({
   onChange,
 }: {
   title: string;
-  /** Sentence case in regular weight instead of the small uppercase label. */
-  plain?: boolean;
   tasks: CardTask[];
   empty: string;
   plans: Map<string, StoredPlan>;
@@ -33,7 +30,7 @@ function Group({
 }) {
   return (
     <>
-      <h4 className={plain ? "group-title-plain" : undefined}>{title}</h4>
+      <h4 className="section-title">{title}</h4>
       {tasks.length === 0 && <p className="muted small">{empty}</p>}
       {tasks.map((t) => (
         <TaskCard
@@ -127,7 +124,7 @@ export function TaskColumn({
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
   const todayGroup = (
     <section className={`today-plan${planned.length ? "" : " empty"}${dropTarget === "today" ? " drop" : ""}`}>
-      <h4 className="today-heading">
+      <h4 className="section-title today-heading">
         Today's tasks
         {planned.length > 0 && (
           <span className="today-total">
@@ -224,12 +221,12 @@ export function TaskColumn({
             empty={filterProject.snapshot ? "Nothing on you for this project." : "Refresh this project to find your tasks."}
             {...shared}
           />
-          {mine.rest.length > 0 && <Group title="All tasks" plain tasks={mine.rest} empty="" {...shared} />}
+          {mine.rest.length > 0 && <Group title="All tasks" tasks={mine.rest} empty="" {...shared} />}
         </>
       ) : (
         <>
           {todayGroup}
-          <Group title="All tasks" plain tasks={mine.rest} empty="No tasks of your own." {...shared} />
+          <Group title="All tasks" tasks={mine.rest} empty="No tasks of your own." {...shared} />
           <Group
             title="Projects"
             tasks={projectTasks.rest}

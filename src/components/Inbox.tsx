@@ -66,7 +66,7 @@ export function Inbox({
 
   return (
     <section className="inbox">
-      <h4>
+      <h4 className="section-title">
         Inbox <span className="muted">{open.length}</span>
       </h4>
       {open.map((r) => {

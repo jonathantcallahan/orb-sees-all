@@ -61,7 +61,9 @@ h1, h2, h3, h4 { margin: 0; }
 h1 { font-size: 17px; }
 h2 { font-size: 14px; }
 h3 { font-size: 13px; font-weight: 400; }
-h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 10px 0 4px; }
+/* Labels inside cards ("Blocked by", "Prep"); section headings in a column use .section-title. */
+h4 { font-size: 12px; font-weight: 400; color: var(--muted); margin: 10px 0 4px; }
+.section-title { font-size: 13px; color: var(--text); }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); text-decoration: underline; }
 
@@ -183,7 +185,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .description.placeholder { cursor: text; font-style: italic; }
 .description:not(.placeholder) { cursor: default; }
 .follow-up { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); }
-.follow-up-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); flex-shrink: 0; }
+.follow-up-kind { font-size: 12px; color: var(--muted); flex-shrink: 0; }
 .follow-up.reply .follow-up-kind, .follow-up.share .follow-up-kind { color: var(--accent); }
 .follow-up.decide .follow-up-kind { color: var(--red); }
 .follow-up.review .follow-up-kind, .follow-up.schedule .follow-up-kind { color: var(--amber); }
@@ -309,7 +311,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .today-plan.empty { background: none; padding: 0 10px; }
 .today-plan h4 { margin: 0; color: var(--text); display: flex; justify-content: space-between; }
-.today-plan .today-heading { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 
 /* Drag and drop into and out of Today */
@@ -397,8 +398,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Daily reading */
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
-.reading .reading-title { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
-.reading h4.reading-title:not(:first-child) { margin-top: 8px; }
+.reading h4.section-title:not(:first-child) { margin-top: 8px; }
 .reading-text { margin: 0; font-style: italic; line-height: 1.55; }
 .update-label { color: var(--muted); margin-right: 6px; }
 
@@ -427,7 +427,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Inbox: messages that only need a quick reply */
 .inbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
-.inbox h4 { margin: 0; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
+.inbox h4 { margin: 0; }
 .inbox-item { padding: 7px 10px; }
 .inbox-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
 .inbox-row .source { flex-shrink: 0; font-size: 11px; }
@@ -439,7 +439,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reply-draft p { margin: 0 0 6px; white-space: pre-wrap; }
 .reply-draft-actions { display: flex; gap: 12px; }
 
-.group-title-plain { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
 
 /* What a running refresh is doing, beside its spinner */
 .refresh-wrap { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
