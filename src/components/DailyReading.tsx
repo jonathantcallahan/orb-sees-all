@@ -34,6 +34,13 @@ function collectUpdates(projects: Project[], news: NewsItem[]): Update[] {
   return [...fromProjects, ...fromNews].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 }
 
+/** "Open thread" for Slack, "Open email" for Gmail, "Open" for anything else. */
+function sourceLabel(link: string): string {
+  if (link.includes("slack.com")) return "Open thread";
+  if (link.includes("mail.google.com") || link.startsWith("gmail:")) return "Open email";
+  return "Open";
+}
+
 /** Stack of update cards, newest on top; marking one read reveals the next. */
 function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Update) => Promise<void> }) {
   const [leaving, setLeaving] = useState(false);
@@ -55,22 +62,27 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
           <span className="update-label">{top.label}</span>
           {top.date && <span className="muted">{top.date}</span>}
         </div>
-        <ExternalLink href={top.link} className="update-text">
-          {top.text}
-        </ExternalLink>
+        <p className="update-text">{top.text}</p>
         <div className="update-actions small">
           <span className="muted">{updates.length > 1 ? `${updates.length - 1} more` : "Last one"}</span>
-          <button
-            className="link-button small"
-            disabled={leaving}
-            onClick={() => {
-              setLeaving(true);
-              // Let the card slide away before it's removed.
-              setTimeout(() => onRead(top).finally(() => setLeaving(false)), 220);
-            }}
-          >
-            Mark read
-          </button>
+          <span className="update-links">
+            {top.link && (
+              <ExternalLink href={top.link} className="link-button small">
+                {sourceLabel(top.link)}
+              </ExternalLink>
+            )}
+            <button
+              className="link-button small"
+              disabled={leaving}
+              onClick={() => {
+                setLeaving(true);
+                // Let the card slide away before it's removed.
+                setTimeout(() => onRead(top).finally(() => setLeaving(false)), 220);
+              }}
+            >
+              Mark read
+            </button>
+          </span>
         </div>
       </div>
     </div>

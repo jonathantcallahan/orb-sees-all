@@ -477,7 +477,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .update-card.leaving { transform: translateX(110%) rotate(4deg); opacity: 0; }
 @keyframes update-in { from { transform: translateY(8px) scale(0.96); opacity: 0.7; } }
 .update-meta { display: flex; justify-content: space-between; gap: 8px; }
-.update-text { font-size: 13px; }
+.update-text { font-size: 13px; margin: 0; }
+.update-links { display: flex; gap: 12px; }
 .update-actions { display: flex; justify-content: space-between; align-items: center; }
 
 .slack-link { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -1px; line-height: 0; opacity: 0.85; }

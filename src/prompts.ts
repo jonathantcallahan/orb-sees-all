@@ -123,7 +123,7 @@ Return the full lists of what's still open: carried-over items that aren't resol
 - follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
 - ${ASSESSMENT_GUIDE}
 
-For each news item: id is the message permalink or "gmail:<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is YYYY-MM-DD. At most eight, most important first.
+For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is YYYY-MM-DD. At most eight, most important first.
 
 For each reply:
 - id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: YYYY-MM-DD. link: as for tasks.
