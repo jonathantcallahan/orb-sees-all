@@ -308,7 +308,7 @@ describe("readingContext", () => {
       blocked_on_others: ["Reason codes (Alex)"],
       active_work: ["Partial-refund tickets (ILT team)"],
     });
-    expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
+    expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "blocking", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
 
     // A blocker marked resolved after a double check drops out.
@@ -350,6 +350,16 @@ describe("task priority", () => {
     expect(taskPriority(null, "P0")).toBe("critical");
   });
 
+  it("makes a task that's blocking its project 'blocking', above everything", () => {
+    expect(taskPriority("low", "P3", true)).toBe("blocking");
+    expect(taskPriority("critical", "P0", true)).toBe("blocking");
+  });
+
+  it("counts blocking tasks as critical pressure", () => {
+    const p = pressure([{ status: "on_track", priority: "P3", blockingIds: ["a"], tasks: [{ id: "a" }, { id: "b" }] }], [], new Map(), new Date(2026, 9, 29));
+    expect(p.criticalTasks).toBe(1);
+  });
+
   it("otherwise keeps Claude's assessment", () => {
     expect(taskPriority("medium", "P1")).toBe("medium");
     expect(taskPriority("high", null)).toBe("high");
@@ -374,6 +384,11 @@ describe("task filters", () => {
     expect(matchesFilter(t("in_progress", "critical"), f)).toBe(true);
     expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
     expect(matchesFilter(t("waiting", "critical"), f)).toBe(false);
+  });
+
+  it("filters on blocking like any other priority", () => {
+    expect(matchesFilter({ status: "todo", priority: "blocking" }, { ...NO_FILTER, priority: "blocking" })).toBe(true);
+    expect(matchesFilter({ status: "todo", priority: "critical" }, { ...NO_FILTER, priority: "blocking" })).toBe(false);
   });
 
   it("treats unassessed tasks as unrated, and can require recommended", () => {

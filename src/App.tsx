@@ -10,7 +10,7 @@ import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
-import { compareProjects, matchesProjectFilter, pressure } from "./tasks";
+import { compareProjects, matchesProjectFilter, myBlockingIds, pressure } from "./tasks";
 import { isDark, useTheme } from "./theme";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
@@ -82,7 +82,12 @@ export default function App() {
     ),
   );
   const load = pressure(
-    projects.map((p) => ({ status: p.snapshot?.status ?? null, priority: p.snapshot?.priority?.level, tasks: p.snapshot?.my_tasks ?? [] })),
+    projects.map((p) => ({
+      status: p.snapshot?.status ?? null,
+      priority: p.snapshot?.priority?.level,
+      blockingIds: myBlockingIds(p.snapshot?.blockers, data.taskStates),
+      tasks: p.snapshot?.my_tasks ?? [],
+    })),
     data.adhoc.tasks,
     data.taskStates,
   );

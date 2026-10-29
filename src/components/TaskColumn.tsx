@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment } from "../schema";
-import { applyTaskState, blockerKey, formatMinutes, isFiltering, matchesFilter, splitToday, stateOf, taskPriority, type TaskState } from "../tasks";
+import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
@@ -96,7 +96,7 @@ export function TaskColumn({
   const filtering = isFiltering(filter);
   /** Effective priority, matching the card's badge: tasks in P0 projects are critical. */
   const priorityOf = (t: CardTask) =>
-    taskPriority((t.source === "manual" ? assessments.get(t.id) : t.assessment)?.priority, t.projectPriority);
+    taskPriority((t.source === "manual" ? assessments.get(t.id) : t.assessment)?.priority, t.projectPriority, t.blocking);
   const filters = <TaskFilters filter={filter} onChange={setFilter} />;
   const keep = <T extends CardTask>(list: T[]) =>
     filtering ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended }, filter)) : list;
@@ -117,11 +117,7 @@ export function TaskColumn({
 
   // The user's tasks from project snapshots: blockers first, then by due date.
   const fromProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
-    const blocking = new Set(
-      (p.snapshot?.blockers ?? [])
-        .filter((b) => b.owners.some((o) => o.is_me) && !stateOf(taskStates, blockerKey(b.id)).dismissed)
-        .map((b) => b.id),
-    );
+    const blocking = new Set(myBlockingIds(p.snapshot?.blockers, taskStates));
     return (p.snapshot?.my_tasks ?? []).map((t) => ({
       ...t,
       source: "project" as const,

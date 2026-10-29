@@ -10,6 +10,7 @@ const STATUSES: [TaskStatus, string][] = [
 ];
 
 const PRIORITIES: [PriorityFilter, string][] = [
+  ["blocking", "Blocking"],
   ["critical", "Critical"],
   ["high", "High"],
   ["medium", "Medium"],

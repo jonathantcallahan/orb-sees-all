@@ -3,8 +3,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { claudeSessionUrl, sessionPrompt } from "../openInClaude";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
-import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority, ProjectPriority } from "../schema";
-import { formatMinutes, taskPriority, type TaskStatus } from "../tasks";
+import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, ProjectPriority } from "../schema";
+import { formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
@@ -149,7 +149,8 @@ function DescriptionEditor({ task, initial, onDone }: { task: CardTask; initial:
   );
 }
 
-const PRIORITY_LABEL: Record<Priority, string> = {
+const PRIORITY_LABEL: Record<EffectivePriority, string> = {
+  blocking: "Blocking",
   critical: "Critical",
   high: "High",
   medium: "Medium",
@@ -257,7 +258,7 @@ export function TaskCard({
   const [editing, setEditing] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
-  const priority = taskPriority(assessment?.priority, task.projectPriority);
+  const priority = taskPriority(assessment?.priority, task.projectPriority, task.blocking);
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
@@ -335,7 +336,6 @@ export function TaskCard({
         <div className="muted small task-meta">
           {task.recommended && <RecommendedBadge />}
           {task.project && <span className="badge project-badge">{task.project.name}</span>}
-          {task.blocking && <span className="badge blocking">Blocking</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}
           {task.due && <span className="due">due {task.due}</span>}

@@ -1,7 +1,7 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
 import type { Blocker, CalendarDay, ManualAssessment } from "./schema";
 import { projectName } from "./projects";
-import { blockerKey, stateOf, taskPriority, type TaskState } from "./tasks";
+import { blockerKey, myBlockingIds, stateOf, taskPriority, type TaskState } from "./tasks";
 
 export interface ReadingInput {
   projects: Project[];
@@ -50,18 +50,19 @@ export function readingContext(r: ReadingInput) {
         project: projectName(p),
         a: t.assessment,
         projectPriority: p.snapshot?.priority?.level,
+        blocking: myBlockingIds(p.snapshot?.blockers, r.states).includes(t.id),
         due: t.due,
       })),
     ),
-    ...r.adhoc.tasks.map((t) => ({ id: t.id, title: t.title, project: null, a: t.assessment, projectPriority: null, due: t.due })),
-    ...r.manual.map((t) => ({ id: t.id, title: t.title, project: null, a: r.assessments.get(t.id), projectPriority: null, due: null })),
+    ...r.adhoc.tasks.map((t) => ({ id: t.id, title: t.title, project: null, a: t.assessment, projectPriority: null, blocking: false, due: t.due })),
+    ...r.manual.map((t) => ({ id: t.id, title: t.title, project: null, a: r.assessments.get(t.id), projectPriority: null, blocking: false, due: null })),
   ]
     .filter((t) => open(t.id))
     .map((t) => ({
       id: t.id,
       title: t.title,
       project: t.project,
-      priority: taskPriority(t.a?.priority, t.projectPriority),
+      priority: taskPriority(t.a?.priority, t.projectPriority, t.blocking),
       estimate_minutes: t.a?.estimate_minutes ?? null,
       due: t.due ?? null,
       planned_today: planned(t.id),

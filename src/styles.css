@@ -266,7 +266,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Tasks column: project badges and the project filter */
 .project-badge { color: var(--accent); }
-.badge.blocking { color: var(--red); background: var(--red-bg); }
+.badge.priority.blocking { color: white; background: var(--red); }
 .filter-chip {
   display: flex;
   justify-content: space-between;

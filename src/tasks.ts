@@ -105,6 +105,8 @@ export interface Pressure {
 interface PressureProject {
   status: ProjectStatus | null;
   priority?: ProjectPriority | null;
+  /** Ids of this project's tasks that are blocking it. */
+  blockingIds?: string[];
   tasks: { id: string; due?: string | null }[];
 }
 
@@ -122,8 +124,8 @@ function dueSoon(due: string | null | undefined, now: Date): boolean {
 
 /**
  * How much is waiting on the user: projects with at least one open task of
- * theirs, and open tasks that are due soon or sit in a P0, blocked or at-risk
- * project. Done and dismissed tasks don't count.
+ * theirs, and open tasks that are blocking, due soon, or sit in a P0, blocked
+ * or at-risk project. Done and dismissed tasks don't count.
  */
 export function pressure(
   projects: PressureProject[],
@@ -139,7 +141,7 @@ export function pressure(
     if (tasks.length) projectsOnMe++;
     // Every task in a P0 project is critical, as are tasks in projects in trouble.
     const hot = p.priority === "P0" || p.status === "blocked" || p.status === "at_risk";
-    criticalTasks += tasks.filter((t) => hot || dueSoon(t.due, now)).length;
+    criticalTasks += tasks.filter((t) => hot || p.blockingIds?.includes(t.id) || dueSoon(t.due, now)).length;
   }
   criticalTasks += otherTasks.filter((t) => open(t) && dueSoon(t.due, now)).length;
   const level =
@@ -158,16 +160,25 @@ export function orbMood(p: Pressure): OrbMood {
   return "furious";
 }
 
+/** Claude's priority levels plus "blocking", which outranks critical and is set by the app, never by Claude. */
+export type EffectivePriority = Priority | "blocking";
+
 /**
- * A task's effective priority: anything that belongs to a P0 project is
- * critical; otherwise Claude's assessment stands (null until assessed).
+ * A task's effective priority: a task that's one of the user's own blockers is
+ * "blocking"; anything else in a P0 project is critical; otherwise Claude's
+ * assessment stands (null until assessed).
  */
-export function taskPriority(assessed: Priority | null | undefined, projectPriority?: ProjectPriority | null): Priority | null {
+export function taskPriority(
+  assessed: Priority | null | undefined,
+  projectPriority?: ProjectPriority | null,
+  blocking = false,
+): EffectivePriority | null {
+  if (blocking) return "blocking";
   if (projectPriority === "P0") return "critical";
   return assessed ?? null;
 }
 
-export type PriorityFilter = Priority | "unrated";
+export type PriorityFilter = EffectivePriority | "unrated";
 
 export interface TaskFilter {
   /** null means any status. */
@@ -185,7 +196,7 @@ export function isFiltering(f: TaskFilter): boolean {
 
 /** Whether a task passes every filter that's set. */
 export function matchesFilter(
-  t: { status: TaskStatus; priority: Priority | null; recommended?: boolean },
+  t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean },
   f: TaskFilter,
 ): boolean {
   if (f.status && t.status !== f.status) return false;
@@ -228,4 +239,9 @@ export function matchesProjectFilter(
   if (f.priority && p.priority !== f.priority) return false;
   if (f.recommendedOnly && !p.taskIds.some((id) => recommended.has(id))) return false;
   return true;
+}
+
+/** Ids of a project's blockers the user owns and hasn't marked resolved: their blocking tasks. */
+export function myBlockingIds(blockers: { id: string; owners: { is_me: boolean }[] }[] | undefined, states: Map<string, TaskState>): string[] {
+  return (blockers ?? []).filter((b) => b.owners.some((o) => o.is_me) && !stateOf(states, blockerKey(b.id)).dismissed).map((b) => b.id);
 }
