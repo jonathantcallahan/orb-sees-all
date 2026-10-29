@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { JobQueue } from "./jobs/queue";
 import { windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, pressure } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, pressure, splitToday, type TaskState } from "./tasks";
+
+const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
+  ...DEFAULT_TASK_STATE,
+  status: done ? "done" : "todo",
+  done,
+  dismissed,
+});
 
 describe("shouldRunMorning", () => {
   const schedule = { time: "07:30", weekdaysOnly: true };
@@ -36,15 +43,15 @@ describe("applyTaskState", () => {
   ];
 
   it("keeps a checked task checked after a refresh returns it again", () => {
-    const states = new Map([["a", { done: true, dismissed: false }]]);
+    const states = new Map([["a", st({ done: true, dismissed: false })]]);
     const refreshed = [...tasks];
     expect(applyTaskState(refreshed, states).find((t) => t.id === "a")?.done).toBe(true);
   });
 
   it("hides dismissed tasks and sorts done ones last", () => {
     const states = new Map([
-      ["a", { done: true, dismissed: false }],
-      ["b", { done: false, dismissed: true }],
+      ["a", st({ done: true, dismissed: false })],
+      ["b", st({ done: false, dismissed: true })],
     ]);
     expect(applyTaskState(tasks, states).map((t) => t.id)).toEqual(["c", "a"]);
   });
@@ -125,7 +132,7 @@ describe("JobQueue", () => {
 
 describe("pressure", () => {
   const now = new Date(2026, 9, 29, 9, 0);
-  const none = new Map<string, { done: boolean; dismissed: boolean }>();
+  const none = new Map<string, TaskState>();
 
   it("is calm with nothing on the user", () => {
     expect(pressure([{ status: "on_track", tasks: [] }], [], none, now).level).toBe(0);
@@ -147,8 +154,8 @@ describe("pressure", () => {
 
   it("ignores done and dismissed tasks", () => {
     const states = new Map([
-      ["a", { done: true, dismissed: false }],
-      ["b", { done: false, dismissed: true }],
+      ["a", st({ done: true, dismissed: false })],
+      ["b", st({ done: false, dismissed: true })],
     ]);
     const p = pressure([{ status: "blocked", tasks: [{ id: "a" }, { id: "b" }] }], [], states, now);
     expect(p).toMatchObject({ projectsOnMe: 0, criticalTasks: 0, level: 0 });
@@ -157,5 +164,31 @@ describe("pressure", () => {
   it("saturates at 1", () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ status: "blocked" as const, tasks: [{ id: `t${i}` }] }));
     expect(pressure(many, [], none, now).level).toBe(1);
+  });
+});
+
+describe("splitToday", () => {
+  const today = "2026-10-29";
+  const t = (id: string, todayOn: string | null, done = false) => ({ id, todayOn, done });
+
+  it("plans tasks picked for today and carries unfinished ones forward", () => {
+    const { planned, rest } = splitToday(
+      [t("a", today), t("b", "2026-10-27"), t("c", "2026-10-27", true), t("d", null), t("e", today, true)],
+      today,
+    );
+    expect(planned.map((p) => [p.id, p.carriedFrom])).toEqual([
+      ["a", null],
+      ["b", "2026-10-27"],
+      ["e", null],
+    ]);
+    expect(rest.map((r) => r.id)).toEqual(["c", "d"]);
+  });
+});
+
+describe("formatMinutes", () => {
+  it("formats minutes and hours", () => {
+    expect(formatMinutes(45)).toBe("45m");
+    expect(formatMinutes(60)).toBe("1h");
+    expect(formatMinutes(150)).toBe("2h 30m");
   });
 });

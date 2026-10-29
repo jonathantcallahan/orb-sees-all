@@ -2,7 +2,8 @@ import { useState } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment } from "../schema";
-import { applyTaskState, type TaskState } from "../tasks";
+import { applyTaskState, formatMinutes, splitToday, type TaskState } from "../tasks";
+import { localDate } from "../scheduler";
 import { RefreshButton, Updated } from "./common";
 import { TaskCard, type CardTask } from "./TaskCard";
 
@@ -68,15 +69,20 @@ export function TaskColumn({
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
-  // Slack and email items share one inbox; dated items first, soonest first.
-  const inbox = applyTaskState(
-    [...adhoc.tasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
-    taskStates,
-  );
   const shared = { plans, assessments, running, onChange };
+  const today = localDate(new Date());
+
+  // Slack and email items share one inbox; dated items first, soonest first.
+  const inbox = splitToday(
+    applyTaskState(
+      [...adhoc.tasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
+      taskStates,
+    ),
+    today,
+  );
 
   // The user's tasks from project snapshots: blockers first, then by due date.
-  const projectTasks = (filterProject ? [filterProject] : projects).flatMap((p) => {
+  const fromProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
     const blocking = new Set(
       (p.snapshot?.blockers ?? []).filter((b) => b.owners.some((o) => o.is_me)).map((b) => b.id),
     );
@@ -87,13 +93,53 @@ export function TaskColumn({
       blocking: blocking.has(t.id),
     }));
   });
-  projectTasks.sort(
+  fromProjects.sort(
     (a, b) => Number(b.blocking) - Number(a.blocking) || (a.due ?? "9999").localeCompare(b.due ?? "9999"),
   );
-  const mine = applyTaskState(
-    manual.filter((t) => !filterProject || t.project_id === filterProject.channel_id),
-    taskStates,
-  ).map((t) => ({ ...t, source: "manual" as const }));
+  const projectTasks = splitToday(applyTaskState(fromProjects, taskStates), today);
+
+  const mine = splitToday(
+    applyTaskState(
+      manual.filter((t) => !filterProject || t.project_id === filterProject.channel_id),
+      taskStates,
+    ).map((t) => ({ ...t, source: "manual" as const })),
+    today,
+  );
+
+  // Today's plan pulls from every group; open tasks first.
+  const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
+    (a, b) => Number(a.done) - Number(b.done),
+  );
+  const estimate = (t: (typeof planned)[number]) =>
+    (t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null)?.estimate_minutes ?? 0;
+  const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
+  const todayGroup = (
+    <section className={`today-plan${planned.length ? "" : " empty"}`}>
+      <h4>
+        ☀ Today
+        {planned.length > 0 && (
+          <span className="today-total">
+            {planned.filter((t) => !t.done).length} open{remaining > 0 && ` · ~${formatMinutes(remaining)}`}
+          </span>
+        )}
+      </h4>
+      {planned.length === 0 ? (
+        <p className="muted small">Pick tasks for today with their ☀ Today button.</p>
+      ) : (
+        planned.map((t) => (
+          <TaskCard
+            key={t.id}
+            task={t}
+            plan={plans.get(t.id)}
+            planning={running.includes(`plan:${t.id}`)}
+            manualAssessment={assessments.get(t.id)}
+            assessing={running.includes("assess")}
+            onChange={onChange}
+          />
+        ))
+      )}
+    </section>
+  );
 
   return (
     <section className="column">
@@ -132,24 +178,26 @@ export function TaskColumn({
               ×
             </button>
           </div>
+          {todayGroup}
           <Group
             title="Project"
-            tasks={applyTaskState(projectTasks, taskStates)}
+            tasks={projectTasks.rest}
             empty={filterProject.snapshot ? "Nothing on you for this project." : "Refresh this project to find your tasks."}
             {...shared}
           />
-          {mine.length > 0 && <Group title="Mine" tasks={mine} empty="" {...shared} />}
+          {mine.rest.length > 0 && <Group title="Mine" tasks={mine.rest} empty="" {...shared} />}
         </>
       ) : (
         <>
-          <Group title="Mine" tasks={mine} empty="No tasks of your own." {...shared} />
+          {todayGroup}
+          <Group title="Mine" tasks={mine.rest} empty="No tasks of your own." {...shared} />
           <Group
             title="Projects"
-            tasks={applyTaskState(projectTasks, taskStates)}
+            tasks={projectTasks.rest}
             empty="No project tasks on you. Refresh projects to find them."
             {...shared}
           />
-          <Group title="Inbox" tasks={inbox} empty="Nothing waiting on you in Slack or email." {...shared} />
+          <Group title="Inbox" tasks={inbox.rest} empty="Nothing waiting on you in Slack or email." {...shared} />
         </>
       )}
     </section>

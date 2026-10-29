@@ -36,6 +36,8 @@ export const Assessment = z.object({
   needs_details: z.boolean(),
   /** What to ask the user when needs_details is true. */
   details_question: z.string().nullish(),
+  /** Expected hands-on time for the user, in minutes. */
+  estimate_minutes: z.number().nullish(),
 });
 export type Assessment = z.infer<typeof Assessment>;
 

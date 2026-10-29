@@ -1,6 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, CalendarDay, ManualAssessment, ProjectSnapshot, RepoState, TaskPlan } from "./schema";
-import type { TaskState } from "./tasks";
+import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
 const db = () => (conn ??= Database.load("sqlite:dayplanner.db"));
@@ -195,14 +195,26 @@ export async function saveTaskPlan(taskId: string, plan: TaskPlan, costUsd: numb
 }
 
 export async function getTaskStates(): Promise<Map<string, TaskState>> {
-  const rows = await (await db()).select<{ task_id: string; done: number; dismissed: number }[]>("SELECT * FROM task_state");
-  return new Map(rows.map((r) => [r.task_id, { done: r.done === 1, dismissed: r.dismissed === 1 }]));
+  const rows = await (await db()).select<{ task_id: string; status: TaskStatus | null; done: number; dismissed: number; today_on: string | null }[]>(
+    "SELECT * FROM task_state",
+  );
+  return new Map(
+    rows.map((r) => {
+      const status = r.status ?? (r.done === 1 ? "done" : "todo");
+      return [r.task_id, { status, dismissed: r.dismissed === 1, todayOn: r.today_on, done: status === "done" }];
+    }),
+  );
 }
 
-export async function setTaskState(taskId: string, state: TaskState) {
+/** Updates part of a task's state, keeping the rest. */
+export async function setTaskState(taskId: string, patch: Partial<Pick<TaskState, "status" | "dismissed" | "todayOn">>) {
+  const current = stateOf(await getTaskStates(), taskId);
+  const next = { ...current, ...patch };
   await (await db()).execute(
-    "INSERT INTO task_state (task_id, done, dismissed, updated_at) VALUES ($1, $2, $3, $4) ON CONFLICT(task_id) DO UPDATE SET done = excluded.done, dismissed = excluded.dismissed, updated_at = excluded.updated_at",
-    [taskId, state.done ? 1 : 0, state.dismissed ? 1 : 0, nowIso()],
+    `INSERT INTO task_state (task_id, status, done, dismissed, today_on, updated_at) VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT(task_id) DO UPDATE SET status = excluded.status, done = excluded.done, dismissed = excluded.dismissed,
+       today_on = excluded.today_on, updated_at = excluded.updated_at`,
+    [taskId, next.status, next.status === "done" ? 1 : 0, next.dismissed ? 1 : 0, next.todayOn, nowIso()],
   );
 }
 

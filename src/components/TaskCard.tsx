@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment } from "../schema";
+import { formatMinutes, type TaskStatus } from "../tasks";
+import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
 
 export interface CardTask {
@@ -13,6 +15,11 @@ export interface CardTask {
   requester?: string | null;
   follow_up?: FollowUp | null;
   source: "manual" | "slack" | "email" | "project";
+  status: TaskStatus;
+  /** YYYY-MM-DD the task was planned for, if it's in Today. */
+  todayOn: string | null;
+  /** Set when the task was planned for an earlier day and is still open. */
+  carriedFrom?: string | null;
   project?: { id: string; name: string };
   /** The task is holding its project up. */
   blocking?: boolean;
@@ -77,7 +84,7 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
   const [overflows, setOverflows] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
+    if (el && !expanded) setOverflows(el.scrollHeight - el.clientHeight > 4);
   }, [text, expanded]);
 
   return (
@@ -133,6 +140,38 @@ function DescriptionEditor({ task, initial, onDone }: { task: CardTask; initial:
   );
 }
 
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "To do",
+  in_progress: "In progress",
+  waiting: "Waiting",
+  done: "Done",
+};
+
+function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
+  return (
+    <select
+      className={`status-select ${task.status}`}
+      value={task.status}
+      aria-label="Status"
+      onChange={async (e) => {
+        await setTaskState(task.id, { status: e.target.value as TaskStatus });
+        onChange();
+      }}
+    >
+      {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
+        <option key={s} value={s}>
+          {STATUS_LABEL[s]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function carriedLabel(day: string): string {
+  const days = Math.round((Date.parse(localDate(new Date())) - Date.parse(day)) / 86_400_000);
+  return days === 1 ? "from yesterday" : `from ${days} days ago`;
+}
+
 const AUTOMATION_LABEL: Record<Automation, string> = {
   human: "You do it",
   assisted: "Claude can help",
@@ -184,6 +223,7 @@ export function TaskCard({
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
+  const planned = !!task.todayOn && (task.todayOn === localDate(new Date()) || !!task.carriedFrom);
   // Inbox tasks come with a follow-up; for the rest, the plan's first step is the next action.
   const firstStep = plan?.plan.steps[0];
   const followUp: FollowUp | null = task.follow_up ?? (firstStep ? { kind: "do", action: firstStep.title } : null);
@@ -205,16 +245,8 @@ export function TaskCard({
   };
 
   return (
-    <article className={`card task-card${task.done ? " done" : ""}`}>
+    <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`}>
       <header className="task-card-header">
-        <input
-          type="checkbox"
-          checked={task.done}
-          onChange={async (e) => {
-            await setTaskState(task.id, { done: e.target.checked, dismissed: false });
-            onChange();
-          }}
-        />
         <ExternalLink href={task.link} className="task-title">
           {task.title}
         </ExternalLink>
@@ -223,7 +255,7 @@ export function TaskCard({
           title="Dismiss"
           aria-label="Dismiss"
           onClick={async () => {
-            await setTaskState(task.id, { done: task.done, dismissed: true });
+            await setTaskState(task.id, { dismissed: true });
             onChange();
           }}
         >
@@ -240,6 +272,26 @@ export function TaskCard({
           {task.due && <span className="due">due {task.due}</span>}
         </div>
       )}
+
+      <div className="task-controls">
+        <StatusSelect task={task} onChange={onChange} />
+        {assessment?.estimate_minutes != null && (
+          <span className="estimate" title="Claude's estimate of your hands-on time">
+            ~{formatMinutes(assessment.estimate_minutes)}
+          </span>
+        )}
+        {task.carriedFrom && <span className="carried">{carriedLabel(task.carriedFrom)}</span>}
+        <button
+          className={`today-toggle${planned ? " on" : ""}`}
+          title={planned ? "Remove from today" : "Plan this for today"}
+          onClick={async () => {
+            await setTaskState(task.id, { todayOn: planned ? null : localDate(new Date()) });
+            onChange();
+          }}
+        >
+          {planned ? "☀ Today ×" : "☀ Today"}
+        </button>
+      </div>
 
       {editing ? (
         <DescriptionEditor

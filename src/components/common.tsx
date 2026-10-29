@@ -37,7 +37,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
             type="checkbox"
             checked={t.done}
             onChange={async (e) => {
-              await setTaskState(t.id, { done: e.target.checked, dismissed: false });
+              await setTaskState(t.id, { status: e.target.checked ? "done" : "todo" });
               onChange();
             }}
           />
@@ -58,7 +58,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
             title="Dismiss"
             aria-label="Dismiss"
             onClick={async () => {
-              await setTaskState(t.id, { done: t.done, dismissed: true });
+              await setTaskState(t.id, { dismissed: true });
               onChange();
             }}
           >

@@ -293,3 +293,29 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .automation.claude .automation-kind { color: var(--green); }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .needs-details .link-button { color: inherit; text-decoration: underline; }
+
+/* Task status, estimate and Today controls */
+.task-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.status-select {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--grey-bg);
+  cursor: pointer;
+}
+.status-select.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
+.status-select.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+.status-select.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
+.estimate { font-size: 11px; color: var(--muted); }
+.carried { font-size: 11px; color: var(--amber); }
+.today-toggle { margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--muted); visibility: hidden; }
+.task-card:hover .today-toggle, .today-toggle.on { visibility: visible; }
+.today-toggle.on { color: var(--amber); border-color: var(--amber); }
+
+/* Today's plan at the top of Tasks */
+.today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.today-plan.empty { background: none; padding: 0 10px; }
+.today-plan h4 { margin: 0; color: var(--amber); display: flex; justify-content: space-between; }
+.today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
