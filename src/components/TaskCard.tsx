@@ -319,6 +319,7 @@ function AssessmentView({
   actions?: ReactNode;
   onAddDetails?: () => void;
 }) {
+  const [open, setOpen] = useState(true);
   return (
     <>
       {assessment.needs_details && (
@@ -332,9 +333,18 @@ function AssessmentView({
         </div>
       )}
       <div className={`automation ${assessment.automation}`}>
-        <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
-        <span className="small">{assessment.suggestion}</span>
-        <PlanOutline steps={steps} action={actions} />
+        <div className="automation-head">
+          <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
+          <button className="link-button small more-link" onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? "Hide" : "Show"}
+          </button>
+        </div>
+        {open && (
+          <>
+            <span className="small">{assessment.suggestion}</span>
+            <PlanOutline steps={steps} action={actions} />
+          </>
+        )}
       </div>
     </>
   );

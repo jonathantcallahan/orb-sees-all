@@ -280,6 +280,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Claude's assessment of a task */
 .automation { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
+.automation-head { display: flex; align-items: baseline; gap: 8px; }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .needs-details .link-button { color: inherit; text-decoration: underline; }
 
