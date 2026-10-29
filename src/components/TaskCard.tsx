@@ -220,7 +220,9 @@ const PRIORITY_LABEL: Record<EffectivePriority, string> = {
 function RecommendedBadge() {
   return (
     <span className="badge recommended" title="The Orb recommends doing this today to move a P0 project forward">
-      <span className="sparkle" aria-hidden>✦</span>Recommended
+      <svg className="sparkle" width="8" height="8" viewBox="0 0 8 8" aria-hidden>
+        <path d="M4 0Q4.6 3.4 8 4Q4.6 4.6 4 8Q3.4 4.6 0 4Q3.4 3.4 4 0Z" fill="currentColor" />
+      </svg>Recommended
     </span>
   );
 }

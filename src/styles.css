@@ -508,8 +508,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
 .badge.recommended, .filter-select.recommended { display: inline-flex; align-items: center; gap: 3px; }
-/* The four-pointed star glyph sits high on its baseline; center it on its own box. */
-.sparkle { display: inline-block; font-size: 9px; line-height: 1; transform: translateY(-0.5px); }
+/* A drawn star rather than the ✦ character, whose ink sits off-center in most fonts. */
+.sparkle { flex-shrink: 0; display: block; }
 
 .motto { color: var(--muted); font-size: 17px; margin-left: 2px; }
 

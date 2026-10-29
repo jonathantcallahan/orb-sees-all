@@ -70,7 +70,9 @@ function FilterSelect<V extends string>({
 function RecommendedToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
     <button className={`filter-select recommended${on ? " on" : ""}`} aria-pressed={on} onClick={() => onChange(!on)}>
-      <span className="sparkle" aria-hidden>✦</span>Recommended
+      <svg className="sparkle" width="8" height="8" viewBox="0 0 8 8" aria-hidden>
+        <path d="M4 0Q4.6 3.4 8 4Q4.6 4.6 4 8Q3.4 4.6 0 4Q3.4 3.4 4 0Z" fill="currentColor" />
+      </svg>Recommended
     </button>
   );
 }
