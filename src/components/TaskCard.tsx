@@ -613,6 +613,7 @@ export function TaskCard({
         <ExternalLink href={task.link} className="task-title">
           {task.title}
         </ExternalLink>
+        {task.recommended && <RecommendedBadge />}
         {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Claude's estimate of your hands-on time">
@@ -622,9 +623,8 @@ export function TaskCard({
         <StatusSelect task={task} onChange={onChange} />
       </header>
 
-      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due || task.recommended) && (
+      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
         <div className="muted small task-meta">
-          {task.recommended && <RecommendedBadge />}
           {task.project && <span className="task-project">{task.project.name}</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}
