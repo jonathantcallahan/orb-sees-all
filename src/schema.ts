@@ -177,6 +177,8 @@ export type CalendarDay = z.infer<typeof CalendarDay>;
 
 export const ReplyDraft = z.object({ draft: z.string() });
 
+export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
+
 export const DailyReading = z.object({ reading: z.string() });
 
 /** Claude's assessment of one of the user's own tasks, with a drafted description if they gave none. */

@@ -126,6 +126,22 @@ export async function saveReading(reading: StoredReading) {
   await setSetting("daily_reading", JSON.stringify(reading));
 }
 
+export interface Reminder {
+  at: string;
+  link: string | null;
+}
+
+/** Reminders sent about blockers, keyed by blocker id. */
+export async function getReminders(): Promise<Record<string, Reminder>> {
+  return json<Record<string, Reminder>>(await getSetting("reminders")) ?? {};
+}
+
+export async function saveReminder(blockerId: string, reminder: Reminder) {
+  const all = await getReminders();
+  all[blockerId] = reminder;
+  await setSetting("reminders", JSON.stringify(all));
+}
+
 export async function getReplyDrafts(): Promise<Map<string, { text: string; created_at: string }>> {
   const rows = await (await db()).select<{ reply_id: string; text: string; created_at: string }[]>("SELECT * FROM reply_drafts");
   return new Map(rows.map((r) => [r.reply_id, { text: r.text, created_at: r.created_at }]));

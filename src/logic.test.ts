@@ -3,7 +3,7 @@ import { dayRange, layoutDay, nowOffset } from "./calendar";
 import { JobQueue } from "./jobs/queue";
 import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
-import { windowStart } from "./prompts";
+import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
 import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, type TaskState } from "./tasks";
 
@@ -309,5 +309,23 @@ describe("readingContext", () => {
     expect(ctx.tasks).toEqual([{ title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
     expect(ctx.news).toEqual(["Reorg announced"]);
+  });
+});
+
+describe("reminders", () => {
+  it("tags each owner and links the message that raised the blocker", () => {
+    const owners = [{ name: "Alex Example", slack_user_id: "U1" }, { name: "Sam", slack_user_id: "U2" }];
+    const text = reminderText(owners, "Refund reason codes", "https://slack.com/p1");
+    expect(text).toMatch(/^@Alex Example @Sam /);
+    expect(text).toContain("*Refund reason codes*");
+    expect(text.endsWith("https://slack.com/p1")).toBe(true);
+    expect(toSlackMentions(text, owners)).toMatch(/^<@U1> <@U2> quick nudge/);
+  });
+
+  it("asks Claude to post the user's text verbatim to the project channel only", () => {
+    const prompt = sendReminderPrompt("C0BGJ", "<@U1> any update?\nhttps://slack.com/p1");
+    expect(prompt).toContain('channel_id "C0BGJ"');
+    expect(prompt).toContain("<<<MESSAGE\n<@U1> any update?\nhttps://slack.com/p1\nMESSAGE>>>");
+    expect(prompt).toMatch(/exactly once/);
   });
 });

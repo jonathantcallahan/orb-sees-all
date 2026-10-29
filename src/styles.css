@@ -489,3 +489,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The RACI letter matches the P0-P4 badge beside it. */
 .project .badge.raci,
 .p-badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; vertical-align: 1px; }
+
+/* Send a reminder to whoever owns a blocker */
+.remind { margin-left: auto; display: inline-flex; gap: 8px; align-items: baseline; }
+.remind-open { visibility: hidden; }
+.work-item:hover .remind-open { visibility: visible; }
+.reminded { font-size: 11px; }
+.remind-composer { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
+.remind-composer textarea { font-size: 12px; }
+.remind-actions { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.remind-buttons { display: flex; gap: 12px; flex-shrink: 0; }

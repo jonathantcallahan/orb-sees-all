@@ -224,3 +224,25 @@ Name the one or two things that matter most (a blocker only they can clear, a cr
 
 ${JSON_ONLY} Shape: {"reading": string}`;
 }
+
+/** The default reminder text, with readable @Name mentions for the user to edit. */
+export function reminderText(owners: { name: string }[], what: string, link: string | null | undefined): string {
+  const mentions = owners.map((o) => `@${o.name}`).join(" ");
+  return `${mentions} quick nudge on this one: *${what}*. Is there anything I can do to help unblock it?${link ? `\n${link}` : ""}`;
+}
+
+/** Turns the composer's @Name mentions into Slack mentions (<@U123>) before posting. */
+export function toSlackMentions(text: string, owners: { name: string; slack_user_id?: string | null }[]): string {
+  return owners.reduce((t, o) => (o.slack_user_id ? t.split(`@${o.name}`).join(`<@${o.slack_user_id}>`) : t), text);
+}
+
+export function sendReminderPrompt(channelId: string, text: string): string {
+  return `Post the message below to the Slack channel ${channelId} by calling slack_send_message exactly once, with channel_id "${channelId}" and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
+
+Message (between the markers):
+<<<MESSAGE
+${text}
+MESSAGE>>>
+
+After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+}

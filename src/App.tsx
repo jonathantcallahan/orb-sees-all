@@ -132,6 +132,7 @@ export default function App() {
               busy={running.includes(`project:${p.channel_id}`)}
               taskStates={data.taskStates}
               selected={filterProject === p.channel_id}
+              reminders={data.reminders}
               onSelect={() => setFilterProject((cur) => (cur === p.channel_id ? null : p.channel_id))}
               onChange={reload}
             />

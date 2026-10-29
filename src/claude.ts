@@ -24,6 +24,8 @@ export const TOOLS = {
     "mcp__claude_ai_Google_Drive__get_file_metadata",
   ],
   jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
+  /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
+  slackSend: [`${SLACK}slack_send_message`],
   uknow: [
     "mcp__claude_ai_U-Know__ask_uknow",
     "mcp__claude_ai_U-Know__ask_uknow_session",

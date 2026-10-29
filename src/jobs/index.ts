@@ -1,8 +1,8 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, assessPrompt, calendarPrompt, draftReplyPrompt, readingPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, TaskPlan, type QuickReply } from "../schema";
+import { AdhocSnapshot, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -245,6 +245,29 @@ export function draftReply(reply: QuickReply): Promise<void> {
         maxTurns: 15,
       });
       await db.saveReplyDraft(reply.id, data.draft, costUsd);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/**
+ * Posts a reminder the user wrote (and clicked Send on) to a project channel.
+ * The only job allowed to write to Slack, and only with slack_send_message.
+ */
+export function sendReminder(blockerId: string, channelId: string, text: string): Promise<void> {
+  return track(`remind:${blockerId}`, (status) =>
+    logged("remind", blockerId, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
+        prompt: sendReminderPrompt(channelId, text),
+        schema: SentMessage,
+        tools: TOOLS.slackSend,
+        // A mechanical post; the cheaper model is plenty.
+        model: "sonnet",
+        maxTurns: 3,
+      });
+      if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
+      await db.saveReminder(blockerId, { at: new Date().toISOString(), link: data.link ?? null });
       return { value: undefined, costUsd };
     }),
   );
