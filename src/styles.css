@@ -230,9 +230,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    color-mix(in srgb, var(--mist-tone) 15%, transparent) 35%,
-    color-mix(in srgb, var(--mist-tone) 55%, transparent) 70%,
-    color-mix(in srgb, var(--mist-tone) 85%, transparent) 100%
+    color-mix(in srgb, var(--mist-tone) 10%, transparent) 35%,
+    color-mix(in srgb, var(--mist-tone) 35%, transparent) 70%,
+    color-mix(in srgb, var(--mist-tone) 60%, transparent) 100%
   );
 }
 

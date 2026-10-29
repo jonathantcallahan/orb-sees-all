@@ -50,11 +50,11 @@ void main() {
   float depth = 1.0 - vUv.y;
   float edge = smoothstep(0.0, 0.75, depth + (d - 0.5) * 0.7);
   float alpha = pow(edge, 0.7) * (0.75 + 0.25 * d) * smoothstep(0.0, 0.3, depth + 0.1);
-  alpha = clamp(alpha + smoothstep(0.45, 1.0, depth) * 0.5, 0.0, 0.98);
+  alpha = clamp(alpha + smoothstep(0.45, 1.0, depth) * 0.35, 0.0, 0.85) * 0.8;
 
   // Shades of the page background, slightly cooler, so the mist reads as part of the page.
-  vec3 deep = mix(uBg, vec3(0.03, 0.03, 0.06), 0.45);
-  vec3 wisp = mix(uBg, vec3(0.20, 0.18, 0.28), 0.15);
+  vec3 deep = mix(uBg, vec3(0.03, 0.03, 0.06), 0.3);
+  vec3 wisp = mix(uBg, vec3(0.20, 0.18, 0.28), 0.1);
   vec3 color = mix(deep, wisp, d * d + length(q) * 0.1);
   gl_FragColor = vec4(color * alpha, alpha);
 }
