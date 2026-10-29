@@ -140,7 +140,7 @@ function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string)
   }
 }
 
-function Description({ text, draft, onEdit, more }: { text: string; draft: boolean; onEdit?: () => void; more?: ReactNode }) {
+function Description({ text, draft, onEdit }: { text: string; draft: boolean; onEdit?: () => void }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   /** Characters shown when collapsed, or null when the whole text fits. */
@@ -159,14 +159,11 @@ function Description({ text, draft, onEdit, more }: { text: string; draft: boole
   }, [text, expanded, onEdit]);
 
   const truncated = !expanded && cut !== null;
-  // More also opens the extra details (relevant links) even when the text fits.
-  const showMore = !expanded && (cut !== null || !!more);
   return (
-    <>
     <p ref={ref} className="description small">
       {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
       <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
-      {showMore && (
+      {truncated && (
         <button className="link-button small inline-action more-link" onClick={() => setExpanded(true)}>
           More
         </button>
@@ -182,8 +179,6 @@ function Description({ text, draft, onEdit, more }: { text: string; draft: boole
         </button>
       )}
     </p>
-    {expanded && more}
-    </>
   );
 }
 
@@ -646,7 +641,7 @@ export function TaskCard({
       {editing ? (
         <DescriptionEditor initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       ) : description ? (
-        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} more={relevantLinks} />
+        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
@@ -654,6 +649,8 @@ export function TaskCard({
           </button>
         )
       )}
+
+      {relevantLinks}
 
       {assessment ? (
         <AssessmentView
