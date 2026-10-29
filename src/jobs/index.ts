@@ -205,11 +205,22 @@ const ASSESS_BATCH = 12;
  */
 export function assessPendingTasks(): Promise<void> {
   return track("assess", async (status) => {
+    // Each task gets one try per run, so a result that still lacks steps can't loop forever.
+    const tried = new Set<string>();
     for (;;) {
       const [tasks, assessed, states] = await Promise.all([db.listManualTasks(), db.getAssessments(), db.getTaskStates()]);
-      const pending = tasks.filter((t) => !assessed.has(t.id) && !states.get(t.id)?.done && !states.get(t.id)?.dismissed);
+      // Unassessed tasks, and ones Claude said it can help with but assessed before it listed its steps.
+      const missingSteps = (id: string) => {
+        const a = assessed.get(id);
+        return !!a && a.automation !== "human" && !a.claude_steps?.length;
+      };
+      const pending = tasks.filter(
+        (t) =>
+          !tried.has(t.id) && (!assessed.has(t.id) || missingSteps(t.id)) && !states.get(t.id)?.done && !states.get(t.id)?.dismissed,
+      );
       if (pending.length === 0) return;
       const batch = pending.slice(0, ASSESS_BATCH);
+      for (const t of batch) tried.add(t.id);
       await logged("assess", `${batch.length} tasks`, async () => {
         const { data, costUsd } = await runClaude({
         onStatus: status,
