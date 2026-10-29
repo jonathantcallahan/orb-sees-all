@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
-import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority } from "../schema";
-import { formatMinutes, type TaskStatus } from "../tasks";
+import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority, ProjectPriority } from "../schema";
+import { formatMinutes, taskPriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
@@ -26,6 +26,8 @@ export interface CardTask {
   blocking?: boolean;
   /** The Orb recommends doing this today to move a P0 project forward. */
   recommended?: boolean;
+  /** Priority of the project the task belongs to; tasks in P0 projects are critical. */
+  projectPriority?: ProjectPriority | null;
   /** From the refresh that found the task; the user's own tasks are assessed separately. */
   assessment?: Assessment | null;
   done: boolean;
@@ -251,6 +253,7 @@ export function TaskCard({
   const [editing, setEditing] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
+  const priority = taskPriority(assessment?.priority, task.projectPriority);
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
@@ -294,7 +297,7 @@ export function TaskCard({
       >
         <span className="task-title">{task.title}</span>
         {task.recommended && <RecommendedBadge />}
-        {assessment?.priority && <span className={`badge priority ${assessment.priority}`}>{PRIORITY_LABEL[assessment.priority]}</span>}
+        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
         {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         <StatusSelect task={task} onChange={onChange} />
       </article>
@@ -322,7 +325,7 @@ export function TaskCard({
       )}
 
       <div className="task-controls">
-        {assessment?.priority && <span className={`badge priority ${assessment.priority}`}>{PRIORITY_LABEL[assessment.priority]}</span>}
+        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Claude's estimate of your hands-on time">
             ~{formatMinutes(assessment.estimate_minutes)}

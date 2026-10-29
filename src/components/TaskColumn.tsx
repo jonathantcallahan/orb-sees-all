@@ -108,6 +108,7 @@ export function TaskColumn({
       project: { id: p.channel_id, name: projectName(p) },
       blocking: blocking.has(t.id),
       recommended: recommended.has(t.id),
+      projectPriority: p.snapshot?.priority?.level,
     }));
   });
   fromProjects.sort(

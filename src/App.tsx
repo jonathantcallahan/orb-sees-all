@@ -72,7 +72,7 @@ export default function App() {
   };
   const refreshingAll = running.includes("all");
   const load = pressure(
-    projects.map((p) => ({ status: p.snapshot?.status ?? null, tasks: p.snapshot?.my_tasks ?? [] })),
+    projects.map((p) => ({ status: p.snapshot?.status ?? null, priority: p.snapshot?.priority?.level, tasks: p.snapshot?.my_tasks ?? [] })),
     data.adhoc.tasks,
     data.taskStates,
   );

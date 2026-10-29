@@ -1,4 +1,4 @@
-import type { ProjectStatus } from "./schema";
+import type { Priority, ProjectPriority, ProjectStatus } from "./schema";
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "done";
 
@@ -104,6 +104,7 @@ export interface Pressure {
 
 interface PressureProject {
   status: ProjectStatus | null;
+  priority?: ProjectPriority | null;
   tasks: { id: string; due?: string | null }[];
 }
 
@@ -121,7 +122,7 @@ function dueSoon(due: string | null | undefined, now: Date): boolean {
 
 /**
  * How much is waiting on the user: projects with at least one open task of
- * theirs, and open tasks that are due soon or sit in a blocked or at-risk
+ * theirs, and open tasks that are due soon or sit in a P0, blocked or at-risk
  * project. Done and dismissed tasks don't count.
  */
 export function pressure(
@@ -136,7 +137,8 @@ export function pressure(
   for (const p of projects) {
     const tasks = p.tasks.filter(open);
     if (tasks.length) projectsOnMe++;
-    const hot = p.status === "blocked" || p.status === "at_risk";
+    // Every task in a P0 project is critical, as are tasks in projects in trouble.
+    const hot = p.priority === "P0" || p.status === "blocked" || p.status === "at_risk";
     criticalTasks += tasks.filter((t) => hot || dueSoon(t.due, now)).length;
   }
   criticalTasks += otherTasks.filter((t) => open(t) && dueSoon(t.due, now)).length;
@@ -154,4 +156,13 @@ export function orbMood(p: Pressure): OrbMood {
   if (p.level < 0.5) return "restless";
   if (p.level < 0.75) return "agitated";
   return "furious";
+}
+
+/**
+ * A task's effective priority: anything that belongs to a P0 project is
+ * critical; otherwise Claude's assessment stands (null until assessed).
+ */
+export function taskPriority(assessed: Priority | null | undefined, projectPriority?: ProjectPriority | null): Priority | null {
+  if (projectPriority === "P0") return "critical";
+  return assessed ?? null;
 }

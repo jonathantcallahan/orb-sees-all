@@ -1,7 +1,7 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
 import type { CalendarDay, ManualAssessment } from "./schema";
 import { projectName } from "./projects";
-import { stateOf, type TaskState } from "./tasks";
+import { stateOf, taskPriority, type TaskState } from "./tasks";
 
 export interface ReadingInput {
   projects: Project[];
@@ -43,17 +43,24 @@ export function readingContext(r: ReadingInput) {
 
   const tasks = [
     ...r.projects.flatMap((p) =>
-      (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, project: projectName(p), a: t.assessment, due: t.due })),
+      (p.snapshot?.my_tasks ?? []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        project: projectName(p),
+        a: t.assessment,
+        projectPriority: p.snapshot?.priority?.level,
+        due: t.due,
+      })),
     ),
-    ...r.adhoc.tasks.map((t) => ({ id: t.id, title: t.title, project: null, a: t.assessment, due: t.due })),
-    ...r.manual.map((t) => ({ id: t.id, title: t.title, project: null, a: r.assessments.get(t.id), due: null })),
+    ...r.adhoc.tasks.map((t) => ({ id: t.id, title: t.title, project: null, a: t.assessment, projectPriority: null, due: t.due })),
+    ...r.manual.map((t) => ({ id: t.id, title: t.title, project: null, a: r.assessments.get(t.id), projectPriority: null, due: null })),
   ]
     .filter((t) => open(t.id))
     .map((t) => ({
       id: t.id,
       title: t.title,
       project: t.project,
-      priority: t.a?.priority ?? null,
+      priority: taskPriority(t.a?.priority, t.projectPriority),
       estimate_minutes: t.a?.estimate_minutes ?? null,
       due: t.due ?? null,
       planned_today: planned(t.id),

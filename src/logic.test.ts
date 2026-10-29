@@ -5,7 +5,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -328,5 +328,23 @@ describe("reminders", () => {
     expect(prompt).toContain('channel_id "C0BGJ"');
     expect(prompt).toContain("<<<MESSAGE\n<@U1> any update?\nhttps://slack.com/p1\nMESSAGE>>>");
     expect(prompt).toMatch(/exactly once/);
+  });
+});
+
+describe("task priority", () => {
+  it("makes any task in a P0 project critical", () => {
+    expect(taskPriority("low", "P0")).toBe("critical");
+    expect(taskPriority(null, "P0")).toBe("critical");
+  });
+
+  it("otherwise keeps Claude's assessment", () => {
+    expect(taskPriority("medium", "P1")).toBe("medium");
+    expect(taskPriority("high", null)).toBe("high");
+    expect(taskPriority(undefined, "P2")).toBeNull();
+  });
+
+  it("counts open P0 tasks as critical pressure even when the project is on track", () => {
+    const p = pressure([{ status: "on_track", priority: "P0", tasks: [{ id: "a" }, { id: "b" }] }], [], new Map(), new Date(2026, 9, 29));
+    expect(p.criticalTasks).toBe(2);
   });
 });
