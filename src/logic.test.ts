@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dayRange, layoutDay, nowOffset } from "./calendar";
 import { JobQueue } from "./jobs/queue";
+import { claudeSessionUrl, sessionPrompt } from "./openInClaude";
 import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
@@ -395,5 +396,38 @@ describe("project filters", () => {
     const f = { ...NO_PROJECT_FILTER, recommendedOnly: true };
     expect(matchesProjectFilter(p, f, new Set(["t2"]))).toBe(true);
     expect(matchesProjectFilter(p, f, new Set(["other"]))).toBe(false);
+  });
+});
+
+describe("open in Claude", () => {
+  const task = { title: "Coveo bestseller tweak", description: "Rebalance daily vs weekly.", link: "https://slack.com/p1", projectName: "Search" };
+  const plan = {
+    approach: "Draft a ticket for Romen.",
+    steps: [{ title: "Read CPS-6931", detail: "for the current weights", link: "https://jira/CPS-6931" }, { title: "Draft the ticket", detail: null, link: null }],
+    open_questions: ["Cap at top 20 or top 50?"],
+    sources: [{ title: "Sep 29 thread", link: "https://slack.com/p2" }],
+  };
+
+  it("includes the task and the plan, and asks to start with step 1", () => {
+    const p = sessionPrompt(task, plan);
+    expect(p).toContain("Task: Coveo bestseller tweak");
+    expect(p).toContain("Project: Search");
+    expect(p).toContain("1. Read CPS-6931 (for the current weights https://jira/CPS-6931)");
+    expect(p).toContain("2. Draft the ticket");
+    expect(p).toContain("- Cap at top 20 or top 50?");
+    expect(p).toMatch(/starting with step 1/);
+  });
+
+  it("keeps the prompt under Claude Desktop's limit", () => {
+    expect(sessionPrompt({ title: "x", description: "y".repeat(20000) }, plan).length).toBeLessThanOrEqual(13500);
+  });
+
+  it("builds a claude://code/new link that decodes back to the prompt and folder", () => {
+    const url = claudeSessionUrl("Fix the test & ship it", "/Users/me/repo");
+    expect(url.startsWith("claude://code/new?")).toBe(true);
+    const params = new URLSearchParams(url.split("?")[1]);
+    expect(params.get("q")).toBe("Fix the test & ship it");
+    expect(params.get("folder")).toBe("/Users/me/repo");
+    expect(url).not.toContain("+");
   });
 });

@@ -1,4 +1,6 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useLayoutEffect, useRef, useState } from "react";
+import { claudeSessionUrl, sessionPrompt } from "../openInClaude";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority, ProjectPriority } from "../schema";
@@ -26,6 +28,8 @@ export interface CardTask {
   blocking?: boolean;
   /** The Orb recommends doing this today to move a P0 project forward. */
   recommended?: boolean;
+  /** A local repo for the task's project, so Open in Claude starts there. */
+  repoFolder?: string | null;
   /** Priority of the project the task belongs to; tasks in P0 projects are critical. */
   projectPriority?: ProjectPriority | null;
   /** From the refresh that found the task; the user's own tasks are assessed separately. */
@@ -260,6 +264,14 @@ export function TaskCard({
   // Inbox tasks come with a follow-up; for the rest, the plan's first step is the next action.
   const firstStep = plan?.plan.steps[0];
   const followUp: FollowUp | null = task.follow_up ?? (firstStep ? { kind: "do", action: firstStep.title } : null);
+  const openInClaude = () => {
+    if (!plan) return;
+    const prompt = sessionPrompt(
+      { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      plan.plan,
+    );
+    openUrl(claudeSessionUrl(prompt, task.repoFolder));
+  };
   const runPlan = () => {
     setShowPlan(true);
     planTask({
@@ -388,14 +400,23 @@ export function TaskCard({
             <button className="link-button small" onClick={() => setShowPlan((s) => !s)}>
               {showPlan ? "Hide plan" : `Show plan (${plan.plan.steps.length} steps)`}
             </button>
+            <button className="link-button small" onClick={openInClaude} title="Open a new Claude Code session with this task and its plan filled in">
+              Open in Claude
+            </button>
             <button className="link-button small muted" onClick={runPlan}>
               Regenerate
             </button>
           </>
-        ) : (
+        ) : description ? (
           <button className="link-button small" onClick={runPlan}>
             ✦ Plan with Claude
           </button>
+        ) : manual ? (
+          <button className="link-button small muted" onClick={() => setEditing(true)}>
+            Add a description to plan with Claude
+          </button>
+        ) : (
+          <span className="muted small">Plan with Claude needs a description; refresh to get one.</span>
         )}
       </footer>
 

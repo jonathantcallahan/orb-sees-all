@@ -129,6 +129,7 @@ export function TaskColumn({
       blocking: blocking.has(t.id),
       recommended: recommended.has(t.id),
       projectPriority: p.snapshot?.priority?.level,
+      repoFolder: p.local_repos[0] ?? null,
     }));
   });
   fromProjects.sort(
