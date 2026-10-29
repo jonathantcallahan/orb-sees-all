@@ -412,7 +412,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
 .reading h4.section-title:not(:first-child) { margin-top: 8px; }
-.reading-text { margin: 0; font-style: italic; line-height: 1.55; }
+.reading-text { margin: 0; line-height: 1.55; }
 .update-label { color: var(--muted); margin-right: 6px; }
 
 /* Project priority ahead of the name */
@@ -516,14 +516,22 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 .motto { color: var(--muted); font-size: 13px; margin-left: 2px; }
 
-/* Task filters */
-.task-filters { display: flex; flex-direction: column; gap: 4px; }
-.filter-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.filter-chip-toggle { font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--muted); background: transparent; }
-.filter-chip-toggle.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
-.filter-chip-toggle.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.filter-sep { width: 6px; }
-.filter-clear { margin-left: 4px; }
+/* All tasks filters: one control per category in the group heading */
+.group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.group-header h4 { margin: 0; }
+.task-filters { display: flex; gap: 6px; align-items: center; }
+.filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.filter-select.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
+.filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: var(--muted); }
 /* Five rows of about 39px with 6px gaps; more scroll. */
 .inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }

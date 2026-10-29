@@ -356,15 +356,15 @@ describe("task filters", () => {
     expect(matchesFilter(t("done", null), NO_FILTER)).toBe(true);
   });
 
-  it("matches any selected value within a dimension and all dimensions together", () => {
-    const f = { statuses: ["todo" as const, "in_progress" as const], priorities: ["critical" as const], recommendedOnly: false };
+  it("requires every filter that's set", () => {
+    const f = { status: "in_progress" as const, priority: "critical" as const, recommendedOnly: false };
     expect(matchesFilter(t("in_progress", "critical"), f)).toBe(true);
     expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
     expect(matchesFilter(t("waiting", "critical"), f)).toBe(false);
   });
 
   it("treats unassessed tasks as unrated, and can require recommended", () => {
-    expect(matchesFilter(t("todo", null), { ...NO_FILTER, priorities: ["unrated"] })).toBe(true);
+    expect(matchesFilter(t("todo", null), { ...NO_FILTER, priority: "unrated" })).toBe(true);
     expect(matchesFilter(t("todo", "low"), { ...NO_FILTER, recommendedOnly: true })).toBe(false);
     expect(matchesFilter(t("todo", "low", true), { ...NO_FILTER, recommendedOnly: true })).toBe(true);
   });

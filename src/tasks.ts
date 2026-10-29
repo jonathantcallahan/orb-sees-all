@@ -170,27 +170,26 @@ export function taskPriority(assessed: Priority | null | undefined, projectPrior
 export type PriorityFilter = Priority | "unrated";
 
 export interface TaskFilter {
-  statuses: TaskStatus[];
-  priorities: PriorityFilter[];
+  /** null means any status. */
+  status: TaskStatus | null;
+  /** null means any priority. */
+  priority: PriorityFilter | null;
   recommendedOnly: boolean;
 }
 
-export const NO_FILTER: TaskFilter = { statuses: [], priorities: [], recommendedOnly: false };
+export const NO_FILTER: TaskFilter = { status: null, priority: null, recommendedOnly: false };
 
 export function isFiltering(f: TaskFilter): boolean {
-  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
+  return f.status !== null || f.priority !== null || f.recommendedOnly;
 }
 
-/**
- * Whether a task passes the filter. Within a dimension any selected value
- * matches; across dimensions all must match. An empty dimension matches all.
- */
+/** Whether a task passes every filter that's set. */
 export function matchesFilter(
   t: { status: TaskStatus; priority: Priority | null; recommended?: boolean },
   f: TaskFilter,
 ): boolean {
-  if (f.statuses.length && !f.statuses.includes(t.status)) return false;
-  if (f.priorities.length && !f.priorities.includes(t.priority ?? "unrated")) return false;
+  if (f.status && t.status !== f.status) return false;
+  if (f.priority && (t.priority ?? "unrated") !== f.priority) return false;
   if (f.recommendedOnly && !t.recommended) return false;
   return true;
 }
