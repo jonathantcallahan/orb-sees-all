@@ -81,6 +81,13 @@ export function fallbackTitle(url: string, kind: LinkKind = linkKind(url)): stri
   return KIND_NAME[kind];
 }
 
+/** Titles that only say where a link lives (a channel, a URL) rather than what it is. */
+function placeOnly(title: string): boolean {
+  const t = title.trim();
+  const channelName = /^#?[a-z0-9][a-z0-9_-]*$/.test(t) && /[#_-]/.test(t);
+  return channelName || /^https?:\/\//.test(t) || /^(DM|Slack|Email|Gmail)$/i.test(t);
+}
+
 const URL_IN_TEXT = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
 
 /**
@@ -95,10 +102,11 @@ export function collectLinks(sources: { url?: string | null; title?: string | nu
     const kind = linkKind(url);
     const existing = byUrl.get(url);
     if (existing) {
-      if (title && existing.title === fallbackTitle(url, kind)) existing.title = title;
+      if (title?.trim() && !placeOnly(title) && existing.title === fallbackTitle(url, kind)) existing.title = title.trim();
       return;
     }
-    byUrl.set(url, { url, kind, title: title?.trim() || fallbackTitle(url, kind) });
+    const given = title?.trim();
+    byUrl.set(url, { url, kind, title: given && !placeOnly(given) ? given : fallbackTitle(url, kind) });
   };
   const [first, ...rest] = sources;
   if (first) add(first.url, first.title);

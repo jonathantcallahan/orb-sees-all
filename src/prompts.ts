@@ -4,6 +4,9 @@ const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 
 /** What counts as a step Claude can do on its own, shared by assessments and plans. */
+/** How every link title should read: what it is, not where it lives. */
+const LINK_TITLE = `Each title is a short, descriptive label of what the link is, two to five words, e.g. "Ben's Q3 numbers ask", "Pricing decision thread", "Export spec doc", "CPS-6931 export ticket". Never the channel name, the document's file name verbatim, or the URL.`;
+
 const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and Unity's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Anything else that sends, files or changes something (email, Jira tickets, docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.`;
 
 /** Shared definition of a task assessment, used by every prompt that produces tasks. */
@@ -185,7 +188,7 @@ Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
 - steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you".
 - open_questions: what's unclear or needs a decision before or during the work. Empty if none.
-- sources: the threads, docs and tickets you relied on.
+- sources: the threads, docs and tickets you relied on. ${LINK_TITLE}
 
 ${READ_ONLY} Don't take any of the steps yourself; only propose them.
 ${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null, "by": "claude"|"you"}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
@@ -278,7 +281,7 @@ Double check it. Dig deeper than the project channel:
 
 verdict: "still_blocking" (nothing resolves it), "resolved" (it was answered, done or delivered somewhere), "partly_resolved" (some of it is done), "not_blocking" (it's real work but nobody is actually waiting on it, or it's the wrong owner), or "unclear" (not enough evidence either way).
 summary: two or three sentences explaining the verdict, naming where you found the answer if it was resolved.
-evidence: the threads, emails, tickets and docs that support the verdict, with links.
+evidence: the threads, emails, tickets and docs that support the verdict, with links. ${LINK_TITLE}
 next_step: if it's still blocking or partly resolved, the single action that would clear it; otherwise null.
 
 ${READ_ONLY}
@@ -309,7 +312,7 @@ verdict: "looks_right", "already_done", "not_needed" (cancelled, superseded or n
 summary: two or three sentences explaining the verdict.
 findings: one entry per check above: check (its short name), finding (what you found, one sentence), ok (true if it passed).
 corrected_description: when it was captured wrong or is missing important context, a corrected two-to-four sentence description of the task as it really stands; otherwise null.
-evidence: the threads, emails, tickets and docs you relied on, with links.
+evidence: the threads, emails, tickets and docs you relied on, with links. ${LINK_TITLE}
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"verdict": "looks_right"|"already_done"|"not_needed"|"captured_wrong"|"duplicate"|"unclear", "summary": string, "findings": [{"check": string, "finding": string, "ok": boolean}], "corrected_description": string|null, "evidence": [{"title": string, "link": string}]}`;

@@ -561,7 +561,7 @@ export function TaskCard({
   };
   const links = collectLinks(
     [
-      { url: task.link },
+      { url: task.link, title: task.requester ? `${task.requester.split(" ")[0]}'s ${task.source === "email" ? "email" : "message"}` : "Original message" },
       ...(plan?.plan.sources ?? []).map((src) => ({ url: src.link, title: src.title })),
       ...(plan?.plan.steps ?? []).map((st) => ({ url: st.link, title: null })),
       ...(check?.evidence ?? []).map((e) => ({ url: e.link, title: e.title })),

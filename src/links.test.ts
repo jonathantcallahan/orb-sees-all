@@ -43,3 +43,15 @@ describe("links", () => {
     expect(links[2].title).toBe("Doc");
   });
 });
+
+describe("link titles", () => {
+  it("replaces titles that only name a channel or URL", () => {
+    const links = collectLinks([
+      { url: "https://unity.slack.com/archives/C1/p1", title: "#tmp-asset-pricing" },
+      { url: "https://unity.slack.com/archives/C1/p2", title: "tmp-asset-pricing" },
+      { url: "https://unity.slack.com/archives/C1/p3", title: "https://unity.slack.com/archives/C1/p3" },
+      { url: "https://unity.slack.com/archives/C1/p4", title: "Pricing decision thread" },
+    ]);
+    expect(links.map((l) => l.title)).toEqual(["Slack thread", "Slack thread", "Slack thread", "Pricing decision thread"]);
+  });
+});
