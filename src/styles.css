@@ -547,3 +547,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Five rows of about 39px with 6px gaps; more scroll. */
 .inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .inbox-item { flex-shrink: 0; }
+
+/* A column title with its "updated" time on the same line */
+.title-line { display: flex; align-items: baseline; gap: 8px; }
+.projects-column > .column-header { flex-wrap: wrap; row-gap: 4px; }

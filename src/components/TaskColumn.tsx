@@ -209,7 +209,7 @@ export function TaskColumn({
     >
       <Inbox replies={adhoc.replies} states={taskStates} drafts={drafts} running={running} onChange={onChange} />
       <header className="column-header">
-        <div>
+        <div className="title-line">
           <h2>Tasks</h2>
           <Updated at={adhoc.refreshed_at} />
         </div>

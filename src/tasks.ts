@@ -202,3 +202,30 @@ export function ago(since: string | null | undefined, now = new Date()): string 
   const a = age(since, now);
   return a && a !== "just now" ? `${a} ago` : a;
 }
+
+export interface ProjectFilter {
+  /** null means any status. */
+  status: ProjectStatus | null;
+  /** null means any priority. */
+  priority: ProjectPriority | null;
+  /** Only projects with a task the Orb recommends today. */
+  recommendedOnly: boolean;
+}
+
+export const NO_PROJECT_FILTER: ProjectFilter = { status: null, priority: null, recommendedOnly: false };
+
+export function isFilteringProjects(f: ProjectFilter): boolean {
+  return f.status !== null || f.priority !== null || f.recommendedOnly;
+}
+
+/** Whether a project passes every filter that's set. */
+export function matchesProjectFilter(
+  p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined; taskIds: string[] },
+  f: ProjectFilter,
+  recommended: Set<string>,
+): boolean {
+  if (f.status && p.status !== f.status) return false;
+  if (f.priority && p.priority !== f.priority) return false;
+  if (f.recommendedOnly && !p.taskIds.some((id) => recommended.has(id))) return false;
+  return true;
+}

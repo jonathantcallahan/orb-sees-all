@@ -5,7 +5,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, NO_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -379,5 +379,21 @@ describe("task filters", () => {
     expect(matchesFilter(t("todo", null), { ...NO_FILTER, priority: "unrated" })).toBe(true);
     expect(matchesFilter(t("todo", "low"), { ...NO_FILTER, recommendedOnly: true })).toBe(false);
     expect(matchesFilter(t("todo", "low", true), { ...NO_FILTER, recommendedOnly: true })).toBe(true);
+  });
+});
+
+describe("project filters", () => {
+  const p = { status: "at_risk" as const, priority: "P0" as const, taskIds: ["t1", "t2"] };
+
+  it("requires every filter that's set", () => {
+    expect(matchesProjectFilter(p, NO_PROJECT_FILTER, new Set())).toBe(true);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, status: "at_risk", priority: "P0" }, new Set())).toBe(true);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priority: "P1" }, new Set())).toBe(false);
+  });
+
+  it("keeps projects with a recommended task when asked", () => {
+    const f = { ...NO_PROJECT_FILTER, recommendedOnly: true };
+    expect(matchesProjectFilter(p, f, new Set(["t2"]))).toBe(true);
+    expect(matchesProjectFilter(p, f, new Set(["other"]))).toBe(false);
   });
 });
