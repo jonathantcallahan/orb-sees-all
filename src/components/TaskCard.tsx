@@ -63,9 +63,7 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
         <ol className="plan-modal-steps">
           {plan.steps.map((step, i) => (
             <li key={i}>
-              <span className="step-circle" aria-hidden>
-                {i + 1}
-              </span>
+              <span className="step-circle" aria-hidden />
               <div>
                 <ExternalLink href={step.link} className="plan-step-title">
                   {step.title}
@@ -291,9 +289,7 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
       <ol className="plan-outline-steps">
         {steps.map((step, i) => (
           <li key={i} className={step.by ? `by-${step.by}` : undefined}>
-            <span className="step-circle" aria-hidden>
-              {i + 1}
-            </span>
+            <span className="step-circle" aria-hidden />
             <span className="small">
               {step.title}
               {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
