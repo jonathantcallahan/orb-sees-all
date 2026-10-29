@@ -496,7 +496,7 @@ export function TaskCard({
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
   const planActions =
-    outlineSteps.length > 0 ? (
+    outlineSteps.length > 0 || planning || (assessment && description) ? (
       <div className="plan-actions">
         {hasClaudeSteps && assessment && (
           <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours">
@@ -509,6 +509,12 @@ export function TaskCard({
               Show plan details
             </button>
           </>
+        )}
+        {/* No steps yet (older assessments didn't list them): plan from here, as on every assessment. */}
+        {outlineSteps.length === 0 && !planning && (
+          <button className="cta-ghost" onClick={() => runPlan()} title="Have Claude plan the steps, marking which it can do">
+            Plan steps
+          </button>
         )}
         {planning && (
           <span className="muted small">
