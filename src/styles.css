@@ -327,3 +327,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
 .today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
 .today-plan.drop { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+
+/* Fog behind everything; the app sits above it. */
+.mist-backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.mist-backdrop canvas { display: block; width: 100%; height: 100%; }
+.topbar, .columns { position: relative; z-index: 1; }
+.topbar { background: color-mix(in srgb, var(--surface) 75%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
