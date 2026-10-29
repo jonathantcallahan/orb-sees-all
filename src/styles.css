@@ -485,4 +485,5 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .project .untrack .link-button.muted { color: var(--muted); }
 
 /* The RACI letter matches the P0-P4 badge beside it. */
-.project .badge.raci { padding: 0 5px; border-radius: 4px; font-size: 11px; }
+.project .badge.raci,
+.p-badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; vertical-align: 1px; }
