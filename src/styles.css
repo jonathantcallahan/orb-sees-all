@@ -514,7 +514,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
 
-.motto { color: var(--muted); font-size: 13px; margin-left: 2px; }
+.motto { color: var(--muted); font-size: 17px; margin-left: 2px; }
 
 /* All tasks filters: one control per category in the group heading */
 .group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
