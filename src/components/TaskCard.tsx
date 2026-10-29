@@ -149,6 +149,9 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const DISMISS = "dismiss";
 
+/** Drag-and-drop payload type for moving tasks in and out of Today. */
+export const TASK_DRAG_TYPE = "application/x-orb-task";
+
 function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
   return (
     <select
@@ -228,7 +231,6 @@ export function TaskCard({
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
-  const planned = !!task.todayOn && (task.todayOn === localDate(new Date()) || !!task.carriedFrom);
   // Inbox tasks come with a follow-up; for the rest, the plan's first step is the next action.
   const firstStep = plan?.plan.steps[0];
   const followUp: FollowUp | null = task.follow_up ?? (firstStep ? { kind: "do", action: firstStep.title } : null);
@@ -250,7 +252,14 @@ export function TaskCard({
   };
 
   return (
-    <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`}>
+    <article
+      className={`card task-card status-${task.status}${task.done ? " done" : ""}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(TASK_DRAG_TYPE, task.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+    >
       <header className="task-card-header">
         <ExternalLink href={task.link} className="task-title">
           {task.title}
@@ -275,16 +284,6 @@ export function TaskCard({
           </span>
         )}
         {task.carriedFrom && <span className="carried">{carriedLabel(task.carriedFrom)}</span>}
-        <button
-          className={`today-toggle${planned ? " on" : ""}`}
-          title={planned ? "Remove from today" : "Plan this for today"}
-          onClick={async () => {
-            await setTaskState(task.id, { todayOn: planned ? null : localDate(new Date()) });
-            onChange();
-          }}
-        >
-          {planned ? "☀ Today ×" : "☀ Today"}
-        </button>
       </div>
 
       {editing ? (

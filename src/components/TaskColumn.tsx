@@ -5,7 +5,8 @@ import type { ManualAssessment } from "../schema";
 import { applyTaskState, formatMinutes, splitToday, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { RefreshButton, Updated } from "./common";
-import { TaskCard, type CardTask } from "./TaskCard";
+import { setTaskState } from "../db";
+import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
 function Group({
   title,
@@ -69,6 +70,7 @@ export function TaskColumn({
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const shared = { plans, assessments, running, onChange };
   const today = localDate(new Date());
 
@@ -114,7 +116,7 @@ export function TaskColumn({
     (t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null)?.estimate_minutes ?? 0;
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
   const todayGroup = (
-    <section className={`today-plan${planned.length ? "" : " empty"}`}>
+    <section className={`today-plan${planned.length ? "" : " empty"}${dropTarget === "today" ? " drop" : ""}`}>
       <h4>
         ☀ Today
         {planned.length > 0 && (
@@ -124,7 +126,7 @@ export function TaskColumn({
         )}
       </h4>
       {planned.length === 0 ? (
-        <p className="muted small">Pick tasks for today with their ☀ Today button.</p>
+        <p className="muted small">Drag tasks here to plan your day.</p>
       ) : (
         planned.map((t) => (
           <TaskCard
@@ -141,8 +143,34 @@ export function TaskColumn({
     </section>
   );
 
+  // Dropping a task on Today plans it; dropping it anywhere else in the column unplans it.
+  const zoneOf = (e: React.DragEvent) => ((e.target as HTMLElement).closest(".today-plan") ? "today" : "rest");
+  const plannedIds = new Set(planned.map((t) => t.id));
+
   return (
-    <section className="column">
+    <section
+      className={`column${dropTarget === "rest" ? " drop" : ""}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDropTarget(zoneOf(e));
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null);
+      }}
+      onDrop={async (e) => {
+        const id = e.dataTransfer.getData(TASK_DRAG_TYPE);
+        setDropTarget(null);
+        if (!id) return;
+        e.preventDefault();
+        const toToday = zoneOf(e) === "today";
+        if (toToday === plannedIds.has(id)) return;
+        await setTaskState(id, { todayOn: toToday ? today : null });
+        onChange();
+      }}
+      onDragEnd={() => setDropTarget(null)}
+    >
       <header className="column-header">
         <div>
           <h2>Tasks</h2>

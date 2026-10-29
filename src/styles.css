@@ -314,12 +314,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-select.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
 .carried { font-size: 11px; color: var(--amber); }
-.today-toggle { margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--muted); visibility: hidden; }
-.task-card:hover .today-toggle, .today-toggle.on { visibility: visible; }
-.today-toggle.on { color: var(--amber); border-color: var(--amber); }
 
 /* Today's plan at the top of Tasks */
 .today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 8%, transparent); }
 .today-plan.empty { background: none; padding: 0 10px; }
 .today-plan h4 { margin: 0; color: var(--amber); display: flex; justify-content: space-between; }
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+
+/* Drag and drop into and out of Today */
+.task-card[draggable="true"] { cursor: grab; }
+.task-card[draggable="true"]:active { cursor: grabbing; }
+.today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
+.today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
+.today-plan.drop { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }

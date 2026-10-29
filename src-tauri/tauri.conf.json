@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "title": "Orb Sees All", "width": 1440, "height": 920, "minWidth": 1000, "minHeight": 600 }
+      { "label": "main", "title": "Orb Sees All", "width": 1440, "height": 920, "minWidth": 1000, "minHeight": 600, "dragDropEnabled": false }
     ],
     "security": { "csp": null }
   },
