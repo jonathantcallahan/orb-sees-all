@@ -1,13 +1,32 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { setTaskState } from "../db";
 import type { ViewTask } from "../tasks";
 
-export function ExternalLink({ href, children, className }: { href?: string | null; children: ReactNode; className?: string }) {
-  if (!href) return <span className={className}>{children}</span>;
+export function ExternalLink({
+  href,
+  children,
+  className,
+  title,
+  style,
+}: {
+  href?: string | null;
+  children: ReactNode;
+  className?: string;
+  title?: string;
+  style?: CSSProperties;
+}) {
+  if (!href)
+    return (
+      <span className={className} title={title} style={style}>
+        {children}
+      </span>
+    );
   return (
     <a
       className={className}
+      title={title}
+      style={style}
       href={href}
       onClick={(e) => {
         e.preventDefault();

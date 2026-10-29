@@ -119,8 +119,8 @@ export function TaskColumn({
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
   const todayGroup = (
     <section className={`today-plan${planned.length ? "" : " empty"}${dropTarget === "today" ? " drop" : ""}`}>
-      <h4>
-        ☀ Today
+      <h4 className="today-heading">
+        Today's tasks
         {planned.length > 0 && (
           <span className="today-total">
             {planned.filter((t) => !t.done).length} open{remaining > 0 && ` · ~${formatMinutes(remaining)}`}

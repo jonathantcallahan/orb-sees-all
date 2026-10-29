@@ -97,7 +97,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .columns {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(210px, 0.68fr) minmax(420px, 1.6fr) minmax(420px, 1.6fr);
+  grid-template-columns: minmax(260px, 1fr) minmax(420px, 1.6fr) minmax(420px, 1.6fr);
   gap: 16px;
   padding: 16px 20px;
   overflow: hidden;
@@ -153,11 +153,6 @@ summary { cursor: pointer; }
 
 .add-task input { width: 100%; padding: 8px 10px; }
 
-.timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.event-time { font-size: 12px; color: var(--muted); }
-.event-title { display: block; margin: 2px 0; }
-.event.past { opacity: 0.55; }
-.event.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: flex; justify-content: center; align-items: flex-start; padding: 40px; }
 .modal { background: var(--bg); border-radius: 12px; padding: 20px; width: min(1000px, 100%); max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
@@ -318,6 +313,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 8%, transparent); }
 .today-plan.empty { background: none; padding: 0 10px; }
 .today-plan h4 { margin: 0; color: var(--amber); display: flex; justify-content: space-between; }
+.today-plan .today-heading { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 
 /* Drag and drop into and out of Today */
@@ -338,3 +334,33 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Project name with its Slack channel underneath */
 .project-channel { display: block; font-size: 11px; color: var(--accent); }
+
+/* Day grid: meetings at their real times, with a line at the current time */
+.day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
+.day-grid .hour { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
+.hour-label { position: absolute; top: -7px; left: 0; width: 38px; font-size: 10px; color: var(--muted); background: var(--bg); padding-right: 4px; text-align: right; }
+.day-grid .events { position: absolute; top: 0; bottom: 0; left: 44px; right: 0; }
+.event-block {
+  position: absolute;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text);
+}
+.event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--accent) 26%, var(--surface)); }
+.event-block.past { opacity: 0.5; }
+.event-block.current { border-left-color: var(--red); }
+.event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-when, .event-prep { color: var(--muted); font-size: 10px; }
+.event-prep { color: var(--amber); }
+.now-line { position: absolute; left: 40px; right: 0; height: 0; border-top: 2px solid var(--red); z-index: 2; pointer-events: none; }
+.now-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.prep-meeting { margin-bottom: 8px; }
+.prep-for { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.prep-for .chip { margin-left: 4px; }

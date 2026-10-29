@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { dayRange, layoutDay, nowOffset } from "./calendar";
 import { JobQueue } from "./jobs/queue";
 import { nameFromChannel, projectName } from "./projects";
 import { windowStart } from "./prompts";
@@ -218,5 +219,36 @@ describe("project names", () => {
   it("prefers the name Claude gave the project", () => {
     expect(projectName({ name: "tmp-ucs-googleadmob", snapshot: null })).toBe("Ucs googleadmob");
     expect(projectName({ name: "tmp-ucs-googleadmob", snapshot: { name: "UCS Google AdMob" } as never })).toBe("UCS Google AdMob");
+  });
+});
+
+describe("calendar layout", () => {
+  // Local times on 29 Oct 2026.
+  const at = (h: number, m = 0) => new Date(2026, 9, 29, h, m).toISOString();
+  const ev = (id: string, s: [number, number], e: [number, number]) => ({ id, start: at(...s), end: at(...e) });
+
+  it("shows 8am to 6pm, stretched for early or late meetings", () => {
+    expect(dayRange([ev("a", [10, 0], [11, 0])])).toEqual({ startHour: 8, endHour: 18 });
+    expect(dayRange([ev("a", [7, 30], [8, 0]), ev("b", [18, 0], [19, 15])])).toEqual({ startHour: 7, endHour: 20 });
+  });
+
+  it("positions events by time and splits overlapping ones into columns", () => {
+    const range = { startHour: 8, endHour: 18 };
+    const placed = layoutDay(
+      [ev("a", [9, 0], [10, 0]), ev("b", [9, 30], [10, 30]), ev("c", [11, 0], [11, 30]), ev("d", [9, 0], [9, 30])],
+      range,
+    );
+    const byId = Object.fromEntries(placed.map((p) => [p.event.id, p]));
+    expect(byId.a).toMatchObject({ top: 60, height: 60, columns: 2 });
+    expect(byId.b.column).not.toBe(byId.a.column);
+    // d ends before b starts, so it can reuse a column.
+    expect(byId.d.columns).toBe(2);
+    expect(byId.c).toMatchObject({ top: 180, height: 30, column: 0, columns: 1 });
+  });
+
+  it("places the now line only inside the range", () => {
+    const range = { startHour: 8, endHour: 18 };
+    expect(nowOffset(new Date(2026, 9, 29, 13, 15), range)).toBe(315);
+    expect(nowOffset(new Date(2026, 9, 29, 7, 0), range)).toBeNull();
   });
 });
