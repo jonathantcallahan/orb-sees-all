@@ -402,6 +402,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
 .reading .reading-title { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
+.reading .reading-title + .updates, .updates + .link-button { margin-top: 2px; }
+.reading h4.reading-title:not(:first-child) { margin-top: 8px; }
 .reading-text { margin: 0; font-style: italic; line-height: 1.55; }
 .updates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .update-label { color: var(--muted); margin-right: 6px; }

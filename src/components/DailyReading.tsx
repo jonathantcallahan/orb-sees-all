@@ -64,7 +64,7 @@ export function DailyReading({
 
       {updates.length > 0 && (
         <>
-          <h4>Updates</h4>
+          <h4 className="reading-title">Updates</h4>
           <ul className="updates small">
             {shown.map((u) => (
               <li key={u.key} title={u.date ?? undefined}>
