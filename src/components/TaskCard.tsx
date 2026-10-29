@@ -655,7 +655,7 @@ export function TaskCard({
       )}
 
       {!description && !editing && linksToggle && <div className="description-actions small">{linksToggle}</div>}
-      {linksOpen && <LinkChips links={links} layout="list" />}
+      {linksOpen && <LinkChips links={links} />}
 
       {assessment ? (
         <AssessmentView
