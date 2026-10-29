@@ -60,12 +60,20 @@ varying vec3 vViewPos;
 varying float vDisp;
 ${NOISE}
 void main() {
-  // Calm: slow, low rolling swells. Stressed: high-frequency ridged noise, i.e. spikes.
-  float flow = uTime * mix(0.25, 0.9, uStress);
-  float swell = snoise(normal * 1.4 + flow);
+  // Calm: slow, irregular swells. Stressed: high-frequency ridged noise, i.e. spikes.
+  float flow = uTime * mix(0.125, 0.9, uStress);
+  // Three wave trains crossing the sphere in different directions and speeds.
+  // Noise bends each one's phase and a slow noise field varies their height, so
+  // the surface rolls like a choppy sea rather than wobbling uniformly.
+  vec3 n = normal;
+  float swell =
+      0.5 * sin(dot(n, vec3(0.80, 0.30, 0.52)) * 5.0 + flow * 2.0 + 2.0 * snoise(n * 1.3 + flow * 0.5))
+    + 0.3 * sin(dot(n, vec3(-0.40, 0.88, 0.25)) * 7.0 - flow * 1.6 + 2.0 * snoise(n * 1.7 - flow * 0.4))
+    + 0.2 * sin(dot(n, vec3(0.20, -0.50, 0.84)) * 9.0 + flow * 2.6 + 2.0 * snoise(n * 2.3 + flow * 0.3));
+  swell *= 0.55 + 0.45 * snoise(n * 0.9 + flow * 0.2);
   float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, uStress) + flow * 1.3));
   float spikes = pow(ridge, mix(2.0, 6.0, uStress));
-  float disp = mix(0.10 * swell, 0.12 * swell + 0.55 * spikes, uStress);
+  float disp = mix(0.13 * swell, 0.12 * swell + 0.55 * spikes, uStress);
   vec3 pos = position + normal * disp;
   vPos = pos;
   vDisp = disp;
@@ -84,7 +92,7 @@ varying float vDisp;
 ${NOISE}
 void main() {
   // Two layers of noise, one warping the other, give the swirling bands.
-  float t = uTime * mix(0.15, 0.6, uStress);
+  float t = uTime * mix(0.075, 0.6, uStress);
   float warp = snoise(vPos * 1.2 + vec3(t, -t, t * 0.5));
   float swirl = 0.5 + 0.5 * snoise(vPos * 2.0 + warp * 1.5 - t);
 
@@ -104,7 +112,7 @@ void main() {
 `;
 
 /** Rotation speed in radians per second at stress 0 and 1. */
-const SPIN = { calm: 0.2, stressed: 2.2 };
+const SPIN = { calm: 0.1, stressed: 2.2 };
 
 export function PressureBlob({ pressure }: { pressure: Pressure }) {
   const mount = useRef<HTMLDivElement>(null);
