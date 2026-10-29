@@ -207,5 +207,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .mist-fade-darken {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, rgb(8 8 16 / 0) 0%, rgb(8 8 16 / 0.15) 35%, rgb(8 8 16 / 0.55) 70%, rgb(8 8 16 / 0.85) 100%);
+  --mist-tone: color-mix(in srgb, var(--bg) 55%, #08080f);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, var(--mist-tone) 15%, transparent) 35%,
+    color-mix(in srgb, var(--mist-tone) 55%, transparent) 70%,
+    color-mix(in srgb, var(--mist-tone) 85%, transparent) 100%
+  );
 }

@@ -12,6 +12,7 @@ void main() {
 const FRAGMENT = /* glsl */ `
 uniform float uTime;
 uniform vec2 uResolution;
+uniform vec3 uBg;
 varying vec2 vUv;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -48,13 +49,16 @@ void main() {
   float alpha = pow(edge, 0.7) * (0.75 + 0.25 * d) * smoothstep(0.0, 0.3, depth + 0.1);
   alpha = clamp(alpha + smoothstep(0.45, 1.0, depth) * 0.5, 0.0, 0.98);
 
-  vec3 color = mix(vec3(0.015, 0.015, 0.03), vec3(0.10, 0.08, 0.15), d * d + length(q) * 0.1);
+  // Shades of the page background, slightly cooler, so the mist reads as part of the page.
+  vec3 deep = mix(uBg, vec3(0.03, 0.03, 0.06), 0.45);
+  vec3 wisp = mix(uBg, vec3(0.20, 0.18, 0.28), 0.15);
+  vec3 color = mix(deep, wisp, d * d + length(q) * 0.1);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
 
 /** Blur radii (px) of the stacked layers, lightest at the top of the fade zone. */
-const BLUR_STEPS = [0.5, 1, 2, 4, 8, 16];
+const BLUR_STEPS = [0.25, 0.5, 1, 2, 4, 8];
 
 /**
  * One layer of a progressive blur: each layer blurs what's behind it by a fixed
@@ -73,7 +77,7 @@ function blurLayer(px: number, i: number): CSSProperties {
   };
 }
 
-/** A swirling band of dark mist along the bottom of the window. Purely decorative; clicks pass through. */
+/** A swirling band of mist, a deeper shade of the background, along the bottom of the window. Purely decorative; clicks pass through. */
 export function Mist() {
   const mount = useRef<HTMLDivElement>(null);
 
@@ -83,7 +87,19 @@ export function Mist() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     el.appendChild(renderer.domElement);
 
-    const uniforms = { uTime: { value: 0 }, uResolution: { value: new THREE.Vector2(1, 1) } };
+    const uniforms = {
+      uTime: { value: 0 },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      uBg: { value: new THREE.Color() },
+    };
+    // Track the theme's background color, including light/dark switches.
+    const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const readBg = () => {
+      const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+      uniforms.uBg.value.set(bg || "#f5f5f4").convertLinearToSRGB();
+    };
+    readBg();
+    scheme.addEventListener("change", readBg);
     const material = new THREE.ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -119,6 +135,7 @@ export function Mist() {
 
     return () => {
       cancelAnimationFrame(frame);
+      scheme.removeEventListener("change", readBg);
       observer.disconnect();
       geometry.dispose();
       material.dispose();
