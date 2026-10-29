@@ -1,8 +1,9 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, assessPrompt, calendarPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, draftReplyPrompt, readingPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, CalendarDay, Discovery, ManualAssessmentBatch, ProjectSnapshot, TaskPlan } from "../schema";
+import { AdhocSnapshot, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, TaskPlan, type QuickReply } from "../schema";
+import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 
@@ -118,14 +119,17 @@ export async function refreshAdhoc(): Promise<void> {
         prompt: adhocPrompt({
           userId: uid,
           previous: previous.tasks,
+          previousReplies: previous.replies,
           lastRefreshedAt: previous.refreshed_at,
           now: startedAt,
         }),
         schema: AdhocSnapshot,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
         model: await model(),
+        // Skimming wider channels for news takes more reads than mentions alone.
+        maxTurns: 70,
       });
-      await db.saveAdhoc({ tasks: data.tasks, refreshed_at: startedAt.toISOString() });
+      await db.saveAdhoc({ tasks: data.tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
       return { value: undefined, costUsd };
     }),
   );
@@ -187,6 +191,49 @@ export function assessPendingTasks(): Promise<void> {
   });
 }
 
+/** Has Claude draft a reply to an Inbox message, for the user to copy. Never sends anything. */
+export function draftReply(reply: QuickReply): Promise<void> {
+  return queue.run(`draft:${reply.id}`, () =>
+    logged("draft", reply.id, async () => {
+      const { data, costUsd } = await runClaude({
+        prompt: draftReplyPrompt(reply, await db.getSetting("slack_user_id")),
+        schema: ReplyDraft,
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
+        model: await model(),
+        maxTurns: 15,
+      });
+      await db.saveReplyDraft(reply.id, data.draft, costUsd);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/** Writes today's reading from what the app already knows; no connector reads. */
+export function refreshReading(): Promise<void> {
+  return queue.run("reading", () =>
+    logged("reading", null, async () => {
+      const today = localDate(new Date());
+      const [projects, adhoc, manual, assessments, states, calendar] = await Promise.all([
+        db.listProjects(),
+        db.getAdhoc(),
+        db.listManualTasks(),
+        db.getAssessments(),
+        db.getTaskStates(),
+        db.getCalendarDay(today),
+      ]);
+      const { data, costUsd } = await runClaude({
+        prompt: readingPrompt(readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today })),
+        schema: DailyReading,
+        tools: [],
+        model: await model(),
+        maxTurns: 2,
+      });
+      await db.saveReading({ date: today, text: data.reading, created_at: new Date().toISOString() });
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
 export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };
 
 /** Asks Claude to research a task and propose a plan; the latest plan per task is kept. */
@@ -223,6 +270,8 @@ export function refreshAll(): Promise<void> {
         assessPendingTasks(),
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
+      // The reading summarizes everything above, so it goes last.
+      await refreshReading().catch(() => {});
     },
     false,
   );

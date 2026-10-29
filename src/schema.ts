@@ -84,6 +84,8 @@ export const ProjectSnapshot = z.object({
   priority: z.object({ level: Priority, reason: z.string() }),
   blockers: z.array(Blocker),
   my_tasks: z.array(ProjectTask),
+  /** Notable developments since the previous snapshot. */
+  recent_updates: z.array(z.object({ summary: z.string(), date: z.string().nullish(), link: z.string().nullish() })).default([]),
   summary: z.string(),
   last_activity: z.string().nullish(),
 });
@@ -104,7 +106,38 @@ export const AdhocTask = Task.extend({
 });
 export type AdhocTask = z.infer<typeof AdhocTask>;
 
-export const AdhocSnapshot = z.object({ tasks: z.array(AdhocTask) });
+/** A message waiting on a reply that takes a few minutes at most: too small to be a task. */
+export const QuickReply = z.object({
+  /** Slack permalink, or "gmail:<thread id>". */
+  id: z.string(),
+  source: z.enum(["slack", "email"]),
+  from: z.string(),
+  /** What they asked, in a few words. */
+  summary: z.string(),
+  /** Where it was sent: "#channel", "DM", or the email subject. */
+  where: z.string().nullish(),
+  received: z.string().nullish(),
+  link: z.string().nullish(),
+});
+export type QuickReply = z.infer<typeof QuickReply>;
+
+/** Something worth knowing from outside the user's project channels. */
+export const NewsItem = z.object({
+  id: z.string(),
+  headline: z.string(),
+  detail: z.string().nullish(),
+  /** "#channel" or "Email: <subject>". */
+  where: z.string().nullish(),
+  date: z.string().nullish(),
+  link: z.string().nullish(),
+});
+export type NewsItem = z.infer<typeof NewsItem>;
+
+export const AdhocSnapshot = z.object({
+  tasks: z.array(AdhocTask),
+  replies: z.array(QuickReply).default([]),
+  news: z.array(NewsItem).default([]),
+});
 export type AdhocSnapshot = z.infer<typeof AdhocSnapshot>;
 
 export const PrepItem = z.object({
@@ -133,6 +166,10 @@ export const CalendarDay = z.object({
   events: z.array(CalendarEvent),
 });
 export type CalendarDay = z.infer<typeof CalendarDay>;
+
+export const ReplyDraft = z.object({ draft: z.string() });
+
+export const DailyReading = z.object({ reading: z.string() });
 
 /** Claude's assessment of one of the user's own tasks, with a drafted description if they gave none. */
 export const ManualAssessment = Assessment.extend({

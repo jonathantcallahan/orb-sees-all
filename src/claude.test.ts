@@ -71,6 +71,12 @@ describe("runClaude", () => {
     expect(JSON.parse(args[args.indexOf("--settings") + 1]).env).toEqual({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" });
   });
 
+  it("leaves out --allowedTools when a job needs no tools", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
+    expect(run.mock.calls[0][1]).not.toContain("--allowedTools");
+  });
+
   it("gives up after the retry fails", async () => {
     const run: CliRunner = async () => reply("{}");
     await expect(runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run)).rejects.toThrow(/schema/);

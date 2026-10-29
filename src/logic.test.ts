@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dayRange, layoutDay, nowOffset } from "./calendar";
 import { JobQueue } from "./jobs/queue";
 import { nameFromChannel, projectName } from "./projects";
+import { readingContext } from "./reading";
 import { windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
 import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, type TaskState } from "./tasks";
@@ -264,5 +265,34 @@ describe("calendar layout", () => {
     const range = { startHour: 8, endHour: 18 };
     expect(nowOffset(new Date(2026, 9, 29, 13, 15), range)).toBe(315);
     expect(nowOffset(new Date(2026, 9, 29, 7, 0), range)).toBeNull();
+  });
+});
+
+describe("readingContext", () => {
+  it("keeps open work, marks today's plan and splits blockers by owner", () => {
+    const snapshot = {
+      name: "Asset refunds", description: "", status: "at_risk" as const, status_reason: "late codes",
+      raci: { role: "accountable" as const, reason: "" }, priority: { level: "high" as const, reason: "" },
+      blockers: [
+        { id: "b1", what: "Reason codes", owners: [{ name: "Alex", is_me: false }] },
+        { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },
+      ],
+      my_tasks: [{ id: "t1", title: "Confirm QA decisions", assessment: { automation: "human" as const, suggestion: "", needs_details: false, priority: "critical" as const, estimate_minutes: 20 } }],
+      recent_updates: [{ summary: "Dev-complete moved to Nov 17" }],
+      summary: "",
+    };
+    const ctx = readingContext({
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, repo_state: null, last_error: null }],
+      adhoc: { tasks: [], replies: [{ id: "r1", source: "slack", from: "Kim", summary: "OK to ship?" }], news: [{ id: "n1", headline: "Reorg announced" }], refreshed_at: null },
+      manual: [{ id: "m1", title: "Done thing", description: null, project_id: null, created_at: "" }],
+      assessments: new Map(),
+      states: new Map([["t1", { status: "todo", dismissed: false, todayOn: "2026-10-29", done: false }], ["m1", { status: "done", dismissed: false, todayOn: null, done: true }]]),
+      calendar: null,
+      today: "2026-10-29",
+    });
+    expect(ctx.projects[0]).toMatchObject({ name: "Asset refunds", blocked_on_me: ["QA decisions"], blocked_on_others: ["Reason codes (Alex)"] });
+    expect(ctx.tasks).toEqual([{ title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
+    expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
+    expect(ctx.news).toEqual(["Reorg announced"]);
   });
 });

@@ -1,4 +1,4 @@
-import type { AdhocTask, ProjectSnapshot, RepoState } from "./schema";
+import type { AdhocTask, ProjectSnapshot, QuickReply, RepoState } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
@@ -70,6 +70,7 @@ Fields:
 - priority: strategic priority to the business, not urgency. "critical" = exec-visible, revenue or legal/compliance impact, or a hard external date; "high" = a committed roadmap item or a dependency for other teams; "medium" = planned work with moderate impact; "low" = exploratory, nice-to-have, or social. reason: one short sentence.
 - blockers: the tasks currently holding the project up (an unanswered question, a missing decision, review, ticket, or deliverable). what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
 - my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
+- recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with the date (YYYY-MM-DD) and the message permalink. Empty when nothing notable happened.
 - summary: three to five sentences on where the project stands.
 - last_activity: YYYY-MM-DD of the latest message.
 
@@ -80,12 +81,14 @@ ${JSON_ONLY} Shape:
  "priority": {"level": "critical"|"high"|"medium"|"low", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
+ "recent_updates": [{"summary": string, "date": "YYYY-MM-DD"|null, "link": string|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
 }
 
 export interface AdhocPromptInput {
   userId: string;
   previous: AdhocTask[];
+  previousReplies: QuickReply[];
   lastRefreshedAt: string | null;
   now: Date;
 }
@@ -97,12 +100,20 @@ export function adhocPrompt(p: AdhocPromptInput): string {
 Currently open tasks from the last refresh (${p.lastRefreshedAt ?? "never"}):
 ${JSON.stringify(p.previous)}
 
+Messages waiting on a quick reply from the last refresh:
+${JSON.stringify(p.previousReplies)}
+
 Look for new items since ${since.date}:
 - Slack: slack_search_public_and_private with "<@${p.userId}> after:${since.date}" and with "is:dm after:${since.date}". Skip anything in a tmp-* channel. A task is a direct request of the user, a question awaiting their answer, or something they said they'd do.
 - Gmail: search_threads with "in:inbox after:${since.date.replaceAll("-", "/")} -category:promotions -category:social -category:updates". A task is a thread where a person (not an automated sender) asks the user to reply, decide, review, or do something, and the user hasn't replied after that ask.
+- News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")} from:unity3d.com" or company-wide lists). Keep only what matters to someone working on the Asset Store, commerce and package distribution: launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
-Return the full list of tasks that are still open: carried-over ones that aren't resolved, plus new ones.
+Sort what's still open into two lists:
+- replies: messages that only need a quick reply the user could write in a few minutes without research, e.g. a yes/no, a date, a quick opinion, an acknowledgement, a pointer to a doc they know. Only messages addressed to the user that they haven't answered.
+- tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply.
+
+Return the full lists of what's still open: carried-over items that aren't resolved, plus new ones.
 - id: for Slack, the message permalink; for email, "gmail:<thread id>". Reuse the existing id for carried-over tasks.
 - title: a short imperative, e.g. "Reply to Ana about the Q4 refund numbers".
 - requester: the person's name. due: YYYY-MM-DD or null. link: permalink or Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>".
@@ -110,8 +121,13 @@ Return the full list of tasks that are still open: carried-over ones that aren't
 - follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
 - ${ASSESSMENT_GUIDE}
 
+For each news item: id is the message permalink or "gmail:<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is YYYY-MM-DD. At most eight, most important first.
+
+For each reply:
+- id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: YYYY-MM-DD. link: as for tasks.
+
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": "YYYY-MM-DD"|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": "YYYY-MM-DD"|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {
@@ -181,4 +197,27 @@ Return exactly one entry per task, with the same id.
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low"}]}`;
+}
+
+export function draftReplyPrompt(r: QuickReply, userId: string | null): string {
+  return `Draft a reply for the user${userId ? ` (Slack user ${userId})` : ""} to this message:
+${JSON.stringify(r)}
+
+Read the thread first (slack_read_thread or the channel for Slack, get_thread for email) so you answer what was actually asked, in context. Look at a few of the user's own recent messages in the same place to match their tone and length.
+
+Write the reply as the user would send it: short, direct, friendly, in their voice. For Slack, no greeting or sign-off unless they use one; for email, a brief greeting and sign-off with their first name. Where the answer depends on something only the user knows, leave a clearly marked blank like [date] rather than guessing.
+
+${READ_ONLY} Only draft; never send.
+${JSON_ONLY} Shape: {"draft": string}`;
+}
+
+export function readingPrompt(context: unknown): string {
+  return `You are the Orb, who sees all of the user's work. Write today's reading: one paragraph (60 to 110 words) proposing what the user should focus on today and why.
+
+Base it only on this snapshot of their day: projects with status, priority, their role, blockers and recent updates; their open tasks with priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
+${JSON.stringify(context)}
+
+Name the one or two things that matter most (a blocker only they can clear, a critical task, a deadline, a meeting that needs prep), say roughly how to spend the open time between meetings, and note what can wait. If a project update or piece of news changes today's priorities, weave it in; the full list of updates is shown separately, so don't recite it. Be concrete: use project, task and meeting names. Voice: calm and lightly oracular, but practical; no lists, no headings, no emoji.
+
+${JSON_ONLY} Shape: {"reading": string}`;
 }

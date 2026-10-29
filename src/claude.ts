@@ -88,8 +88,8 @@ async function callOnce(
     opts.model ?? "opus",
     "--max-turns",
     String(opts.maxTurns ?? 40),
-    "--allowedTools",
-    ...opts.tools,
+    // A job with no tools (like the daily reading) must not pass a bare --allowedTools.
+    ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
   ];

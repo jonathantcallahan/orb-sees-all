@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, CalendarDay, ManualAssessment, ProjectSnapshot, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, CalendarDay, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -99,11 +99,43 @@ export async function setSetting(key: string, value: string) {
 
 export interface AdhocStore {
   tasks: AdhocTask[];
+  replies: QuickReply[];
+  news: NewsItem[];
   refreshed_at: string | null;
 }
 
 export async function getAdhoc(): Promise<AdhocStore> {
-  return json<AdhocStore>(await getSetting("adhoc")) ?? { tasks: [], refreshed_at: null };
+  const stored = json<Partial<AdhocStore>>(await getSetting("adhoc"));
+  return { tasks: [], replies: [], news: [], refreshed_at: null, ...stored };
+}
+
+// ---- daily reading and reply drafts
+
+export interface StoredReading {
+  /** YYYY-MM-DD the reading is for. */
+  date: string;
+  text: string;
+  created_at: string;
+}
+
+export async function getReading(): Promise<StoredReading | null> {
+  return json<StoredReading>(await getSetting("daily_reading"));
+}
+
+export async function saveReading(reading: StoredReading) {
+  await setSetting("daily_reading", JSON.stringify(reading));
+}
+
+export async function getReplyDrafts(): Promise<Map<string, { text: string; created_at: string }>> {
+  const rows = await (await db()).select<{ reply_id: string; text: string; created_at: string }[]>("SELECT * FROM reply_drafts");
+  return new Map(rows.map((r) => [r.reply_id, { text: r.text, created_at: r.created_at }]));
+}
+
+export async function saveReplyDraft(replyId: string, text: string, costUsd: number) {
+  await (await db()).execute(
+    "INSERT INTO reply_drafts (reply_id, text, created_at, cost_usd) VALUES ($1, $2, $3, $4) ON CONFLICT(reply_id) DO UPDATE SET text = excluded.text, created_at = excluded.created_at, cost_usd = excluded.cost_usd",
+    [replyId, text, nowIso(), costUsd],
+  );
 }
 
 export async function saveAdhoc(store: AdhocStore) {
