@@ -491,13 +491,6 @@ export function TaskCard({
             <button className="cta-ghost" onClick={() => setShowPlan(true)}>
               Show plan details
             </button>
-            <button
-              className="link-button small more-link"
-              onClick={() => runPlan()}
-              title="Plan again; the new plan marks which steps Claude can do on its own"
-            >
-              Regenerate
-            </button>
           </>
         )}
         {planning && (
