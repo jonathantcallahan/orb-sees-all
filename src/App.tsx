@@ -43,6 +43,12 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   useScheduler();
 
+  // Pick up anything written to the database while the window was in the background.
+  useEffect(() => {
+    window.addEventListener("focus", reload);
+    return () => window.removeEventListener("focus", reload);
+  }, [reload]);
+
   if (!data) return <div className="loading">Loading…</div>;
 
   const projects = data.projects
