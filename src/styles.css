@@ -188,12 +188,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .description.placeholder { cursor: text; font-style: italic; }
 .description:not(.placeholder) { cursor: default; }
 .follow-up { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); }
-.follow-up-kind { font-size: 12px; color: var(--muted); flex-shrink: 0; }
-.follow-up.reply .follow-up-kind, .follow-up.share .follow-up-kind { color: var(--accent); }
-.follow-up.decide .follow-up-kind { color: var(--red); }
-.follow-up.review .follow-up-kind, .follow-up.schedule .follow-up-kind { color: var(--amber); }
-.follow-up.do .follow-up-kind { color: var(--green); }
-.task-card-actions { display: flex; gap: 12px; }
+.follow-up-kind, .task-card-actions { display: flex; gap: 12px; }
 .link-button { border: none; background: none; padding: 0; color: var(--accent); }
 .link-button:hover:not(:disabled) { text-decoration: underline; }
 .plan { border-top: 1px solid var(--border); padding-top: 8px; }
@@ -293,10 +288,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Claude's assessment of a task */
 .automation { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
-.automation-kind { font-size: 11px; flex-shrink: 0; }
-.automation.human .automation-kind { color: var(--muted); }
-.automation.assisted .automation-kind { color: var(--accent); }
-.automation.claude .automation-kind { color: var(--green); }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .needs-details .link-button { color: inherit; text-decoration: underline; }
 
