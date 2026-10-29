@@ -335,7 +335,7 @@ export function TaskCard({
       {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due || task.recommended) && (
         <div className="muted small task-meta">
           {task.recommended && <RecommendedBadge />}
-          {task.project && <span className="badge project-badge">{task.project.name}</span>}
+          {task.project && <span className="task-project">{task.project.name}</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}
           {task.due && <span className="due">due {task.due}</span>}

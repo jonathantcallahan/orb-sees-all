@@ -265,7 +265,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .project-meta { display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
 
 /* Tasks column: project badges and the project filter */
-.project-badge { color: var(--accent); }
+.task-project { color: var(--muted); }
 .badge.priority.blocking { color: white; background: var(--red); }
 .filter-chip {
   display: flex;
