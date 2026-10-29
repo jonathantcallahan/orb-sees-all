@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { Mist, MistBackdrop } from "./components/Mist";
+import { Mist } from "./components/Mist";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
@@ -71,7 +71,6 @@ export default function App() {
 
   return (
     <div className="app">
-      <MistBackdrop />
       <header className="topbar">
         <div className="row">
           <h1>{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</h1>

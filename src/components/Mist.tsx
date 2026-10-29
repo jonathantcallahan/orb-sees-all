@@ -152,34 +152,6 @@ function useShaderLayer(mount: React.RefObject<HTMLDivElement | null>, fragmentS
   }, [mount, fragmentShader, maxPixelRatio]);
 }
 
-const BACKDROP_FRAGMENT = /* glsl */ `
-uniform float uTime;
-uniform vec2 uResolution;
-uniform vec3 uBg;
-varying vec2 vUv;
-${NOISE}
-void main() {
-  vec2 p = vUv * vec2(uResolution.x / uResolution.y, 1.0) * 1.4;
-  float t = uTime * 0.035;
-  vec2 q = vec2(fbm(p + vec2(t, t * 0.3)), fbm(p + vec2(4.1, 7.3) - t * 0.8));
-  vec2 r = vec2(fbm(p + 2.5 * q + vec2(2.4, 1.1) - t), fbm(p + 2.5 * q + vec2(6.7, 3.9) + t * 0.6));
-  float d = smoothstep(0.25, 0.8, fbm(p + 2.0 * r));
-
-  // Wisps a little darker than the page in light mode, a little lighter in dark mode.
-  float light = step(0.5, dot(uBg, vec3(0.299, 0.587, 0.114)));
-  vec3 fog = mix(uBg + vec3(0.11, 0.11, 0.14), uBg * vec3(0.78, 0.78, 0.84), light);
-  gl_FragColor = vec4(mix(uBg, fog, d), 1.0);
-}
-`;
-
-/** Slow fog filling the window behind everything. */
-export function MistBackdrop() {
-  const mount = useRef<HTMLDivElement>(null);
-  // Fog is soft anyway, so render at half resolution to keep a full-window shader cheap.
-  useShaderLayer(mount, BACKDROP_FRAGMENT, 0.5);
-  return <div ref={mount} className="mist-backdrop" aria-hidden />;
-}
-
 /** A swirling band of mist, a deeper shade of the background, along the bottom of the window. Purely decorative; clicks pass through. */
 export function Mist() {
   const mount = useRef<HTMLDivElement>(null);
