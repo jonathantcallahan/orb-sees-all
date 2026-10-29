@@ -310,6 +310,12 @@ export function TaskCard({
         <ExternalLink href={task.link} className="task-title">
           {task.title}
         </ExternalLink>
+        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
+        {assessment?.estimate_minutes != null && (
+          <span className="estimate" title="Claude's estimate of your hands-on time">
+            ~{formatMinutes(assessment.estimate_minutes)}
+          </span>
+        )}
         <StatusSelect task={task} onChange={onChange} />
       </header>
 
@@ -324,15 +330,11 @@ export function TaskCard({
         </div>
       )}
 
-      <div className="task-controls">
-        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
-        {assessment?.estimate_minutes != null && (
-          <span className="estimate" title="Claude's estimate of your hands-on time">
-            ~{formatMinutes(assessment.estimate_minutes)}
-          </span>
-        )}
-        {task.carriedFrom && <span className="carried">{carriedLabel(task.carriedFrom)}</span>}
-      </div>
+      {task.carriedFrom && (
+        <div className="task-controls">
+          <span className="carried">{carriedLabel(task.carriedFrom)}</span>
+        </div>
+      )}
 
       {editing ? (
         <DescriptionEditor

@@ -176,6 +176,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card.done { opacity: 0.6; }
 .task-card.done .task-title { text-decoration: line-through; }
 .task-card-header { display: flex; gap: 8px; align-items: flex-start; }
+.task-card-header .badge, .task-card-header .estimate { flex-shrink: 0; margin-top: 2px; }
 .task-card-header input { margin-top: 3px; }
 .task-card-header .task-title { flex: 1; }
 .task-card .dismiss { visibility: hidden; }
