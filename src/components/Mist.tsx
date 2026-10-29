@@ -52,13 +52,30 @@ void main() {
   float alpha = pow(edge, 0.7) * (0.75 + 0.25 * d) * smoothstep(0.0, 0.3, depth + 0.1);
   alpha = clamp(alpha + smoothstep(0.45, 1.0, depth) * 0.35, 0.0, 0.85) * 0.8;
 
-  // Shades of the page background, slightly cooler, so the mist reads as part of the page.
-  vec3 deep = mix(uBg, vec3(0.03, 0.03, 0.06), 0.3);
-  vec3 wisp = mix(uBg, vec3(0.20, 0.18, 0.28), 0.1);
+  // The orb's mood, blended into the page background: icy blue when calm,
+  // violet when restless, ember when stressed.
+  vec3 moodDeep = mix(vec3(0.36, 0.46, 0.92), vec3(0.50, 0.30, 0.80), smoothstep(0.0, 0.5, uStress));
+  moodDeep = mix(moodDeep, vec3(0.80, 0.22, 0.12), smoothstep(0.5, 1.0, uStress));
+  vec3 moodWisp = mix(vec3(0.70, 0.80, 1.00), vec3(0.80, 0.70, 1.00), smoothstep(0.0, 0.5, uStress));
+  moodWisp = mix(moodWisp, vec3(1.00, 0.62, 0.30), smoothstep(0.5, 1.0, uStress));
+  vec3 deep = mix(uBg, moodDeep, 0.35);
+  vec3 wisp = mix(uBg, moodWisp, 0.22);
   vec3 color = mix(deep, wisp, d * d + length(q) * 0.1);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
+
+/** The deep mist color for a stress level, matching the shader's moodDeep, for the CSS fade. */
+function moodTint(level: number): string {
+  const mix = (a: number[], b: number[], t: number) => a.map((v, i) => v + (b[i] - v) * t);
+  const smooth = (e0: number, e1: number, x: number) => {
+    const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+    return t * t * (3 - 2 * t);
+  };
+  let c = mix([0.36, 0.46, 0.92], [0.5, 0.3, 0.8], smooth(0, 0.5, level));
+  c = mix(c, [0.8, 0.22, 0.12], smooth(0.5, 1, level));
+  return `rgb(${c.map((v) => Math.round(v * 255)).join(" ")})`;
+}
 
 /** Blur radii (px) of the stacked layers, lightest at the top of the fade zone. */
 const BLUR_STEPS = [0.25, 0.5, 1, 2, 4, 8];
@@ -85,7 +102,13 @@ function blurLayer(px: number, i: number): CSSProperties {
  * with uTime, uResolution and uBg (the theme background, tracking light/dark
  * switches) as uniforms. Pauses with the page, like any requestAnimationFrame loop.
  */
-function useShaderLayer(mount: React.RefObject<HTMLDivElement | null>, fragmentShader: string, maxPixelRatio: number) {
+function useShaderLayer(
+  mount: React.RefObject<HTMLDivElement | null>,
+  fragmentShader: string,
+  maxPixelRatio: number,
+  /** Target stress (0-1); uStress eases toward it like the orb does. */
+  stress: React.RefObject<number>,
+) {
   useEffect(() => {
     const el = mount.current!;
     const renderer = new THREE.WebGLRenderer({ alpha: true, premultipliedAlpha: true });
@@ -94,6 +117,7 @@ function useShaderLayer(mount: React.RefObject<HTMLDivElement | null>, fragmentS
 
     const uniforms = {
       uTime: { value: 0 },
+      uStress: { value: stress.current },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uBg: { value: new THREE.Color() },
     };
@@ -133,7 +157,9 @@ function useShaderLayer(mount: React.RefObject<HTMLDivElement | null>, fragmentS
     const clock = new THREE.Clock();
     let frame = 0;
     const tick = () => {
-      uniforms.uTime.value += Math.min(clock.getDelta(), 0.1) * motion;
+      const dt = Math.min(clock.getDelta(), 0.1);
+      uniforms.uTime.value += dt * motion;
+      uniforms.uStress.value += (stress.current - uniforms.uStress.value) * Math.min(dt * 1.2, 1);
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
     };
@@ -149,17 +175,19 @@ function useShaderLayer(mount: React.RefObject<HTMLDivElement | null>, fragmentS
       renderer.dispose();
       el.removeChild(renderer.domElement);
     };
-  }, [mount, fragmentShader, maxPixelRatio]);
+  }, [mount, fragmentShader, maxPixelRatio, stress]);
 }
 
-/** A swirling band of mist, a deeper shade of the background, along the bottom of the window. Purely decorative; clicks pass through. */
-export function Mist() {
+/** A swirling band of mist tinted by the orb's mood, along the bottom of the window. Purely decorative; clicks pass through. */
+export function Mist({ level }: { level: number }) {
   const mount = useRef<HTMLDivElement>(null);
-  useShaderLayer(mount, FRAGMENT, 1.5);
+  const stress = useRef(level);
+  stress.current = level;
+  useShaderLayer(mount, FRAGMENT, 1.5, stress);
 
   return (
     <>
-      <div className="mist-fade" aria-hidden>
+      <div className="mist-fade" aria-hidden style={{ "--mist-mood": moodTint(level) } as CSSProperties}>
         {BLUR_STEPS.map((px, i) => (
           <div key={px} className="mist-fade-layer" style={blurLayer(px, i)} />
         ))}

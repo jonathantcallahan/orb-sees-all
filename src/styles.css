@@ -220,7 +220,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .mist-fade-darken {
   position: absolute;
   inset: 0;
-  --mist-tone: color-mix(in srgb, var(--bg) 55%, #08080f);
+  --mist-tone: color-mix(in srgb, var(--bg) 60%, var(--mist-mood, #08080f));
   background: linear-gradient(
     to bottom,
     transparent 0%,

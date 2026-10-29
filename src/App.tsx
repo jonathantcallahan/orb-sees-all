@@ -133,7 +133,7 @@ export default function App() {
         />
       </main>
 
-      <Mist />
+      <Mist level={load.level} />
 
       {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>
