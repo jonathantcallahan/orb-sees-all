@@ -327,3 +327,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
 .today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
 .today-plan.drop { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+
+/* Tasks outside Today: one row until clicked */
+.task-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; }
+.task-row .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.task-row.done { opacity: 0.6; }
+.task-row.done .task-title { text-decoration: line-through; }
+.task-row .badge, .task-row .estimate { flex-shrink: 0; }
+.badge.priority.medium { color: var(--muted); }
+.badge.priority.low { color: var(--muted); opacity: 0.8; }

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
-import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment } from "../schema";
+import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, Priority } from "../schema";
 import { formatMinutes, type TaskStatus } from "../tasks";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
@@ -140,6 +140,13 @@ function DescriptionEditor({ task, initial, onDone }: { task: CardTask; initial:
   );
 }
 
+const PRIORITY_LABEL: Record<Priority, string> = {
+  critical: "Critical",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
 const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "To do",
   in_progress: "In progress",
@@ -213,6 +220,7 @@ export function TaskCard({
   planning,
   manualAssessment,
   assessing,
+  compact = false,
   onChange,
 }: {
   task: CardTask;
@@ -222,9 +230,12 @@ export function TaskCard({
   manualAssessment?: ManualAssessment;
   /** An assessment run is in progress and this task has none yet. */
   assessing: boolean;
+  /** Show a one-line row (title, priority, estimate, status) until clicked. */
+  compact?: boolean;
   onChange: () => void;
 }) {
   const [showPlan, setShowPlan] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
@@ -251,15 +262,34 @@ export function TaskCard({
     }).catch(() => {});
   };
 
+  const drag = {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData(TASK_DRAG_TYPE, task.id);
+      e.dataTransfer.effectAllowed = "move";
+    },
+  };
+
+  if (compact && !expanded) {
+    return (
+      <article
+        className={`card task-row status-${task.status}${task.done ? " done" : ""}`}
+        {...drag}
+        onClick={(e) => {
+          if (!(e.target as HTMLElement).closest("select")) setExpanded(true);
+        }}
+        title="Click for details"
+      >
+        <span className="task-title">{task.title}</span>
+        {assessment?.priority && <span className={`badge priority ${assessment.priority}`}>{PRIORITY_LABEL[assessment.priority]}</span>}
+        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
+        <StatusSelect task={task} onChange={onChange} />
+      </article>
+    );
+  }
+
   return (
-    <article
-      className={`card task-card status-${task.status}${task.done ? " done" : ""}`}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(TASK_DRAG_TYPE, task.id);
-        e.dataTransfer.effectAllowed = "move";
-      }}
-    >
+    <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`} {...drag}>
       <header className="task-card-header">
         <ExternalLink href={task.link} className="task-title">
           {task.title}
@@ -278,6 +308,7 @@ export function TaskCard({
       )}
 
       <div className="task-controls">
+        {assessment?.priority && <span className={`badge priority ${assessment.priority}`}>{PRIORITY_LABEL[assessment.priority]}</span>}
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Claude's estimate of your hands-on time">
             ~{formatMinutes(assessment.estimate_minutes)}
@@ -324,6 +355,11 @@ export function TaskCard({
       )}
 
       <footer className="task-card-actions">
+        {compact && (
+          <button className="link-button small muted" onClick={() => setExpanded(false)}>
+            Collapse
+          </button>
+        )}
         {planning ? (
           <span className="muted small">
             <span className="spin">↻</span> Claude is researching a plan…

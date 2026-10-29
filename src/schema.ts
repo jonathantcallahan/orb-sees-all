@@ -24,6 +24,9 @@ export const FollowUp = z.object({
 });
 export type FollowUp = z.infer<typeof FollowUp>;
 
+export const Priority = z.enum(["critical", "high", "medium", "low"]);
+export type Priority = z.infer<typeof Priority>;
+
 /** Who can get a task done: the user alone, the user with Claude's help, or Claude. */
 export const Automation = z.enum(["human", "assisted", "claude"]);
 export type Automation = z.infer<typeof Automation>;
@@ -38,15 +41,13 @@ export const Assessment = z.object({
   details_question: z.string().nullish(),
   /** Expected hands-on time for the user, in minutes. */
   estimate_minutes: z.number().nullish(),
+  priority: Priority.nullish(),
 });
 export type Assessment = z.infer<typeof Assessment>;
 
 /** The user's inferred role on a project. */
 export const Raci = z.enum(["responsible", "accountable", "consulted", "informed"]);
 export type Raci = z.infer<typeof Raci>;
-
-export const Priority = z.enum(["critical", "high", "medium", "low"]);
-export type Priority = z.infer<typeof Priority>;
 
 export const Person = z.object({
   name: z.string(),

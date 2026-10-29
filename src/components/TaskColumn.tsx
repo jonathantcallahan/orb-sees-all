@@ -37,6 +37,7 @@ function Group({
           planning={running.includes(`plan:${t.id}`)}
           manualAssessment={assessments.get(t.id)}
           assessing={running.includes("assess")}
+          compact
           onChange={onChange}
         />
       ))}
