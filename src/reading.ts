@@ -1,7 +1,7 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
-import type { CalendarDay, ManualAssessment } from "./schema";
+import type { Blocker, CalendarDay, ManualAssessment } from "./schema";
 import { projectName } from "./projects";
-import { stateOf, taskPriority, type TaskState } from "./tasks";
+import { blockerKey, stateOf, taskPriority, type TaskState } from "./tasks";
 
 export interface ReadingInput {
   projects: Project[];
@@ -23,11 +23,12 @@ export function readingContext(r: ReadingInput) {
     return !st.done && !st.dismissed;
   };
   const planned = (id: string) => stateOf(r.states, id).todayOn === r.today;
+  const openBlockers = (list: Blocker[] = []) => list.filter((b) => !stateOf(r.states, blockerKey(b.id)).dismissed);
 
   const projects = r.projects
     .filter((p) => !p.hidden && p.snapshot)
     .map((p) => {
-      const s = p.snapshot!;
+      const s = { ...p.snapshot!, blockers: openBlockers(p.snapshot!.blockers) };
       return {
         name: projectName(p),
         status: s.status,

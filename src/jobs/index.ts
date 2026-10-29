@@ -1,8 +1,8 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, assessPrompt, calendarPrompt, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -245,6 +245,23 @@ export function draftReply(reply: QuickReply): Promise<void> {
         maxTurns: 15,
       });
       await db.saveReplyDraft(reply.id, data.draft, costUsd);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/** Has Claude dig into whether a blocker is real and whether it was already solved somewhere else. */
+export function checkBlocker(projectName: string, channelId: string, blocker: Blocker): Promise<void> {
+  return track(`check:${blocker.id}`, (status) =>
+    logged("check", blocker.id, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: checkBlockerPrompt({ projectName, channelId, blocker, userId: await db.getSetting("slack_user_id") }),
+        schema: BlockerCheck,
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead, ...TOOLS.driveRead],
+        model: await model(),
+      });
+      await db.saveBlockerCheck(blocker.id, data);
       return { value: undefined, costUsd };
     }),
   );

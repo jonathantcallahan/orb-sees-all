@@ -193,3 +193,12 @@ export function matchesFilter(
   if (f.recommendedOnly && !t.recommended) return false;
   return true;
 }
+
+/** Task-state key for a blocker the user marked resolved. */
+export const blockerKey = (blockerId: string) => `blocker:${blockerId}`;
+
+/** "3d ago", "5h ago" or "just now". */
+export function ago(since: string | null | undefined, now = new Date()): string | null {
+  const a = age(since, now);
+  return a && a !== "just now" ? `${a} ago` : a;
+}

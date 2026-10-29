@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { updateProjectConfig, type Project, type Reminder } from "../db";
-import { refreshProject, sendReminder } from "../jobs";
+import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
+import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions } from "../prompts";
-import type { Blocker, ProjectStatus, PullRequest, Raci } from "../schema";
-import { age, applyTaskState, type TaskState } from "../tasks";
+import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
+import { age, ago, applyTaskState, blockerKey, stateOf, type TaskState } from "../tasks";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton, Updated } from "./common";
@@ -66,6 +66,61 @@ function Untrack({ name, onConfirm }: { name: string; onConfirm: () => Promise<v
   );
 }
 
+const VERDICT_LABEL: Record<BlockerCheck["verdict"], string> = {
+  still_blocking: "Still blocking",
+  resolved: "Resolved elsewhere",
+  partly_resolved: "Partly resolved",
+  not_blocking: "Not really a blocker",
+  unclear: "Unclear",
+};
+
+/** "Double check": Claude looks for whether a blocker is real and already solved elsewhere. */
+function CheckAction({ checking, onCheck }: { checking: string | undefined; onCheck: () => void }) {
+  if (checking) {
+    return (
+      <span className="muted small checking" title={checking}>
+        <span className="spin">✦</span> {checking}…
+      </span>
+    );
+  }
+  return (
+    <button className="link-button small work-action" onClick={onCheck}>
+      Double check
+    </button>
+  );
+}
+
+function CheckResult({ check, onResolve, onDismiss }: { check: StoredBlockerCheck; onResolve: () => void; onDismiss: () => void }) {
+  const clearable = check.verdict === "resolved" || check.verdict === "not_blocking";
+  return (
+    <div className={`check-result ${check.verdict}`} onClick={(e) => e.stopPropagation()}>
+      <div className="check-head small">
+        <span className="check-verdict">{VERDICT_LABEL[check.verdict]}</span>
+        <span className="muted">checked {ago(check.at)}</span>
+      </div>
+      <p className="small">{check.summary}</p>
+      {check.next_step && <p className="small muted">Next: {check.next_step}</p>}
+      <div className="check-actions small">
+        {check.evidence.map((e) => (
+          <ExternalLink key={e.link} href={e.link} className="chip">
+            {e.title}
+          </ExternalLink>
+        ))}
+        <span className="check-buttons">
+          {clearable && (
+            <button className="link-button small" onClick={onResolve}>
+              Mark resolved
+            </button>
+          )}
+          <button className="link-button small muted" onClick={onDismiss}>
+            Hide
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** "Send reminder" on a blocker someone else owns: an editable nudge posted to the project channel. */
 function RemindAction({
   item,
@@ -89,7 +144,7 @@ function RemindAction({
       <span className="remind">
         {reminder && (
           <ExternalLink href={reminder.link} className="muted small reminded" title={new Date(reminder.at).toLocaleString()}>
-            Reminded {age(reminder.at)} ago
+            Reminded {ago(reminder.at)}
           </ExternalLink>
         )}
         <button
@@ -143,13 +198,22 @@ function WorkItem({
   label,
   kind,
   remind,
+  check,
 }: {
   item: Blocker;
   label: string;
   kind: "blocker" | "active";
   /** For blockers: the channel to post a reminder in, and any reminder already sent. */
   remind?: { channelId: string; reminder: Reminder | undefined; onSent: () => void };
+  /** For blockers: run a double check, and its latest result. */
+  check?: {
+    result: StoredBlockerCheck | undefined;
+    onCheck: () => void;
+    onResolve: () => void;
+  };
 }) {
+  const checking = useJobStatus(`check:${item.id}`);
+  const [hideResult, setHideResult] = useState(false);
   return (
     <li className={`work-item ${kind}`}>
       <div className="owners">
@@ -160,11 +224,27 @@ function WorkItem({
           </span>
         ))}
         {item.since && <span className="age">{age(item.since)}</span>}
-        {remind && <RemindAction item={item} {...remind} />}
+        {(check || remind) && (
+          <span className="work-actions">
+            {check && (
+              <CheckAction
+                checking={checking}
+                onCheck={() => {
+                  setHideResult(false);
+                  check.onCheck();
+                }}
+              />
+            )}
+            {remind && <RemindAction item={item} {...remind} />}
+          </span>
+        )}
       </div>
       <ExternalLink href={item.link} className="what">
         {item.what}
       </ExternalLink>
+      {check?.result && !hideResult && !checking && (
+        <CheckResult check={check.result} onResolve={check.onResolve} onDismiss={() => setHideResult(true)} />
+      )}
     </li>
   );
 }
@@ -181,6 +261,7 @@ export function ProjectCard({
   taskStates,
   selected,
   reminders,
+  blockerChecks,
   onSelect,
   onChange,
 }: {
@@ -191,6 +272,8 @@ export function ProjectCard({
   selected: boolean;
   /** Reminders already sent about blockers, by blocker id. */
   reminders: Record<string, Reminder>;
+  /** Double checks of blockers, by blocker id. */
+  blockerChecks: Record<string, StoredBlockerCheck>;
   onSelect: () => void;
   onChange: () => void;
 }) {
@@ -198,6 +281,8 @@ export function ProjectCard({
   const status = s?.status;
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
+  // Blockers the user marked resolved after a double check stay hidden.
+  const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
   const openTasks = applyTaskState(s?.my_tasks ?? [], taskStates).filter((t) => !t.done).length;
 
   return (
@@ -247,15 +332,23 @@ export function ProjectCard({
 
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
-          {s.blockers?.length > 0 && (
+          {blockers.length > 0 && (
             <ul className="work-items">
-              {s.blockers.map((b) => (
+              {blockers.map((b) => (
                 <WorkItem
                   key={b.id}
                   item={b}
                   label="Blocked by"
                   kind="blocker"
                   remind={{ channelId: project.channel_id, reminder: reminders[b.id], onSent: onChange }}
+                  check={{
+                    result: blockerChecks[b.id],
+                    onCheck: () => checkBlocker(projectName(project), project.channel_id, b).then(onChange, () => {}),
+                    onResolve: async () => {
+                      await setTaskState(blockerKey(b.id), { dismissed: true });
+                      onChange();
+                    },
+                  }}
                 />
               ))}
             </ul>

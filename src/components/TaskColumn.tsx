@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment } from "../schema";
-import { applyTaskState, formatMinutes, isFiltering, matchesFilter, splitToday, taskPriority, type TaskState } from "../tasks";
+import { applyTaskState, blockerKey, formatMinutes, isFiltering, matchesFilter, splitToday, stateOf, taskPriority, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
@@ -118,7 +118,9 @@ export function TaskColumn({
   // The user's tasks from project snapshots: blockers first, then by due date.
   const fromProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
     const blocking = new Set(
-      (p.snapshot?.blockers ?? []).filter((b) => b.owners.some((o) => o.is_me)).map((b) => b.id),
+      (p.snapshot?.blockers ?? [])
+        .filter((b) => b.owners.some((o) => o.is_me) && !stateOf(taskStates, blockerKey(b.id)).dismissed)
+        .map((b) => b.id),
     );
     return (p.snapshot?.my_tasks ?? []).map((t) => ({
       ...t,

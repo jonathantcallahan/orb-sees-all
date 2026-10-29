@@ -178,6 +178,16 @@ export type CalendarDay = z.infer<typeof CalendarDay>;
 
 export const ReplyDraft = z.object({ draft: z.string() });
 
+/** Claude's second look at a blocker: is it real, and was it already solved somewhere else? */
+export const BlockerCheck = z.object({
+  verdict: z.enum(["still_blocking", "resolved", "partly_resolved", "not_blocking", "unclear"]),
+  summary: z.string(),
+  evidence: z.array(z.object({ title: z.string(), link: z.string() })).default([]),
+  /** The next step that would clear it, if it's still blocking. */
+  next_step: z.string().nullish(),
+});
+export type BlockerCheck = z.infer<typeof BlockerCheck>;
+
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
 export const DailyReading = z.object({

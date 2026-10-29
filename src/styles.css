@@ -502,9 +502,20 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .p-badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; vertical-align: 1px; }
 
 /* Send a reminder to whoever owns a blocker */
-.remind { margin-left: auto; display: inline-flex; gap: 8px; align-items: baseline; }
-.remind-open { visibility: hidden; }
-.work-item:hover .remind-open { visibility: visible; }
+.work-actions { margin-left: auto; display: inline-flex; gap: 10px; align-items: baseline; }
+.remind { display: inline-flex; gap: 8px; align-items: baseline; }
+.remind-open, .work-action { visibility: hidden; }
+.work-item:hover .remind-open, .work-item:hover .work-action { visibility: visible; }
+.checking { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Result of a blocker double check */
+.check-result { margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); display: flex; flex-direction: column; gap: 3px; }
+.check-result p { margin: 0; }
+.check-head { display: flex; justify-content: space-between; gap: 8px; }
+.check-verdict { color: var(--text); }
+.check-result.resolved .check-verdict, .check-result.not_blocking .check-verdict { color: var(--green); }
+.check-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.check-buttons { margin-left: auto; display: flex; gap: 10px; }
 .reminded { font-size: 11px; }
 .remind-composer { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
 .remind-composer textarea { font-size: 12px; }

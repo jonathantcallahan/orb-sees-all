@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, CalendarDay, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, BlockerCheck, CalendarDay, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -126,6 +126,21 @@ export async function getReading(): Promise<StoredReading | null> {
 
 export async function saveReading(reading: StoredReading) {
   await setSetting("daily_reading", JSON.stringify(reading));
+}
+
+export interface StoredBlockerCheck extends BlockerCheck {
+  at: string;
+}
+
+/** Double checks of blockers, keyed by blocker id. */
+export async function getBlockerChecks(): Promise<Record<string, StoredBlockerCheck>> {
+  return json<Record<string, StoredBlockerCheck>>(await getSetting("blocker_checks")) ?? {};
+}
+
+export async function saveBlockerCheck(blockerId: string, check: BlockerCheck) {
+  const all = await getBlockerChecks();
+  all[blockerId] = { ...check, at: new Date().toISOString() };
+  await setSetting("blocker_checks", JSON.stringify(all));
 }
 
 export interface Reminder {

@@ -309,6 +309,18 @@ describe("readingContext", () => {
     });
     expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
+
+    // A blocker marked resolved after a double check drops out.
+    const after = readingContext({
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, repo_state: null, last_error: null }],
+      adhoc: { tasks: [], replies: [], news: [], refreshed_at: null },
+      manual: [],
+      assessments: new Map(),
+      states: new Map([["blocker:b1", { status: "todo", dismissed: true, todayOn: null, done: false }]]),
+      calendar: null,
+      today: "2026-10-29",
+    });
+    expect(after.projects[0].blocked_on_others).toEqual([]);
     expect(ctx.news).toEqual(["Reorg announced"]);
   });
 });

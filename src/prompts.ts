@@ -1,4 +1,4 @@
-import type { AdhocTask, ProjectSnapshot, QuickReply, RepoState } from "./schema";
+import type { AdhocTask, Blocker, ProjectSnapshot, QuickReply, RepoState } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
@@ -248,4 +248,29 @@ ${text}
 MESSAGE>>>
 
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+}
+
+export interface CheckBlockerInput {
+  projectName: string;
+  channelId: string;
+  blocker: Blocker;
+  userId: string | null;
+}
+
+export function checkBlockerPrompt(p: CheckBlockerInput): string {
+  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}a product manager on Unity's Asset Store) has this item listed as blocking the "${p.projectName}" project (Slack channel ${p.channelId}):
+${JSON.stringify(p.blocker)}
+
+Double check it. Dig deeper than the project channel:
+1. Read the message that raised it and its thread (the link), and the latest messages in ${p.channelId}.
+2. Search for anything that resolved it elsewhere: Slack across channels and DMs (slack_search_public_and_private, using the key terms and the owners' names, since the date it was raised), email (search_threads), Jira (jira_search for related tickets and their status) and Google Drive (search_files for a doc it asked for).
+3. Decide whether it's accurate: is someone really unable to proceed until it's done, and is the named owner the right person?
+
+verdict: "still_blocking" (nothing resolves it), "resolved" (it was answered, done or delivered somewhere), "partly_resolved" (some of it is done), "not_blocking" (it's real work but nobody is actually waiting on it, or it's the wrong owner), or "unclear" (not enough evidence either way).
+summary: two or three sentences explaining the verdict, naming where you found the answer if it was resolved.
+evidence: the threads, emails, tickets and docs that support the verdict, with links.
+next_step: if it's still blocking or partly resolved, the single action that would clear it; otherwise null.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"verdict": "still_blocking"|"resolved"|"partly_resolved"|"not_blocking"|"unclear", "summary": string, "evidence": [{"title": string, "link": string}], "next_step": string|null}`;
 }
