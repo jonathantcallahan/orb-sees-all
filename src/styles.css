@@ -187,7 +187,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .description { margin: 0; white-space: pre-wrap; }
 .description.placeholder { cursor: text; font-style: italic; }
 .description:not(.placeholder) { cursor: default; }
-.follow-up { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); }
+.follow-up { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); }
 .follow-up-kind { font-size: 12px; color: var(--muted); flex-shrink: 0; }
 .follow-up.reply .follow-up-kind, .follow-up.share .follow-up-kind { color: var(--accent); }
 .follow-up.decide .follow-up-kind { color: var(--red); }
@@ -292,7 +292,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .add-description { align-self: flex-start; font-style: italic; }
 
 /* Claude's assessment of a task */
-.automation { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
+.automation { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
 .automation-kind { font-size: 11px; flex-shrink: 0; }
 .automation.human .automation-kind { color: var(--muted); }
 .automation.assisted .automation-kind { color: var(--accent); }
