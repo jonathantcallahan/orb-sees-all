@@ -75,7 +75,7 @@ function CheckAction({ checking, onCheck }: { checking: string | undefined; onCh
     );
   }
   return (
-    <button className="link-button small work-action" onClick={onCheck}>
+    <button className="link-button small more-link work-action" onClick={onCheck}>
       Double check
     </button>
   );
@@ -235,9 +235,7 @@ function WorkItem({
           </span>
         )}
       </div>
-      <ExternalLink href={item.link} className="what">
-        {item.what}
-      </ExternalLink>
+      <span className="what">{item.what}</span>
       {check?.result && !hideResult && !checking && (
         <CheckResult check={check.result} onResolve={check.onResolve} onDismiss={() => setHideResult(true)} />
       )}
