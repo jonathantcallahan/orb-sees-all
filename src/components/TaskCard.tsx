@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useLayoutEffect, useRef, useState } from "react";
-import { claudeSessionUrl, sessionPrompt } from "../openInClaude";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment, ProjectPriority } from "../schema";
@@ -211,7 +211,29 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
   claude: "Claude can do it",
 };
 
-function AssessmentView({ assessment, onAddDetails }: { assessment: Assessment; onAddDetails?: () => void }) {
+/** The single next action ("Reply: …", "Do: …"). */
+function NextAction({ followUp, label }: { followUp: FollowUp; label: string }) {
+  return (
+    <div className={`follow-up ${followUp.kind}`}>
+      <span className="follow-up-kind">{label}</span>
+      <span className="small">{followUp.action}</span>
+    </div>
+  );
+}
+
+function AssessmentView({
+  assessment,
+  next,
+  onAddDetails,
+  onStart,
+}: {
+  assessment: Assessment;
+  /** The next action, shown inside the assessment. */
+  next?: ReactNode;
+  onAddDetails?: () => void;
+  /** Approve Claude's approach and start on it; offered when Claude can help or do it. */
+  onStart?: () => void;
+}) {
   return (
     <>
       {assessment.needs_details && (
@@ -227,6 +249,16 @@ function AssessmentView({ assessment, onAddDetails }: { assessment: Assessment; 
       <div className={`automation ${assessment.automation}`}>
         <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
         <span className="small">{assessment.suggestion}</span>
+        {next}
+        {onStart && (
+          <button
+            className="link-button small approve-start"
+            onClick={onStart}
+            title="Mark this in progress and open a Claude Code session to start on it"
+          >
+            Approve & start
+          </button>
+        )}
       </div>
     </>
   );
@@ -270,6 +302,18 @@ export function TaskCard({
     const prompt = sessionPrompt(
       { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
       plan.plan,
+    );
+    openUrl(claudeSessionUrl(prompt, task.repoFolder));
+  };
+  const approveAndStart = async () => {
+    if (!assessment) return;
+    await setTaskState(task.id, { status: "in_progress" });
+    onChange();
+    const prompt = startPrompt(
+      { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      assessment,
+      followUp,
+      plan?.plan ?? null,
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
@@ -368,21 +412,22 @@ export function TaskCard({
       )}
 
       {assessment ? (
-        <AssessmentView assessment={assessment} onAddDetails={manual && !editing ? () => setEditing(true) : undefined} />
+        <AssessmentView
+          assessment={assessment}
+          next={followUp && <NextAction followUp={followUp} label={task.follow_up ? FOLLOW_UP_LABEL[followUp.kind] : "Next"} />}
+          onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
+          onStart={assessment.automation !== "human" ? approveAndStart : undefined}
+        />
       ) : (
-        manual &&
-        assessing && (
-          <div className="muted small">
-            <span className="spin">✦</span> Claude is reviewing this task…
-          </div>
-        )
-      )}
-
-      {followUp && (
-        <div className={`follow-up ${followUp.kind}`}>
-          <span className="follow-up-kind">{task.follow_up ? FOLLOW_UP_LABEL[followUp.kind] : "Next"}</span>
-          <span className="small">{followUp.action}</span>
-        </div>
+        <>
+          {manual && assessing && (
+            <div className="muted small">
+              <span className="spin">✦</span> Claude is reviewing this task…
+            </div>
+          )}
+          {/* No assessment to nest it in yet. */}
+          {followUp && <NextAction followUp={followUp} label={task.follow_up ? FOLLOW_UP_LABEL[followUp.kind] : "Next"} />}
+        </>
       )}
 
       <footer className="task-card-actions">

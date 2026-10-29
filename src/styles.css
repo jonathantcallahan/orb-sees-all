@@ -546,3 +546,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .work-tab { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; padding: 0; font-size: 12px; color: var(--muted); }
 .work-tab:hover, .work-tab.open { color: var(--text); }
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
+/* The next action nested inside the assessment, and the button to start on it */
+.automation .follow-up { margin-top: 4px; background: var(--grey-bg); }
+.approve-start { align-self: flex-end; margin-top: 2px; }
