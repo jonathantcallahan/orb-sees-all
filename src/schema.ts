@@ -121,6 +121,8 @@ export const CalendarEvent = z.object({
   end: z.string(),
   attendees: z.array(z.string()),
   link: z.string().nullish(),
+  /** Google Meet, Zoom or Teams URL for joining the call. */
+  video_link: z.string().nullish(),
   related_project: z.string().nullish(),
   prep: z.array(PrepItem),
 });

@@ -129,9 +129,10 @@ export function calendarPrompt(p: CalendarPromptInput): string {
 
 - id: the calendar event id. Prep id: "<event id>#<short-kebab-slug>", stable for the same prep item.
 - start and end: ISO 8601 with offset. attendees: display names (not the user), at most 8. link: the event's htmlLink.
+- video_link: the URL to join the call: the event's Google Meet link (hangoutLink or conferenceData), or a Zoom, Teams or other meeting URL from the location or description. null when there's no call.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": string, "start": string, "end": string, "attendees": [string], "link": string|null, "related_project": string|null, "prep": [{"id": string, "title": string, "link": string|null}]}]}`;
+${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": string, "start": string, "end": string, "attendees": [string], "link": string|null, "video_link": string|null, "related_project": string|null, "prep": [{"id": string, "title": string, "link": string|null}]}]}`;
 }
 
 export interface PlanPromptInput {

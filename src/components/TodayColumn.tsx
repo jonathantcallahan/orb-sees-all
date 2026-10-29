@@ -1,16 +1,25 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import { nameFromChannel } from "../projects";
 import type { CalendarDay, CalendarEvent } from "../schema";
 import { applyTaskState, type Pressure, type TaskState } from "../tasks";
-import { Checklist, ExternalLink, RefreshButton, Updated } from "./common";
+import { Checklist, RefreshButton, Updated } from "./common";
 import { PressureBlob } from "./PressureBlob";
 
 /** Pixels per minute on the day grid (72px an hour). */
 const PX_PER_MIN = 1.2;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+/** "meet.google.com" from a call link, tolerating a malformed URL from the model. */
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
 const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
 
 /** The current time, refreshed every minute so the now line moves. */
@@ -43,10 +52,13 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
           const tooltip = [`${ev.title}`, `${time(ev.start)} – ${time(ev.end)}`, ev.prep.length ? `${ev.prep.length} prep` : ""]
             .filter(Boolean)
             .join("\n");
+          // The call is worth surfacing from 10 minutes before until the meeting ends.
+          const joinSoon = !past && new Date(ev.start).getTime() - now.getTime() <= 10 * 60_000;
           return (
-            <ExternalLink
+            <div
               key={ev.id}
-              href={ev.link}
+              role="link"
+              tabIndex={0}
               className={`event-block${past ? " past" : ""}${current ? " current" : ""}`}
               title={tooltip}
               style={{
@@ -55,11 +67,27 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
                 left: `${(column / columns) * 100}%`,
                 width: `calc(${100 / columns}% - 2px)`,
               }}
+              onClick={() => ev.link && openUrl(ev.link)}
+              onKeyDown={(e) => e.key === "Enter" && ev.link && openUrl(ev.link)}
             >
-              <span className="event-name">{ev.title}</span>
+              <div className="event-top">
+                <span className="event-name">{ev.title}</span>
+                {ev.video_link && !past && (
+                  <button
+                    className={`join${joinSoon ? " soon" : ""}`}
+                    title={`Join the call (${hostOf(ev.video_link)})`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openUrl(ev.video_link!);
+                    }}
+                  >
+                    Join
+                  </button>
+                )}
+              </div>
               {height >= 40 && <span className="event-when">{time(ev.start)}</span>}
               {ev.prep.length > 0 && <span className="event-prep">{ev.prep.length} prep</span>}
-            </ExternalLink>
+            </div>
           );
         })}
       </div>
