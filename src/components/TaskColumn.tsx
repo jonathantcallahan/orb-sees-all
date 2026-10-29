@@ -13,7 +13,7 @@ import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
 
 function Group({
   title,
-  tasks,
+  tasks: unsorted,
   empty,
   plans,
   assessments,
@@ -28,6 +28,8 @@ function Group({
   running: string[];
   onChange: () => void;
 }) {
+  // Recommended tasks first, keeping the group's order otherwise.
+  const tasks = [...unsorted].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
   return (
     <>
       <h4 className="section-title">{title}</h4>
@@ -58,6 +60,7 @@ export function TaskColumn({
   plans,
   assessments,
   drafts,
+  recommended,
   running,
   onChange,
 }: {
@@ -72,6 +75,8 @@ export function TaskColumn({
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
   drafts: Map<string, { text: string }>;
+  /** Task ids today's reading recommends. */
+  recommended: Set<string>;
   running: string[];
   onChange: () => void;
 }) {
@@ -84,7 +89,9 @@ export function TaskColumn({
   // Slack and email items share one inbox; dated items first, soonest first.
   const inbox = splitToday(
     applyTaskState(
-      [...adhoc.tasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
+      [...adhoc.tasks]
+        .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
+        .map((t) => ({ ...t, recommended: recommended.has(t.id) })),
       taskStates,
     ),
     today,
@@ -100,6 +107,7 @@ export function TaskColumn({
       source: "project" as const,
       project: { id: p.channel_id, name: projectName(p) },
       blocking: blocking.has(t.id),
+      recommended: recommended.has(t.id),
     }));
   });
   fromProjects.sort(
@@ -111,7 +119,7 @@ export function TaskColumn({
     applyTaskState(
       manual.filter((t) => !filterProject || t.project_id === filterProject.channel_id),
       taskStates,
-    ).map((t) => ({ ...t, source: "manual" as const })),
+    ).map((t) => ({ ...t, source: "manual" as const, recommended: recommended.has(t.id) })),
     today,
   );
 

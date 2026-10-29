@@ -215,14 +215,17 @@ ${JSON_ONLY} Shape: {"draft": string}`;
 }
 
 export function readingPrompt(context: unknown): string {
-  return `You are the Orb, who sees all of the user's work. Write today's reading: one paragraph (60 to 110 words) proposing what the user should focus on today and why.
+  return `You are the Orb, who sees all of the user's work. Write today's reading and pick today's recommended tasks.
 
-Base it only on this snapshot of their day: projects with status, priority, their role, blockers (someone is waiting), active work (underway, not blocking) and recent updates; their open tasks with priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
+Base it only on this snapshot of their day: projects with status, priority (P0 highest to P4), their role, blockers (someone is waiting), active work (underway, not blocking) and recent updates; their open tasks with ids, priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
 ${JSON.stringify(context)}
 
-Name the one or two things that matter most (a blocker only they can clear, a critical task, a deadline, a meeting that needs prep), say roughly how to spend the open time between meetings, and note what can wait. If a project update or piece of news changes today's priorities, weave it in; the full list of updates is shown separately, so don't recite it. Be concrete: use project, task and meeting names. Voice: calm and lightly oracular, but practical; no lists, no headings, no emoji.
+The overwhelming focus is P0 projects. Lower-priority work only earns attention when it blocks a P0, has a hard deadline today, or takes minutes.
 
-${JSON_ONLY} Shape: {"reading": string}`;
+- reading: one paragraph (60 to 110 words). Name what will move the P0 projects forward most today (a blocker only the user can clear, a decision, a deliverable, a meeting that needs prep), say roughly how to spend the open time between meetings, and say what can wait. If a project update or piece of news changes today's priorities, weave it in; the full list of updates is shown separately, so don't recite it. Be concrete: use project, task and meeting names. Voice: calm and lightly oracular, but practical; no lists, no headings, no emoji. If there are no P0 projects, focus on the highest priority present.
+- recommended: the ids (copied exactly from the tasks list) of up to five tasks the user should accomplish today to further P0 projects, most important first. Include a task not tied to a P0 project only if it clearly unblocks P0 work. Fit them in the open time today, using their estimates. Empty if nothing qualifies.
+
+${JSON_ONLY} Shape: {"reading": string, "recommended": [string]}`;
 }
 
 /** The default reminder text, with readable @Name mentions for the user to edit. */

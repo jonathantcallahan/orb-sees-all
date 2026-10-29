@@ -173,7 +173,7 @@ export function TodayColumn({
 
       {upcomingPrep.length > 0 && (
         <section className="prep">
-          <h4>Prep</h4>
+          <h4 className="section-title">Prep</h4>
           {upcomingPrep.map((ev) => (
             <div key={ev.id} className="prep-meeting">
               <div className="small prep-for" title={ev.title}>

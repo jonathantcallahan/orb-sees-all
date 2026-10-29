@@ -50,6 +50,7 @@ export function readingContext(r: ReadingInput) {
   ]
     .filter((t) => open(t.id))
     .map((t) => ({
+      id: t.id,
       title: t.title,
       project: t.project,
       priority: t.a?.priority ?? null,

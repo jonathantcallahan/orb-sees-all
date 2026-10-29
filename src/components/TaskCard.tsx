@@ -24,6 +24,8 @@ export interface CardTask {
   project?: { id: string; name: string };
   /** The task is holding its project up. */
   blocking?: boolean;
+  /** The Orb recommends doing this today to move a P0 project forward. */
+  recommended?: boolean;
   /** From the refresh that found the task; the user's own tasks are assessed separately. */
   assessment?: Assessment | null;
   done: boolean;
@@ -147,6 +149,14 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   medium: "Medium",
   low: "Low",
 };
+
+function RecommendedBadge() {
+  return (
+    <span className="badge recommended" title="The Orb recommends doing this today to move a P0 project forward">
+      ✦ Recommended
+    </span>
+  );
+}
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "To do",
@@ -283,6 +293,7 @@ export function TaskCard({
         title="Click for details"
       >
         <span className="task-title">{task.title}</span>
+        {task.recommended && <RecommendedBadge />}
         {assessment?.priority && <span className={`badge priority ${assessment.priority}`}>{PRIORITY_LABEL[assessment.priority]}</span>}
         {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         <StatusSelect task={task} onChange={onChange} />
@@ -299,8 +310,9 @@ export function TaskCard({
         <StatusSelect task={task} onChange={onChange} />
       </header>
 
-      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
+      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due || task.recommended) && (
         <div className="muted small task-meta">
+          {task.recommended && <RecommendedBadge />}
           {task.project && <span className="badge project-badge">{task.project.name}</span>}
           {task.blocking && <span className="badge blocking">Blocking</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}

@@ -8,6 +8,7 @@ import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
+import { localDate } from "./scheduler";
 import { compareProjects, pressure } from "./tasks";
 import { isDark, useTheme } from "./theme";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
@@ -81,6 +82,7 @@ export default function App() {
       <header className="topbar">
         <div className="row">
           <h1>{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</h1>
+          <span className="motto">Remember dear worker the orb sees all.</span>
           {counts.blocked > 0 && <span className="pill blocked">{counts.blocked} blocked</span>}
           {counts.at_risk > 0 && <span className="pill at_risk">{counts.at_risk} at risk</span>}
         </div>
@@ -149,6 +151,7 @@ export default function App() {
           plans={data.plans}
           assessments={data.assessments}
           drafts={data.drafts}
+          recommended={new Set(data.reading?.date === localDate(new Date()) ? (data.reading.recommended ?? []) : [])}
           running={running}
           onChange={reload}
         />

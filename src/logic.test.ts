@@ -61,7 +61,7 @@ describe("applyTaskState", () => {
 });
 
 describe("compareProjects", () => {
-  it("puts blocked, then at risk, then the rest", () => {
+  it("puts blocked, then at risk, then the rest within a priority", () => {
     const list = [
       { name: "z", status: "on_track" as const },
       { name: "y", status: null },
@@ -71,13 +71,14 @@ describe("compareProjects", () => {
     expect(list.sort(compareProjects).map((p) => p.name)).toEqual(["w", "x", "z", "y"]);
   });
 
-  it("orders by P0-P4 within a status", () => {
+  it("puts P0 projects first, whatever their status", () => {
     const list = [
-      { name: "a", status: "at_risk" as const, priority: "P2" },
-      { name: "b", status: "at_risk" as const, priority: "P0" },
+      { name: "a", status: "blocked" as const, priority: "P2" },
+      { name: "b", status: "on_track" as const, priority: "P0" },
       { name: "c", status: "at_risk" as const, priority: null },
+      { name: "d", status: "blocked" as const, priority: "P0" },
     ];
-    expect(list.sort(compareProjects).map((p) => p.name)).toEqual(["b", "a", "c"]);
+    expect(list.sort(compareProjects).map((p) => p.name)).toEqual(["d", "b", "a", "c"]);
   });
 });
 
@@ -306,7 +307,7 @@ describe("readingContext", () => {
       blocked_on_others: ["Reason codes (Alex)"],
       active_work: ["Partial-refund tickets (ILT team)"],
     });
-    expect(ctx.tasks).toEqual([{ title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
+    expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
     expect(ctx.news).toEqual(["Reorg announced"]);
   });

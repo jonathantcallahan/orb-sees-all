@@ -61,7 +61,8 @@ h1, h2, h3, h4 { margin: 0; }
 /* No bold anywhere: emphasis comes from color and size. */
 h1, h2, h3, h4, h5, h6, strong, b, th { font-weight: 400; }
 h1 { font-size: 17px; }
-h2 { font-size: 14px; }
+/* Column titles and section titles share one size. */
+h2 { font-size: 13px; }
 h3 { font-size: 13px; font-weight: 400; }
 /* Labels inside cards ("Blocked by", "Prep"); section headings in a column use .section-title. */
 h4 { font-size: 12px; font-weight: 400; color: var(--muted); margin: 10px 0 4px; }
@@ -499,3 +500,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .remind-composer textarea { font-size: 12px; }
 .remind-actions { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .remind-buttons { display: flex; gap: 12px; flex-shrink: 0; }
+
+/* The Orb's picks for today */
+.badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
+
+.motto { color: var(--muted); font-size: 13px; margin-left: 2px; }

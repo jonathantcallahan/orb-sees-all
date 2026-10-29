@@ -286,15 +286,23 @@ export function refreshReading(): Promise<void> {
         db.getTaskStates(),
         db.getCalendarDay(today),
       ]);
+      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today });
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: readingPrompt(readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today })),
+        prompt: readingPrompt(context),
         schema: DailyReading,
         tools: [],
         model: await model(),
         maxTurns: 2,
       });
-      await db.saveReading({ date: today, text: data.reading, created_at: new Date().toISOString() });
+      // Keep only ids that are real tasks, in case the model invents one.
+      const ids = new Set(context.tasks.map((t) => t.id));
+      await db.saveReading({
+        date: today,
+        text: data.reading,
+        recommended: data.recommended.filter((id) => ids.has(id)),
+        created_at: new Date().toISOString(),
+      });
       return { value: undefined, costUsd };
     }),
   );

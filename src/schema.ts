@@ -179,7 +179,11 @@ export const ReplyDraft = z.object({ draft: z.string() });
 
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
-export const DailyReading = z.object({ reading: z.string() });
+export const DailyReading = z.object({
+  reading: z.string(),
+  /** Ids of tasks the Orb recommends doing today to move P0 projects forward. */
+  recommended: z.array(z.string()).default([]),
+});
 
 /** Claude's assessment of one of the user's own tasks, with a drafted description if they gave none. */
 export const ManualAssessment = Assessment.extend({

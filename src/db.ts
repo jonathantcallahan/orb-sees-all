@@ -115,6 +115,8 @@ export interface StoredReading {
   /** YYYY-MM-DD the reading is for. */
   date: string;
   text: string;
+  /** Task ids the Orb recommends doing today. */
+  recommended?: string[];
   created_at: string;
 }
 

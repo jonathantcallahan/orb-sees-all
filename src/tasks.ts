@@ -72,8 +72,8 @@ export function formatMinutes(minutes: number): string {
 const STATUS_ORDER: Record<ProjectStatus, number> = { blocked: 0, at_risk: 1, on_track: 2, idle: 3 };
 
 /**
- * Blocked first, then at risk, on track, idle (projects never refreshed go
- * last); within a status, P0 before P4, then by name.
+ * P0 first: priority leads (unprioritized projects after P4), then status
+ * (blocked, at risk, on track, idle, never refreshed), then name.
  */
 export function compareProjects(
   a: { name: string; status: ProjectStatus | null; priority?: string | null },
@@ -81,7 +81,7 @@ export function compareProjects(
 ): number {
   const rank = (s: ProjectStatus | null) => (s ? STATUS_ORDER[s] : 4);
   const prio = (p?: string | null) => (p ? Number(p.slice(1)) : 5);
-  return rank(a.status) - rank(b.status) || prio(a.priority) - prio(b.priority) || a.name.localeCompare(b.name);
+  return prio(a.priority) - prio(b.priority) || rank(a.status) - rank(b.status) || a.name.localeCompare(b.name);
 }
 
 /** "3d", "5h" or "just now" since an ISO date or YYYY-MM-DD. */
