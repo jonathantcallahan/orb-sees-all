@@ -7,6 +7,7 @@
   --muted: #6b6b66;
   --accent: #2f6fde;
   --red: #c8352c;
+  --blocking-bg: #c8352c;
   --red-bg: #fbe9e7;
   --amber: #a86400;
   --amber-bg: #fdf1dc;
@@ -29,6 +30,7 @@
   --muted: #9b9b96;
   --accent: #6b9cf0;
   --red: #f07b72;
+  --blocking-bg: #a8322a;
   --red-bg: #45231f;
   --amber: #f0b45a;
   --amber-bg: #42321a;
@@ -46,6 +48,7 @@
     --muted: #9b9b96;
     --accent: #6b9cf0;
     --red: #f07b72;
+  --blocking-bg: #a8322a;
     --red-bg: #45231f;
     --amber: #f0b45a;
     --amber-bg: #42321a;
@@ -267,7 +270,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Tasks column: project badges and the project filter */
 .task-project { color: var(--muted); }
-.badge.priority.blocking { color: white; background: var(--red); }
+.badge.priority.blocking { color: white; background: var(--blocking-bg); }
 .filter-chip {
   display: flex;
   justify-content: space-between;
