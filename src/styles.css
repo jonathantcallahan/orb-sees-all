@@ -614,3 +614,5 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .link-chip:hover { background: var(--border); text-decoration: none; }
 .link-chip-icon { flex: none; object-fit: contain; }
 .link-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.description-editor { min-height: 140px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); line-height: 1.5; }
+.edit-actions { justify-content: flex-end; gap: 8px; }

@@ -70,7 +70,7 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
                 <ExternalLink href={step.link} className="plan-step-title">
                   {step.title}
                 </ExternalLink>
-                {step.by === "you" && <span className="step-by you">You</span>}
+                {step.by === "you" && <span className="step-by you">Human input needed</span>}
                 {step.detail && <div className="muted small">{step.detail}</div>}
               </div>
             </li>
@@ -186,25 +186,58 @@ function Description({ text, draft, onEdit, actions }: { text: string; draft: bo
   );
 }
 
-function DescriptionEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string | null) => void; onCancel: () => void }) {
+/** Edits a task's description in a centered modal. Esc cancels; ⌘↩ saves. */
+function DescriptionEditor({
+  title,
+  initial,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  initial: string;
+  onSave: (text: string | null) => void;
+  onCancel: () => void;
+}) {
   const [text, setText] = useState(initial);
-  return (
-    <textarea
-      autoFocus
-      rows={4}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={() => {
-        const next = text.trim() || null;
-        if (next === (initial.trim() || null)) onCancel();
-        else onSave(next);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
-      }}
-      placeholder="What's involved, who it's for, links…"
-    />
+  const save = () => {
+    const next = text.trim() || null;
+    if (next === (initial.trim() || null)) onCancel();
+    else onSave(next);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return createPortal(
+    <div className="modal-backdrop plan-modal-backdrop" onClick={onCancel}>
+      <div className="modal plan-modal" role="dialog" aria-label={`Edit description for ${title}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>{title}</h2>
+        </header>
+        <textarea
+          autoFocus
+          className="description-editor"
+          rows={8}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
+          }}
+          placeholder="What's involved, who it's for, links…"
+        />
+        <footer className="plan-modal-actions edit-actions">
+          <button className="cta-ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="cta-primary" onClick={save} title="Save, then plan again from the new description (⌘↩)">
+            Save
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -302,7 +335,7 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
             <StepCircle />
             <span className="small">
               {step.title}
-              {step.by === "you" && <span className="step-by you">You</span>}
+              {step.by === "you" && <span className="step-by you">Human input needed</span>}
             </span>
           </li>
         ))}
@@ -648,9 +681,10 @@ export function TaskCard({
         </div>
       )}
 
-      {editing ? (
-        <DescriptionEditor initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
-      ) : description ? (
+      {editing && (
+        <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
+      )}
+      {description ? (
         <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} actions={linksToggle} />
       ) : (
         manual && (
@@ -660,7 +694,7 @@ export function TaskCard({
         )
       )}
 
-      {!description && !editing && linksToggle && <div className="description-actions small">{linksToggle}</div>}
+      {!description && linksToggle && <div className="description-actions small">{linksToggle}</div>}
       {linksOpen && <LinkChips links={links} />}
 
       {assessment ? (
