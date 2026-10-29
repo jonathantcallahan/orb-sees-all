@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
 import type { Blocker, ProjectStatus, PullRequest, Raci } from "../schema";
@@ -20,6 +21,49 @@ const RACI_LABEL: Record<Raci, string> = {
   consulted: "Consulted",
   informed: "Informed",
 };
+
+/** Slack's mark: one arm (a long bar and a short nub) repeated at 90° in each brand color. */
+function SlackIcon() {
+  const arms = ["#36C5F0", "#2EB67D", "#ECB22E", "#E01E5A"];
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden>
+      {arms.map((color, i) => (
+        <g key={color} transform={`rotate(${i * 90} 12 12)`} fill={color}>
+          <rect x="8.5" y="1" width="4" height="10" rx="2" />
+          <rect x="3.5" y="7" width="4" height="4" rx="2" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/** Hides a project from the dashboard after an inline confirmation. */
+function Untrack({ name, onConfirm }: { name: string; onConfirm: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className={`untrack small${confirming ? " confirming" : ""}`}>
+      {confirming ? (
+        <>
+          <span className="muted">Untrack {name}?</span>
+          <button className="link-button small danger" onClick={onConfirm}>
+            Yes
+          </button>
+          <button className="link-button small muted" onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button
+          className="link-button small muted"
+          title="Stop tracking this project. You can track it again in Settings."
+          onClick={() => setConfirming(true)}
+        >
+          Untrack
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** One line of label, owners and age, with the work itself underneath. */
 function WorkItem({ item, label, kind }: { item: Blocker; label: string; kind: "blocker" | "active" }) {
@@ -86,36 +130,18 @@ export function ProjectCard({
                 {s.priority.level}
               </span>
             )}
-            {projectName(project)}
-          </h3>
-          <ExternalLink href={slackChannelUrl(project.channel_id)} className="project-channel">
-            #{project.name}
-          </ExternalLink>
-          <div className="project-meta">
-            <Updated at={project.last_refreshed_at} />
-            {openTasks > 0 && (
-              <span className="small task-count">
-                · {openTasks} task{openTasks === 1 ? "" : "s"} for you{selected ? " (shown in Tasks)" : ""}
+            {s?.raci && (
+              <span className={`badge raci ${s.raci.role}`} title={`${RACI_LABEL[s.raci.role]}: ${s.raci.reason}`}>
+                {s.raci.role[0].toUpperCase()}
               </span>
             )}
-          </div>
+            {projectName(project)}
+            <ExternalLink href={slackChannelUrl(project.channel_id)} className="slack-link" title={`Open #${project.name} in Slack`}>
+              <SlackIcon />
+            </ExternalLink>
+          </h3>
         </div>
-        <div className="row">
-          <button
-            className="link-button small untrack"
-            title="Stop tracking this project. You can track it again in Settings."
-            onClick={async () => {
-              await updateProjectConfig(project.channel_id, { hidden: true, local_repos: project.local_repos, gh_repos: project.gh_repos });
-              onChange();
-            }}
-          >
-            Untrack
-          </button>
-          {s?.raci && (
-            <span className={`badge raci ${s.raci.role}`} title={`${RACI_LABEL[s.raci.role]}: ${s.raci.reason}`}>
-              {s.raci.role[0].toUpperCase()}
-            </span>
-          )}
+        <div className="row project-header-right">
           {status && <span className={`pill ${status}`}>{STATUS_LABEL[status]}</span>}
           <RefreshButton busy={busy} status={refreshStatus} title={`Refresh ${projectName(project)}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
         </div>
@@ -176,6 +202,23 @@ export function ProjectCard({
           ))}
         </footer>
       )}
+      <div className="project-footer">
+        <div className="project-meta">
+          <Updated at={project.last_refreshed_at} />
+          {openTasks > 0 && (
+            <span className="small task-count">
+              · {openTasks} task{openTasks === 1 ? "" : "s"} for you{selected ? " (shown in Tasks)" : ""}
+            </span>
+          )}
+        </div>
+        <Untrack
+          name={projectName(project)}
+          onConfirm={async () => {
+            await updateProjectConfig(project.channel_id, { hidden: true, local_repos: project.local_repos, gh_repos: project.gh_repos });
+            onChange();
+          }}
+        />
+      </div>
     </article>
   );
 }

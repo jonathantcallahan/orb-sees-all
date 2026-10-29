@@ -229,9 +229,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   );
 }
 
-.project .untrack { visibility: hidden; color: var(--muted); }
-.project:hover .untrack { visibility: visible; }
-.project .untrack:hover { color: var(--red); }
+.project-footer { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 10px; }
+.project .untrack { display: flex; gap: 8px; align-items: baseline; visibility: hidden; }
+.project:hover .untrack, .project .untrack.confirming { visibility: visible; }
+.link-button.danger { color: var(--red); }
+.project .p-badge + .badge.raci, .project .badge.raci { margin-right: 6px; vertical-align: 1px; }
+
+/* The status pill sits flush right; on hover the refresh button opens beside it and the pill slides over. */
+.project-header-right { gap: 0; }
+.project-header-right .refresh {
+  width: 0;
+  padding: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: width 0.18s ease, opacity 0.18s ease, padding 0.18s ease;
+}
+.project:hover .project-header-right .refresh,
+.project-header-right .refresh.busy { width: 22px; padding: 0 4px; opacity: 1; }
+.project-header-right .refresh-status { margin-left: 6px; }
 
 /* Project cards: badges, description, blockers, selection */
 .project { cursor: pointer; }
@@ -329,7 +344,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .badge.priority.low { color: var(--muted); opacity: 0.8; }
 
 /* Project name with its Slack channel underneath */
-.project-channel { display: block; font-size: 11px; color: var(--accent); }
 
 /* Day grid: meetings at their real times, with a line at the current time */
 .day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
@@ -468,3 +482,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .update-meta { display: flex; justify-content: space-between; gap: 8px; }
 .update-text { font-size: 13px; }
 .update-actions { display: flex; justify-content: space-between; align-items: center; }
+
+.slack-link { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -1px; line-height: 0; opacity: 0.85; }
+.slack-link:hover { opacity: 1; }
+.project .untrack .link-button.muted { color: var(--muted); }
+
+/* The RACI letter matches the P0-P4 badge beside it. */
+.project .badge.raci { padding: 0 5px; border-radius: 4px; font-size: 11px; }
