@@ -32,6 +32,7 @@ float fbm(vec2 p) {
 
 const FRAGMENT = /* glsl */ `
 uniform float uTime;
+uniform float uStress;
 uniform vec2 uResolution;
 uniform vec3 uBg;
 varying vec2 vUv;
@@ -46,11 +47,13 @@ void main() {
   vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + t * 1.5), fbm(p + 3.0 * q + vec2(8.3, 2.8) - t * 1.2));
   float d = fbm(p + 2.5 * r);
 
-  // Thick at the bottom, wispy and ragged where it fades out at the top.
+  // Thick at the bottom, wispy and ragged where it fades out at the top. Opacity
+  // follows the swirl density, so thin areas are see-through and wisps stand out.
   float depth = 1.0 - vUv.y;
+  float density = smoothstep(0.3, 0.8, d);
   float edge = smoothstep(0.0, 0.75, depth + (d - 0.5) * 0.7);
-  float alpha = pow(edge, 0.7) * (0.75 + 0.25 * d) * smoothstep(0.0, 0.3, depth + 0.1);
-  alpha = clamp(alpha + smoothstep(0.45, 1.0, depth) * 0.35, 0.0, 0.85) * 0.8;
+  float alpha = pow(edge, 0.7) * (0.15 + 0.85 * density) * smoothstep(0.0, 0.3, depth + 0.1);
+  alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9);
 
   // The orb's mood, blended into the page background: icy blue when calm,
   // violet when restless, ember when stressed.
@@ -58,9 +61,8 @@ void main() {
   moodDeep = mix(moodDeep, vec3(0.80, 0.22, 0.12), smoothstep(0.5, 1.0, uStress));
   vec3 moodWisp = mix(vec3(0.70, 0.80, 1.00), vec3(0.80, 0.70, 1.00), smoothstep(0.0, 0.5, uStress));
   moodWisp = mix(moodWisp, vec3(1.00, 0.62, 0.30), smoothstep(0.5, 1.0, uStress));
-  vec3 deep = mix(uBg, moodDeep, 0.35);
-  vec3 wisp = mix(uBg, moodWisp, 0.22);
-  vec3 color = mix(deep, wisp, d * d + length(q) * 0.1);
+  // Dense swirls take most of the mood color; the thinner edges a lighter tint.
+  vec3 color = mix(mix(uBg, moodWisp, 0.35), mix(uBg, moodDeep, 0.6), density);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
