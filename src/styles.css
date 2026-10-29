@@ -401,7 +401,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
 .reading h4.section-title:not(:first-child) { margin-top: 8px; }
-.reading-text { margin: 0; line-height: 1.55; }
+.reading-text { margin: 0; line-height: 1.55; color: var(--muted); }
 .update-label { color: var(--muted); margin-right: 6px; }
 
 /* Project priority ahead of the name */
