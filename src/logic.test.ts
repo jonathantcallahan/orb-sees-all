@@ -70,6 +70,15 @@ describe("compareProjects", () => {
     ];
     expect(list.sort(compareProjects).map((p) => p.name)).toEqual(["w", "x", "z", "y"]);
   });
+
+  it("orders by P0-P4 within a status", () => {
+    const list = [
+      { name: "a", status: "at_risk" as const, priority: "P2" },
+      { name: "b", status: "at_risk" as const, priority: "P0" },
+      { name: "c", status: "at_risk" as const, priority: null },
+    ];
+    expect(list.sort(compareProjects).map((p) => p.name)).toEqual(["b", "a", "c"]);
+  });
 });
 
 describe("windowStart", () => {
@@ -272,7 +281,7 @@ describe("readingContext", () => {
   it("keeps open work, marks today's plan and splits blockers by owner", () => {
     const snapshot = {
       name: "Asset refunds", description: "", status: "at_risk" as const, status_reason: "late codes",
-      raci: { role: "accountable" as const, reason: "" }, priority: { level: "high" as const, reason: "" },
+      raci: { role: "accountable" as const, reason: "" }, priority: { level: "P1" as const, reason: "" },
       blockers: [
         { id: "b1", what: "Reason codes", owners: [{ name: "Alex", is_me: false }] },
         { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },

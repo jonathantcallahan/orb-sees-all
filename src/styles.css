@@ -401,7 +401,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Daily reading */
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
+.reading .reading-title { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
 .reading-text { margin: 0; font-style: italic; line-height: 1.55; }
 .updates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .update-label { color: var(--muted); margin-right: 6px; }
 .reading .link-button { align-self: flex-start; }
+
+/* Project priority ahead of the name */
+.p-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--grey-bg);
+  color: var(--muted);
+  vertical-align: 1px;
+}
+.p-badge.P0 { background: var(--red-bg); color: var(--red); }
+.p-badge.P1 { background: var(--amber-bg); color: var(--amber); }
+.p-badge.P2 { color: var(--text); }

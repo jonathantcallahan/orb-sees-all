@@ -45,6 +45,10 @@ export const Assessment = z.object({
 });
 export type Assessment = z.infer<typeof Assessment>;
 
+/** Strategic priority of a project, P0 (highest) to P4. */
+export const ProjectPriority = z.enum(["P0", "P1", "P2", "P3", "P4"]);
+export type ProjectPriority = z.infer<typeof ProjectPriority>;
+
 /** The user's inferred role on a project. */
 export const Raci = z.enum(["responsible", "accountable", "consulted", "informed"]);
 export type Raci = z.infer<typeof Raci>;
@@ -81,7 +85,7 @@ export const ProjectSnapshot = z.object({
   status: ProjectStatus,
   status_reason: z.string(),
   raci: z.object({ role: Raci, reason: z.string() }),
-  priority: z.object({ level: Priority, reason: z.string() }),
+  priority: z.object({ level: ProjectPriority, reason: z.string() }),
   blockers: z.array(Blocker),
   my_tasks: z.array(ProjectTask),
   /** Notable developments since the previous snapshot. */

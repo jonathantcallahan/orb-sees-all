@@ -50,9 +50,10 @@ void main() {
   // Thick at the bottom, wispy and ragged where it fades out at the top. Opacity
   // follows the swirl density, so thin areas are see-through and wisps stand out.
   float depth = 1.0 - vUv.y;
-  float density = smoothstep(0.2, 0.9, d);
+  // Gentle contrast between thin and dense areas, so the color stays fairly even.
+  float density = 0.25 + 0.5 * smoothstep(0.15, 0.95, d);
   float edge = smoothstep(0.0, 0.75, depth + (d - 0.5) * 0.7);
-  float alpha = pow(edge, 0.7) * (0.3 + 0.7 * density) * smoothstep(0.0, 0.3, depth + 0.1);
+  float alpha = pow(edge, 0.7) * (0.45 + 0.55 * density) * smoothstep(0.0, 0.3, depth + 0.1);
   alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9) * 0.7;
 
   // The orb's mood, blended into the page background: icy blue when calm,

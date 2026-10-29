@@ -57,7 +57,12 @@ export default function App() {
 
   const projects = data.projects
     .filter((p) => !p.hidden)
-    .sort((a, b) => compareProjects({ name: a.name, status: a.snapshot?.status ?? null }, { name: b.name, status: b.snapshot?.status ?? null }));
+    .sort((a, b) =>
+      compareProjects(
+        { name: a.name, status: a.snapshot?.status ?? null, priority: a.snapshot?.priority?.level },
+        { name: b.name, status: b.snapshot?.status ?? null, priority: b.snapshot?.priority?.level },
+      ),
+    );
   const counts = {
     blocked: projects.filter((p) => p.snapshot?.status === "blocked").length,
     at_risk: projects.filter((p) => p.snapshot?.status === "at_risk").length,

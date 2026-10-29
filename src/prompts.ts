@@ -67,7 +67,7 @@ Fields:
 - status: "blocked" = progress cannot continue until someone acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.
 - status_reason: one sentence naming the specific late item or dependency.
 - raci: the user's role, inferred from how they participate. "accountable" = they own the outcome (they set direction, make the calls, report status upward, or others ask them for decisions). "responsible" = they do the work but someone else owns the outcome. "consulted" = people ask their input but they don't drive. "informed" = they mostly read along. reason: one short sentence of evidence.
-- priority: strategic priority to the business, not urgency. "critical" = exec-visible, revenue or legal/compliance impact, or a hard external date; "high" = a committed roadmap item or a dependency for other teams; "medium" = planned work with moderate impact; "low" = exploratory, nice-to-have, or social. reason: one short sentence.
+- priority: strategic priority to the business, not urgency. "P0" = company-critical: exec-visible, revenue or legal/compliance impact, or a hard external date; "P1" = a committed roadmap item or a dependency for other teams; "P2" = planned work with moderate impact; "P3" = low impact or nice to have; "P4" = exploratory, informational or social. reason: one short sentence.
 - blockers: the tasks currently holding the project up (an unanswered question, a missing decision, review, ticket, or deliverable). what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
 - my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
 - recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with the date (YYYY-MM-DD) and the message permalink. Empty when nothing notable happened.
@@ -78,7 +78,7 @@ ${READ_ONLY}
 ${JSON_ONLY} Shape:
 {"name": string, "description": string, "status": "on_track"|"at_risk"|"blocked"|"idle", "status_reason": string,
  "raci": {"role": "responsible"|"accountable"|"consulted"|"informed", "reason": string},
- "priority": {"level": "critical"|"high"|"medium"|"low", "reason": string},
+ "priority": {"level": "P0"|"P1"|"P2"|"P3"|"P4", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": "YYYY-MM-DD"|null, "link": string|null}],

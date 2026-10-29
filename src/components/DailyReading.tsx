@@ -51,7 +51,7 @@ export function DailyReading({
   return (
     <section className="reading">
       <header className="column-header">
-        <h4>Daily reading</h4>
+        <h4 className="reading-title">Daily reading</h4>
         <RefreshButton busy={busy} title="Write today's reading again" onClick={() => refreshReading().catch(() => {})} />
       </header>
       {current ? (

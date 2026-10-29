@@ -9,7 +9,7 @@ const MIN_SNAPSHOT = JSON.stringify({
   status: "idle",
   status_reason: "",
   raci: { role: "informed", reason: "" },
-  priority: { level: "low", reason: "" },
+  priority: { level: "P4", reason: "" },
   blockers: [],
   my_tasks: [],
   summary: "",

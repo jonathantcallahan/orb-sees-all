@@ -1,6 +1,6 @@
 import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
-import type { Priority, ProjectStatus, PullRequest, Raci } from "../schema";
+import type { ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
 import { projectName, slackChannelUrl } from "../projects";
 import { ExternalLink, RefreshButton, Updated } from "./common";
@@ -12,12 +12,6 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   idle: "Idle",
 };
 
-const PRIORITY_LABEL: Record<Priority, string> = {
-  critical: "Critical",
-  high: "High priority",
-  medium: "Medium priority",
-  low: "Low priority",
-};
 
 const RACI_LABEL: Record<Raci, string> = {
   responsible: "Responsible",
@@ -64,7 +58,14 @@ export function ProjectCard({
     >
       <header className="card-header">
         <div>
-          <h3>{projectName(project)}</h3>
+          <h3>
+            {s?.priority && (
+              <span className={`p-badge ${s.priority.level}`} title={s.priority.reason}>
+                {s.priority.level}
+              </span>
+            )}
+            {projectName(project)}
+          </h3>
           <ExternalLink href={slackChannelUrl(project.channel_id)} className="project-channel">
             #{project.name}
           </ExternalLink>
@@ -92,11 +93,6 @@ export function ProjectCard({
       {s && (
         <>
           <div className="badges">
-            {s.priority && (
-              <span className={`badge priority ${s.priority.level}`} title={s.priority.reason}>
-                {PRIORITY_LABEL[s.priority.level]}
-              </span>
-            )}
             {s.raci && (
               <span className={`badge raci ${s.raci.role}`} title={s.raci.reason}>
                 <strong>{s.raci.role[0].toUpperCase()}</strong> {RACI_LABEL[s.raci.role]}
