@@ -109,7 +109,14 @@ export default function App() {
         <TodayColumn pressure={load} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
-          <DailyReading reading={data.reading} projects={data.projects} news={data.adhoc.news} busy={running.includes("reading")} />
+          <DailyReading
+            reading={data.reading}
+            projects={data.projects}
+            news={data.adhoc.news}
+            states={data.taskStates}
+            busy={running.includes("reading")}
+            onChange={reload}
+          />
           <header className="column-header">
             <h2>Projects</h2>
           </header>

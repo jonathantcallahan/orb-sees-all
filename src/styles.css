@@ -113,10 +113,6 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 }
 .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 
-.project { border-left: 4px solid var(--border); }
-.project.blocked { border-left-color: var(--red); }
-.project.at_risk { border-left-color: var(--amber); }
-.project.on_track { border-left-color: var(--green); }
 .project .reason { margin: 8px 0 0; }
 
 .pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--grey-bg); }
@@ -347,7 +343,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   flex-direction: column;
   padding: 2px 6px;
   border-radius: 5px;
-  border-left: 3px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 16%, var(--surface));
   font-size: 11px;
   line-height: 1.3;
@@ -356,7 +352,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-block { cursor: pointer; }
 .event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--accent) 26%, var(--surface)); }
 .event-block.past { opacity: 0.5; }
-.event-block.current { border-left-color: var(--red); }
+.event-block.current { border-color: var(--red); }
 .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-when, .event-prep { color: var(--muted); font-size: 10px; }
 .event-prep { color: var(--amber); }
@@ -402,12 +398,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
 .reading .reading-title { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); }
-.reading .reading-title + .updates, .updates + .link-button { margin-top: 2px; }
 .reading h4.reading-title:not(:first-child) { margin-top: 8px; }
 .reading-text { margin: 0; font-style: italic; line-height: 1.55; }
-.updates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .update-label { color: var(--muted); margin-right: 6px; }
-.reading .link-button { align-self: flex-start; }
 
 /* Project priority ahead of the name */
 .p-badge {
@@ -459,3 +452,21 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   color: var(--muted);
 }
 .inbox-drafting { flex-shrink: 1; min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Updates as a deck: newest on top, the next two peeking out behind */
+.update-stack { position: relative; margin-top: 2px; }
+.update-card-behind { position: absolute; inset: 0; transform-origin: bottom center; }
+.update-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  transition: transform 0.22s ease, opacity 0.22s ease;
+  animation: update-in 0.22s ease;
+}
+.update-card.leaving { transform: translateX(110%) rotate(4deg); opacity: 0; }
+@keyframes update-in { from { transform: translateY(8px) scale(0.96); opacity: 0.7; } }
+.update-meta { display: flex; justify-content: space-between; gap: 8px; }
+.update-text { font-size: 13px; }
+.update-actions { display: flex; justify-content: space-between; align-items: center; }
