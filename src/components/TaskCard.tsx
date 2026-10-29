@@ -321,7 +321,7 @@ function AssessmentView({
   actions?: ReactNode;
   onAddDetails?: () => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   return (
     <>
       {assessment.needs_details && (
