@@ -47,3 +47,53 @@ export function age(since: string | null | undefined, now = new Date()): string 
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 }
+
+export interface Pressure {
+  projectsOnMe: number;
+  criticalTasks: number;
+  /** 0 (calm) to 1 (on fire). */
+  level: number;
+}
+
+interface PressureProject {
+  status: ProjectStatus | null;
+  tasks: { id: string; due?: string | null }[];
+}
+
+/** Open tasks due within this many days (or overdue) count as critical. */
+const CRITICAL_DUE_DAYS = 2;
+/** Counts at which each signal saturates. */
+const PROJECTS_AT_MAX = 6;
+const CRITICAL_AT_MAX = 8;
+
+function dueSoon(due: string | null | undefined, now: Date): boolean {
+  if (!due) return false;
+  const ms = new Date(`${due}T23:59:59`).getTime() - now.getTime();
+  return !Number.isNaN(ms) && ms < CRITICAL_DUE_DAYS * 86_400_000;
+}
+
+/**
+ * How much is waiting on the user: projects with at least one open task of
+ * theirs, and open tasks that are due soon or sit in a blocked or at-risk
+ * project. Done and dismissed tasks don't count.
+ */
+export function pressure(
+  projects: PressureProject[],
+  otherTasks: { id: string; due?: string | null }[],
+  states: Map<string, TaskState>,
+  now = new Date(),
+): Pressure {
+  const open = (t: { id: string }) => !states.get(t.id)?.done && !states.get(t.id)?.dismissed;
+  let projectsOnMe = 0;
+  let criticalTasks = 0;
+  for (const p of projects) {
+    const tasks = p.tasks.filter(open);
+    if (tasks.length) projectsOnMe++;
+    const hot = p.status === "blocked" || p.status === "at_risk";
+    criticalTasks += tasks.filter((t) => hot || dueSoon(t.due, now)).length;
+  }
+  criticalTasks += otherTasks.filter((t) => open(t) && dueSoon(t.due, now)).length;
+  const level =
+    0.5 * Math.min(projectsOnMe / PROJECTS_AT_MAX, 1) + 0.5 * Math.min(criticalTasks / CRITICAL_AT_MAX, 1);
+  return { projectsOnMe, criticalTasks, level };
+}

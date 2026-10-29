@@ -1,16 +1,19 @@
 import { refreshCalendar } from "../jobs";
 import type { CalendarDay } from "../schema";
-import { applyTaskState, type TaskState } from "../tasks";
+import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, ExternalLink, RefreshButton, Updated } from "./common";
+import { PressureBlob } from "./PressureBlob";
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 export function TodayColumn({
+  pressure,
   calendar,
   taskStates,
   busy,
   onChange,
 }: {
+  pressure: Pressure;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   busy: boolean;
@@ -21,6 +24,7 @@ export function TodayColumn({
 
   return (
     <section className="column">
+      <PressureBlob pressure={pressure} />
       <header className="column-header">
         <div>
           <h2>Today</h2>

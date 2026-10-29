@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { JobQueue } from "./jobs/queue";
 import { windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects } from "./tasks";
+import { applyTaskState, compareProjects, pressure } from "./tasks";
 
 describe("shouldRunMorning", () => {
   const schedule = { time: "07:30", weekdaysOnly: true };
@@ -120,5 +120,42 @@ describe("JobQueue", () => {
   it("lets a coordinating job wait on others without taking a slot", async () => {
     const q = new JobQueue(1);
     await q.run("all", () => q.run("child", async () => "done"), false);
+  });
+});
+
+describe("pressure", () => {
+  const now = new Date(2026, 9, 29, 9, 0);
+  const none = new Map<string, { done: boolean; dismissed: boolean }>();
+
+  it("is calm with nothing on the user", () => {
+    expect(pressure([{ status: "on_track", tasks: [] }], [], none, now).level).toBe(0);
+  });
+
+  it("counts tasks in blocked or at-risk projects and tasks due soon as critical", () => {
+    const p = pressure(
+      [
+        { status: "blocked", tasks: [{ id: "a" }, { id: "b" }] },
+        { status: "on_track", tasks: [{ id: "c", due: "2026-10-30" }, { id: "d", due: "2026-12-01" }] },
+      ],
+      [{ id: "e", due: "2026-10-28" }, { id: "f" }],
+      none,
+      now,
+    );
+    expect(p).toMatchObject({ projectsOnMe: 2, criticalTasks: 4 });
+    expect(p.level).toBeCloseTo(0.5 * (2 / 6) + 0.5 * (4 / 8));
+  });
+
+  it("ignores done and dismissed tasks", () => {
+    const states = new Map([
+      ["a", { done: true, dismissed: false }],
+      ["b", { done: false, dismissed: true }],
+    ]);
+    const p = pressure([{ status: "blocked", tasks: [{ id: "a" }, { id: "b" }] }], [], states, now);
+    expect(p).toMatchObject({ projectsOnMe: 0, criticalTasks: 0, level: 0 });
+  });
+
+  it("saturates at 1", () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ status: "blocked" as const, tasks: [{ id: `t${i}` }] }));
+    expect(pressure(many, [], none, now).level).toBe(1);
   });
 });

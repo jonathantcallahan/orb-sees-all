@@ -151,3 +151,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .projects-table td:first-child { white-space: nowrap; }
 .log-table tr.error td { color: var(--red); }
 .log-error { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+.pressure-blob { width: 100%; height: 190px; }
+.pressure-blob canvas { display: block; width: 100%; height: 100%; }
+.pressure-label { margin-top: -6px; }

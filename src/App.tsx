@@ -6,7 +6,7 @@ import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
-import { compareProjects } from "./tasks";
+import { compareProjects, pressure } from "./tasks";
 import { useAppData, useRunningJobs } from "./useAppData";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
@@ -59,6 +59,11 @@ export default function App() {
     at_risk: projects.filter((p) => p.snapshot?.status === "at_risk").length,
   };
   const refreshingAll = running.includes("all");
+  const load = pressure(
+    projects.map((p) => ({ status: p.snapshot?.status ?? null, tasks: p.snapshot?.my_tasks ?? [] })),
+    data.adhoc.tasks,
+    data.taskStates,
+  );
 
   return (
     <div className="app">
@@ -78,7 +83,7 @@ export default function App() {
       </header>
 
       <main className="columns">
-        <TodayColumn calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        <TodayColumn pressure={load} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
           <header className="column-header">
