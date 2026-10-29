@@ -289,8 +289,8 @@ export function ProjectCard({
     <article
       className={`card project ${status ?? "unknown"}${selected ? " selected" : ""}`}
       onClick={(e) => {
-        // Links, buttons and the summary toggle keep their own behavior.
-        if (!(e.target as HTMLElement).closest("a, button, input, summary")) onSelect();
+        // Links, buttons and inputs keep their own behavior.
+        if (!(e.target as HTMLElement).closest("a, button, input, textarea, select")) onSelect();
       }}
       title={selected ? "Showing only this project's tasks. Click to show all." : "Click to show only this project's tasks"}
     >
