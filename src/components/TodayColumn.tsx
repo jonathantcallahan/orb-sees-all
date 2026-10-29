@@ -3,11 +3,9 @@ import { useEffect, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import { nameFromChannel } from "../projects";
-import type { CalendarDay, CalendarEvent, NewsItem } from "../schema";
-import type { Project, StoredReading } from "../db";
+import type { CalendarDay, CalendarEvent } from "../schema";
 import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, RefreshButton, Updated } from "./common";
-import { DailyReading } from "./DailyReading";
 import { PressureBlob } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
@@ -139,20 +137,12 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
 
 export function TodayColumn({
   pressure,
-  reading,
-  projects,
-  news,
-  readingBusy,
   calendar,
   taskStates,
   busy,
   onChange,
 }: {
   pressure: Pressure;
-  reading: StoredReading | null;
-  projects: Project[];
-  news: NewsItem[];
-  readingBusy: boolean;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   busy: boolean;
@@ -169,7 +159,6 @@ export function TodayColumn({
   return (
     <section className="column">
       <PressureBlob pressure={pressure} />
-      <DailyReading reading={reading} projects={projects} news={news} busy={readingBusy} />
       <header className="column-header">
         <div>
           <h2>Today</h2>

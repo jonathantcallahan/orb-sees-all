@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
@@ -105,9 +106,10 @@ export default function App() {
       </header>
 
       <main className="columns">
-        <TodayColumn pressure={load} reading={data.reading} projects={data.projects} news={data.adhoc.news} readingBusy={running.includes("reading")} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        <TodayColumn pressure={load} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
+          <DailyReading reading={data.reading} projects={data.projects} news={data.adhoc.news} busy={running.includes("reading")} />
           <header className="column-header">
             <h2>Projects</h2>
           </header>
