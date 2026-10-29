@@ -60,7 +60,7 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
       <div key={top.key} className={`card update-card${leaving ? " leaving" : ""}`}>
         <div className="update-meta small">
           <span className="update-label">{top.label}</span>
-          {top.date && <span className="muted">{formatWhen(top.date)}</span>}
+          {top.date && <span className="timestamp">{formatWhen(top.date)}</span>}
         </div>
         <p className="update-text">{top.text}</p>
         <div className="update-actions small">

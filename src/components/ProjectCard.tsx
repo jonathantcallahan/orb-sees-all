@@ -96,7 +96,7 @@ function CheckResult({ check, onResolve, onDismiss }: { check: StoredBlockerChec
     <div className={`check-result ${check.verdict}`} onClick={(e) => e.stopPropagation()}>
       <div className="check-head small">
         <span className="check-verdict">{VERDICT_LABEL[check.verdict]}</span>
-        <span className="muted">checked {ago(check.at)}</span>
+        <span className="timestamp">checked {ago(check.at)}</span>
       </div>
       <p className="small">{check.summary}</p>
       {check.next_step && <p className="small muted">Next: {check.next_step}</p>}
@@ -143,7 +143,7 @@ function RemindAction({
     return (
       <span className="remind">
         {reminder && (
-          <ExternalLink href={reminder.link} className="muted small reminded" title={new Date(reminder.at).toLocaleString()}>
+          <ExternalLink href={reminder.link} className="timestamp small reminded" title={new Date(reminder.at).toLocaleString()}>
             Reminded {ago(reminder.at)}
           </ExternalLink>
         )}

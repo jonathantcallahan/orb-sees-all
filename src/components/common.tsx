@@ -108,9 +108,9 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
 }
 
 export function Updated({ at }: { at: string | null | undefined }) {
-  if (!at) return <span className="muted small">never refreshed</span>;
+  if (!at) return <span className="timestamp small">never refreshed</span>;
   const d = new Date(at);
   const today = d.toDateString() === new Date().toDateString();
   const text = d.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return <span className={`muted small${today ? "" : " stale"}`}>updated {text}</span>;
+  return <span className={`timestamp small${today ? "" : " stale"}`}>updated {text}</span>;
 }

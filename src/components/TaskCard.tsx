@@ -380,7 +380,7 @@ function TaskCheckResult({
     <div className={`check-result task-check ${check.verdict}`}>
       <div className="check-head small">
         <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span>
-        <span className="muted">checked {ago(check.at)}</span>
+        <span className="timestamp">checked {ago(check.at)}</span>
       </div>
       <p className="small">{check.summary}</p>
       {check.findings.length > 0 && (

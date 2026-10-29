@@ -85,6 +85,8 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 
 .row { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--muted); }
+/* Timestamps and "updated …" sit a step lighter than the text around them. */
+.timestamp { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .small { font-size: 12px; }
 .stale { color: var(--amber); }
 .error { color: var(--red); }
@@ -260,7 +262,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .owners h4 { margin: 0 2px 0 0; }
 .owner { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--grey-bg); }
 .owner.me { background: var(--grey-bg); color: var(--text); }
-.work-items .age { font-size: 11px; color: var(--muted); }
+.work-items .age { font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .project-meta { display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
 
 /* Tasks column: project badges and the project filter */
@@ -358,6 +360,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-block.current { border-color: var(--red); }
 .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-when, .event-prep { color: var(--muted); font-size: 10px; }
+.event-when { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .event-prep { color: var(--amber); }
 .now-line { position: absolute; left: 40px; right: 0; height: 0; border-top: 2px solid var(--red); z-index: 2; pointer-events: none; }
 .now-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
@@ -542,7 +545,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .filter-select.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
 .filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: var(--muted); }
+.inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 /* Five rows of about 39px with 6px gaps; more scroll. */
 .inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .inbox-item { flex-shrink: 0; }

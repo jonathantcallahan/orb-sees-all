@@ -52,7 +52,7 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
   return (
     <div className="card meeting-card" style={{ left, width, ...vertical }} role="tooltip">
       <div className="meeting-card-title">{ev.title}</div>
-      <div className="muted small">
+      <div className="timestamp small">
         {time(ev.start)} – {time(ev.end)}
         {ev.video_link && ` · ${hostOf(ev.video_link)}`}
       </div>
@@ -177,7 +177,7 @@ export function TodayColumn({
           {upcomingPrep.map((ev) => (
             <div key={ev.id} className="prep-meeting">
               <div className="small prep-for" title={ev.title}>
-                <span className="muted">{time(ev.start)}</span> {ev.title}
+                <span className="timestamp">{time(ev.start)}</span> {ev.title}
                 {ev.related_project && <span className="chip">{nameFromChannel(ev.related_project)}</span>}
               </div>
               <Checklist tasks={applyTaskState(ev.prep, taskStates)} onChange={onChange} />
