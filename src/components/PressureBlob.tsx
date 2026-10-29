@@ -205,7 +205,7 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
     <div className={`pressure mood-${mood}`} title={counts ?? "Nothing waiting on you"}>
       <div ref={mount} className="pressure-blob" aria-hidden />
       <div className="muted small">Orb is {mood}</div>
-      {counts && <div className="muted small">{counts}</div>}
+      {counts && <div className="small pressure-stats">{counts}</div>}
     </div>
   );
 }

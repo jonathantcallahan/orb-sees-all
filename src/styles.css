@@ -571,3 +571,5 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-modal-steps .step-circle { margin-top: 4px; }
 .plan-modal section h4 { margin-top: 0; }
 .plan-modal-actions { display: flex; gap: 14px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
+/* The orb's stats line: a step fainter than other gray text */
+.pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
