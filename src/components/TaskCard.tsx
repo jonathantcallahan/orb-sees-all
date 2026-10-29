@@ -63,7 +63,7 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
         <ol className="plan-modal-steps">
           {plan.steps.map((step, i) => (
             <li key={i}>
-              <span className="step-circle" aria-hidden />
+              <StepCircle />
               <div>
                 <ExternalLink href={step.link} className="plan-step-title">
                   {step.title}
@@ -276,6 +276,15 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
  * With no plan yet, the next action stands in as step one. `action` (e.g.
  * Approve & start) sits inside, under the steps.
  */
+/** A small dashed ring marking a plan step. */
+function StepCircle() {
+  return (
+    <svg className="step-circle" width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+      <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
+    </svg>
+  );
+}
+
 interface OutlineStep {
   title: string;
   /** Who does it; null for older plans that didn't say. */
@@ -289,7 +298,7 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
       <ol className="plan-outline-steps">
         {steps.map((step, i) => (
           <li key={i} className={step.by ? `by-${step.by}` : undefined}>
-            <span className="step-circle" aria-hidden />
+            <StepCircle />
             <span className="small">
               {step.title}
               {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}

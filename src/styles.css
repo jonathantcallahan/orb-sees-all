@@ -548,7 +548,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline { margin-top: 4px; padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
-.step-circle { flex-shrink: 0; width: 11px; height: 11px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
 
