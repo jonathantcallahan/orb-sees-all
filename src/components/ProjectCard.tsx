@@ -1,6 +1,6 @@
 import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
-import type { ProjectStatus, PullRequest, Raci } from "../schema";
+import type { Blocker, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
@@ -20,6 +20,26 @@ const RACI_LABEL: Record<Raci, string> = {
   consulted: "Consulted",
   informed: "Informed",
 };
+
+/** One line of label, owners and age, with the work itself underneath. */
+function WorkItem({ item, label, kind }: { item: Blocker; label: string; kind: "blocker" | "active" }) {
+  return (
+    <li className={`work-item ${kind}`}>
+      <div className="owners">
+        <h4>{label}</h4>
+        {item.owners.map((o) => (
+          <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
+            {o.is_me ? "You" : o.name}
+          </span>
+        ))}
+        {item.since && <span className="age">{age(item.since)}</span>}
+      </div>
+      <ExternalLink href={item.link} className="what">
+        {item.what}
+      </ExternalLink>
+    </li>
+  );
+}
 
 function prLabel(pr: PullRequest) {
   if (pr.isDraft) return "draft";
@@ -106,22 +126,17 @@ export function ProjectCard({
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
           {s.blockers?.length > 0 && (
-            <ul className="blockers">
+            <ul className="work-items">
               {s.blockers.map((b) => (
-                <li key={b.id}>
-                  <div className="owners">
-                    <h4>Blocked by</h4>
-                    {b.owners.map((o) => (
-                      <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
-                        {o.is_me ? "You" : o.name}
-                      </span>
-                    ))}
-                    {b.since && <span className="age">{age(b.since)}</span>}
-                  </div>
-                  <ExternalLink href={b.link} className="what">
-                    {b.what}
-                  </ExternalLink>
-                </li>
+                <WorkItem key={b.id} item={b} label="Blocked by" kind="blocker" />
+              ))}
+            </ul>
+          )}
+
+          {s.active?.length > 0 && (
+            <ul className="work-items">
+              {s.active.map((a) => (
+                <WorkItem key={a.id} item={a} label="Active" kind="active" />
               ))}
             </ul>
           )}

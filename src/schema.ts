@@ -60,7 +60,7 @@ export const Person = z.object({
 });
 export type Person = z.infer<typeof Person>;
 
-/** A task that's holding the project up, and who owns it. */
+/** A piece of work on the project and who owns it: a blocker, or active work. */
 export const Blocker = z.object({
   /** Permalink of the message that raised it; matches the my_tasks id when the user owns it. */
   id: z.string(),
@@ -87,6 +87,8 @@ export const ProjectSnapshot = z.object({
   raci: z.object({ role: Raci, reason: z.string() }),
   priority: z.object({ level: ProjectPriority, reason: z.string() }),
   blockers: z.array(Blocker),
+  /** Planned work that's underway and isn't holding anyone up. */
+  active: z.array(Blocker).default([]),
   my_tasks: z.array(ProjectTask),
   /** Notable developments since the previous snapshot. */
   recent_updates: z.array(z.object({ summary: z.string(), date: z.string().nullish(), link: z.string().nullish() })).default([]),

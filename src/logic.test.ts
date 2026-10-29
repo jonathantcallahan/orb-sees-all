@@ -287,6 +287,7 @@ describe("readingContext", () => {
         { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },
       ],
       my_tasks: [{ id: "t1", title: "Confirm QA decisions", assessment: { automation: "human" as const, suggestion: "", needs_details: false, priority: "critical" as const, estimate_minutes: 20 } }],
+      active: [{ id: "a1", what: "Partial-refund tickets", owners: [{ name: "ILT team", is_me: false }] }],
       recent_updates: [{ summary: "Dev-complete moved to Nov 17" }],
       summary: "",
     };
@@ -299,7 +300,12 @@ describe("readingContext", () => {
       calendar: null,
       today: "2026-10-29",
     });
-    expect(ctx.projects[0]).toMatchObject({ name: "Asset refunds", blocked_on_me: ["QA decisions"], blocked_on_others: ["Reason codes (Alex)"] });
+    expect(ctx.projects[0]).toMatchObject({
+      name: "Asset refunds",
+      blocked_on_me: ["QA decisions"],
+      blocked_on_others: ["Reason codes (Alex)"],
+      active_work: ["Partial-refund tickets (ILT team)"],
+    });
     expect(ctx.tasks).toEqual([{ title: "Confirm QA decisions", project: "Asset refunds", priority: "critical", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
     expect(ctx.news).toEqual(["Reorg announced"]);

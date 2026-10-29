@@ -36,6 +36,7 @@ export function readingContext(r: ReadingInput) {
         my_role: s.raci?.role,
         blocked_on_me: (s.blockers ?? []).filter((b) => b.owners.some((o) => o.is_me)).map((b) => b.what),
         blocked_on_others: (s.blockers ?? []).filter((b) => !b.owners.some((o) => o.is_me)).map((b) => `${b.what} (${b.owners.map((o) => o.name).join(", ")})`),
+        active_work: (s.active ?? []).map((a) => `${a.what} (${a.owners.map((o) => (o.is_me ? "you" : o.name)).join(", ")})`),
         recent_updates: (s.recent_updates ?? []).map((u) => u.summary),
       };
     });

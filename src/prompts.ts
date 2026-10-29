@@ -68,7 +68,8 @@ Fields:
 - status_reason: one sentence naming the specific late item or dependency.
 - raci: the user's role, inferred from how they participate. "accountable" = they own the outcome (they set direction, make the calls, report status upward, or others ask them for decisions). "responsible" = they do the work but someone else owns the outcome. "consulted" = people ask their input but they don't drive. "informed" = they mostly read along. reason: one short sentence of evidence.
 - priority: strategic priority to the business, not urgency. "P0" = company-critical: exec-visible, revenue or legal/compliance impact, or a hard external date; "P1" = a committed roadmap item or a dependency for other teams; "P2" = planned work with moderate impact; "P3" = low impact or nice to have; "P4" = exploratory, informational or social. reason: one short sentence.
-- blockers: the tasks currently holding the project up (an unanswered question, a missing decision, review, ticket, or deliverable). what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
+- blockers: work someone is waiting on and can't proceed without until it's done: an unanswered question, a missing decision, review, ticket, or deliverable that stops someone else from working. what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
+- active: planned work that's underway and isn't stopping anyone (tickets in a sprint, a doc being written, a build in progress), with the same fields; since is when it started. Don't repeat anything listed in blockers. At most five, most important first.
 - my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
 - recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with the date (YYYY-MM-DD) and the message permalink. Empty when nothing notable happened.
 - summary: three to five sentences on where the project stands.
@@ -80,6 +81,7 @@ ${JSON_ONLY} Shape:
  "raci": {"role": "responsible"|"accountable"|"consulted"|"informed", "reason": string},
  "priority": {"level": "P0"|"P1"|"P2"|"P3"|"P4", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
+ "active": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": "YYYY-MM-DD"|null, "link": string|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
@@ -215,7 +217,7 @@ ${JSON_ONLY} Shape: {"draft": string}`;
 export function readingPrompt(context: unknown): string {
   return `You are the Orb, who sees all of the user's work. Write today's reading: one paragraph (60 to 110 words) proposing what the user should focus on today and why.
 
-Base it only on this snapshot of their day: projects with status, priority, their role, blockers and recent updates; their open tasks with priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
+Base it only on this snapshot of their day: projects with status, priority, their role, blockers (someone is waiting), active work (underway, not blocking) and recent updates; their open tasks with priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
 ${JSON.stringify(context)}
 
 Name the one or two things that matter most (a blocker only they can clear, a critical task, a deadline, a meeting that needs prep), say roughly how to spend the open time between meetings, and note what can wait. If a project update or piece of news changes today's priorities, weave it in; the full list of updates is shown separately, so don't recite it. Be concrete: use project, task and meeting names. Voice: calm and lightly oracular, but practical; no lists, no headings, no emoji.
