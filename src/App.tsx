@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { Mist } from "./components/Mist";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
@@ -107,6 +108,8 @@ export default function App() {
 
         <TaskColumn adhoc={data.adhoc} manual={data.manual} taskStates={data.taskStates} plans={data.plans} running={running} onChange={reload} />
       </main>
+
+      <Mist />
 
       {showSettings && <Settings projects={data.projects} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>
