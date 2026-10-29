@@ -590,7 +590,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 
 /* Relevant links on a task, as Google Docs–style smart chips */
-.relevant-links { display: flex; flex-direction: column; gap: 4px; }
 .link-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .link-chip {
   display: inline-flex;

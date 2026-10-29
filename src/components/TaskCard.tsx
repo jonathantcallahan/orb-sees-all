@@ -568,13 +568,7 @@ export function TaskCard({
     ],
     [description],
   );
-  const relevantLinks =
-    links.length > 0 ? (
-      <div className="relevant-links">
-        <span className="automation-kind">Relevant links</span>
-        <LinkChips links={links} />
-      </div>
-    ) : undefined;
+  const relevantLinks = <LinkChips links={links} />;
   const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
     await setTaskState(task.id, patch);
     onChange();
