@@ -422,3 +422,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .p-badge.P0 { background: var(--red-bg); color: var(--red); }
 .p-badge.P1 { background: var(--amber-bg); color: var(--amber); }
 .p-badge.P2 { color: var(--text); }
+
+/* Refresh buttons appear when hovering their card or section; a running refresh stays visible. */
+.refresh { visibility: hidden; }
+.refresh.busy,
+.card:hover .refresh,
+.reading:hover .refresh,
+.column:hover > .column-header .refresh { visibility: visible; }

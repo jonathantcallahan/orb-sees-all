@@ -40,7 +40,7 @@ export function ExternalLink({
 
 export function RefreshButton({ busy, onClick, title }: { busy: boolean; onClick: () => void; title: string }) {
   return (
-    <button className="icon-button" onClick={onClick} disabled={busy} title={title} aria-label={title}>
+    <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>
       <span className={busy ? "spin" : undefined}>↻</span>
     </button>
   );
