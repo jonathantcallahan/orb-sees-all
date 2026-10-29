@@ -75,7 +75,7 @@ Fields:
 - blockers: work someone is waiting on and can't proceed without until it's done: an unanswered question, a missing decision, review, ticket, or deliverable that stops someone else from working. what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
 - active: planned work that's underway and isn't stopping anyone (tickets in a sprint, a doc being written, a build in progress), with the same fields; since is when it started. Don't repeat anything listed in blockers. At most five, most important first.
 - my_tasks: (if the project's priority is P0, set every task's assessment priority to "critical") things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
-- recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with the date (YYYY-MM-DD) and the message permalink. Empty when nothing notable happened.
+- recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with when it was posted (ISO 8601 date-time with offset, e.g. "2026-10-29T14:05:00-07:00") and the message permalink. Empty when nothing notable happened.
 - summary: three to five sentences on where the project stands.
 - last_activity: YYYY-MM-DD of the latest message.
 
@@ -87,7 +87,7 @@ ${JSON_ONLY} Shape:
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "active": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
- "recent_updates": [{"summary": string, "date": "YYYY-MM-DD"|null, "link": string|null}],
+ "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
 }
 
@@ -127,13 +127,13 @@ Return the full lists of what's still open: carried-over items that aren't resol
 - follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
 - ${ASSESSMENT_GUIDE}
 
-For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is YYYY-MM-DD. At most eight, most important first.
+For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is when it was posted, as ISO 8601 date-time with offset. At most eight, most important first.
 
 For each reply:
 - id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: when the message was sent, as ISO 8601 date-time with offset (e.g. "2026-10-29T14:05:00-07:00"). link: as for tasks.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": "YYYY-MM-DD"|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": string|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": string|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": string|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {

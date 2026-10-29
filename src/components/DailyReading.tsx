@@ -4,7 +4,7 @@ import { setTaskState, type Project, type StoredReading } from "../db";
 import { stateOf, type TaskState } from "../tasks";
 import { refreshReading } from "../jobs";
 import { projectName } from "../projects";
-import { localDate } from "../scheduler";
+import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton } from "./common";
 
@@ -60,7 +60,7 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
       <div key={top.key} className={`card update-card${leaving ? " leaving" : ""}`}>
         <div className="update-meta small">
           <span className="update-label">{top.label}</span>
-          {top.date && <span className="muted">{top.date}</span>}
+          {top.date && <span className="muted">{formatWhen(top.date)}</span>}
         </div>
         <p className="update-text">{top.text}</p>
         <div className="update-actions small">

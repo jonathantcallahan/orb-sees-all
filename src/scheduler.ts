@@ -23,3 +23,17 @@ export function shouldRunMorning(now: Date, schedule: MorningSchedule, lastFullR
   const [h, m] = schedule.time.split(":").map(Number);
   return now.getHours() * 60 + now.getMinutes() >= h * 60 + m;
 }
+
+/** A message time: the time today, "Yesterday 3:05 PM", or "Oct 27, 3:05 PM"; bare dates as "Oct 27". */
+export function formatWhen(received: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(received)) {
+    return new Date(`${received}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  const d = new Date(received);
+  if (Number.isNaN(d.getTime())) return received;
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = localDate(d);
+  if (day === localDate(new Date())) return time;
+  if (day === localDate(new Date(Date.now() - 86_400_000))) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}

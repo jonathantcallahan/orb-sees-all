@@ -4,24 +4,10 @@ import { draftReply } from "../jobs";
 import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
 import { useJobStatus } from "../useAppData";
-import { localDate } from "../scheduler";
+import { formatWhen } from "../scheduler";
 import { ExternalLink } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
-
-/** "3:12 PM" today, "Yesterday 3:12 PM", or "Oct 27, 9:05 AM"; older refreshes stored only a date. */
-function when(received: string): string {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(received)) {
-    return new Date(`${received}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  const d = new Date(received);
-  if (Number.isNaN(d.getTime())) return received;
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const day = localDate(d);
-  if (day === localDate(new Date())) return time;
-  if (day === localDate(new Date(Date.now() - 86_400_000))) return `Yesterday ${time}`;
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
-}
 
 function Draft({ reply, text, onRegenerate }: { reply: QuickReply; text: string; onRegenerate: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -99,7 +85,7 @@ export function Inbox({
               </ExternalLink>
               {r.received && (
                 <span className="inbox-time" title={new Date(r.received).toLocaleString()}>
-                  {when(r.received)}
+                  {formatWhen(r.received)}
                 </span>
               )}
               {drafting ? (
