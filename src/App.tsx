@@ -97,7 +97,7 @@ export default function App() {
       <header className="topbar">
         <div className="row">
           <h1>{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</h1>
-          <span className="motto">Remember dear worker the orb sees all.</span>
+          <span className="motto">Remember dear worker, the orb sees all.</span>
         </div>
         <div className="row">
           {allStatus ? (
