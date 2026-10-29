@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions } from "../prompts";
@@ -130,56 +131,111 @@ function RemindAction({
   const sending = useJobStatus(`remind:${item.id}`);
   if (others.length === 0) return null;
 
-  if (text === null) {
-    return (
-      <span className="remind">
-        {reminder && (
-          <ExternalLink href={reminder.link} className="timestamp small reminded" title={new Date(reminder.at).toLocaleString()}>
-            Reminded {ago(reminder.at)}
-          </ExternalLink>
-        )}
-        <button
-          className="link-button small remind-open"
-          onClick={() => {
-            setError(null);
-            setText(reminderText(others, item.what, item.link));
-          }}
-        >
-          Send reminder
-        </button>
-      </span>
-    );
-  }
+  const send = async () => {
+    if (!text?.trim()) return;
+    try {
+      await sendReminder(item.id, channelId, toSlackMentions(text.trim(), others));
+      setText(null);
+      onSent();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   return (
-    <div className="remind-composer" onClick={(e) => e.stopPropagation()}>
-      <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} disabled={!!sending} />
-      <div className="remind-actions small">
-        <span className="muted">
-          {sending ? `${sending}…` : error ? <span className="error">Couldn't send: {error}</span> : "Posts to the project channel"}
-        </span>
-        <span className="remind-buttons">
-          <button className="link-button small muted" disabled={!!sending} onClick={() => setText(null)}>
+    <span className="remind">
+      {reminder && (
+        <ExternalLink href={reminder.link} className="timestamp small reminded" title={new Date(reminder.at).toLocaleString()}>
+          Reminded {ago(reminder.at)}
+        </ExternalLink>
+      )}
+      <button
+        className="link-button small remind-open"
+        onClick={() => {
+          setError(null);
+          setText(reminderText(others, item.what, item.link));
+        }}
+      >
+        Send reminder
+      </button>
+      {text !== null && (
+        <ReminderModal
+          to={others.map((o) => o.name).join(", ")}
+          text={text}
+          status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
+          failed={!!error && !sending}
+          busy={!!sending}
+          onChange={setText}
+          onCancel={() => !sending && setText(null)}
+          onSend={send}
+        />
+      )}
+    </span>
+  );
+}
+
+/** The reminder text in a centered modal, editable before it's posted. Esc cancels; ⌘↩ sends. */
+function ReminderModal({
+  to,
+  text,
+  status,
+  failed,
+  busy,
+  onChange,
+  onCancel,
+  onSend,
+}: {
+  to: string;
+  text: string;
+  status: string | null;
+  failed: boolean;
+  busy: boolean;
+  onChange: (text: string) => void;
+  onCancel: () => void;
+  onSend: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // Portaled to <body>; clicks still bubble through React, so stop them before they select the project.
+  return createPortal(
+    <div
+      className="modal-backdrop plan-modal-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCancel();
+      }}
+    >
+      <div className="modal plan-modal" role="dialog" aria-label={`Remind ${to}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>Remind {to}</h2>
+        </header>
+        <textarea
+          autoFocus
+          className="description-editor"
+          rows={6}
+          value={text}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend();
+          }}
+        />
+        <footer className="plan-modal-actions edit-actions">
+          <span className={`small ${failed ? "error" : "muted"} remind-status`}>{status ?? "Posts to the project's Slack channel, tagging them."}</span>
+          <button className="cta-ghost" disabled={busy} onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className="link-button small"
-            disabled={!!sending || !text.trim()}
-            onClick={async () => {
-              try {
-                await sendReminder(item.id, channelId, toSlackMentions(text.trim(), others));
-                setText(null);
-                onSent();
-              } catch (e) {
-                setError((e as Error).message);
-              }
-            }}
-          >
+          <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Post to the project channel (⌘↩)">
             Send
           </button>
-        </span>
+        </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

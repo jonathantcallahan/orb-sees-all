@@ -519,10 +519,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
 .check-result .corrected { color: var(--text); }
 .reminded { font-size: 11px; }
-.remind-composer { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
-.remind-composer textarea { font-size: 12px; }
-.remind-actions { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.remind-buttons { display: flex; gap: 12px; flex-shrink: 0; }
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
@@ -616,3 +612,4 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .link-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .description-editor { min-height: 140px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); line-height: 1.5; }
 .edit-actions { justify-content: flex-end; gap: 8px; }
+.remind-status { margin-right: auto; }
