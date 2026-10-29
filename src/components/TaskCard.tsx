@@ -211,7 +211,16 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
   claude: "Claude can do it",
 };
 
-function AssessmentView({ assessment, onAddDetails }: { assessment: Assessment; onAddDetails?: () => void }) {
+function AssessmentView({
+  assessment,
+  onAddDetails,
+  onOpenInClaude,
+}: {
+  assessment: Assessment;
+  onAddDetails?: () => void;
+  /** Present once the task has a plan. */
+  onOpenInClaude?: () => void;
+}) {
   return (
     <>
       {assessment.needs_details && (
@@ -225,7 +234,18 @@ function AssessmentView({ assessment, onAddDetails }: { assessment: Assessment; 
         </div>
       )}
       <div className={`automation ${assessment.automation}`}>
-        <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
+        <div className="automation-head">
+          <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
+          {onOpenInClaude && (
+            <button
+              className="link-button small"
+              onClick={onOpenInClaude}
+              title="Open a new Claude Code session with this task and its plan filled in"
+            >
+              Open in Claude
+            </button>
+          )}
+        </div>
         <span className="small">{assessment.suggestion}</span>
       </div>
     </>
@@ -368,7 +388,11 @@ export function TaskCard({
       )}
 
       {assessment ? (
-        <AssessmentView assessment={assessment} onAddDetails={manual && !editing ? () => setEditing(true) : undefined} />
+        <AssessmentView
+          assessment={assessment}
+          onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
+          onOpenInClaude={plan ? openInClaude : undefined}
+        />
       ) : (
         manual &&
         assessing && (
@@ -400,9 +424,12 @@ export function TaskCard({
             <button className="link-button small" onClick={() => setShowPlan((s) => !s)}>
               {showPlan ? "Hide plan" : `Show plan (${plan.plan.steps.length} steps)`}
             </button>
-            <button className="link-button small" onClick={openInClaude} title="Open a new Claude Code session with this task and its plan filled in">
-              Open in Claude
-            </button>
+            {/* Normally beside the assessment label; here only if the task has no assessment yet. */}
+            {!assessment && (
+              <button className="link-button small" onClick={openInClaude}>
+                Open in Claude
+              </button>
+            )}
             <button className="link-button small muted" onClick={runPlan}>
               Regenerate
             </button>
