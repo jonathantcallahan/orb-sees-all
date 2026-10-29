@@ -1,4 +1,4 @@
-import type { Project } from "../db";
+import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
 import type { ProjectStatus, PullRequest } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
@@ -41,6 +41,16 @@ export function ProjectCard({
           <Updated at={project.last_refreshed_at} />
         </div>
         <div className="row">
+          <button
+            className="link-button small untrack"
+            title="Stop tracking this project. You can track it again in Settings."
+            onClick={async () => {
+              await updateProjectConfig(project.channel_id, { hidden: true, local_repos: project.local_repos, gh_repos: project.gh_repos });
+              onChange();
+            }}
+          >
+            Untrack
+          </button>
           {status && <span className={`pill ${status}`}>{STATUS_LABEL[status]}</span>}
           <RefreshButton busy={busy} title={`Refresh #${project.name}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
         </div>
