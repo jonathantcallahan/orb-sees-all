@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import { nameFromChannel } from "../projects";
@@ -7,8 +7,8 @@ import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, ExternalLink, RefreshButton, Updated } from "./common";
 import { PressureBlob } from "./PressureBlob";
 
-/** Pixels per minute on the day grid (48px an hour). */
-const PX_PER_MIN = 0.8;
+/** Pixels per minute on the day grid (72px an hour). */
+const PX_PER_MIN = 1.2;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
@@ -24,16 +24,10 @@ function useNow(): Date {
 }
 
 function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
-  const range = dayRange(events);
+  const range = dayRange(events, now);
   const hours = Array.from({ length: range.endHour - range.startHour }, (_, i) => range.startHour + i);
   const placed = layoutDay(events, range);
   const nowTop = nowOffset(now, range);
-  const nowLine = useRef<HTMLDivElement>(null);
-
-  // Start with the current time in view.
-  useEffect(() => {
-    nowLine.current?.scrollIntoView({ block: "center" });
-  }, []);
 
   return (
     <div className="day-grid" style={{ height: hours.length * 60 * PX_PER_MIN }}>
@@ -70,7 +64,7 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
         })}
       </div>
       {nowTop != null && (
-        <div ref={nowLine} className="now-line" style={{ top: nowTop * PX_PER_MIN }} title={`Now, ${time(now.toISOString())}`} />
+        <div className="now-line" style={{ top: nowTop * PX_PER_MIN }} title={`Now, ${time(now.toISOString())}`} />
       )}
     </div>
   );

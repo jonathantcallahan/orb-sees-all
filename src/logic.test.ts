@@ -246,6 +246,20 @@ describe("calendar layout", () => {
     expect(byId.c).toMatchObject({ top: 180, height: 30, column: 0, columns: 1 });
   });
 
+  it("drops hours that are long past", () => {
+    const events = [ev("a", [9, 0], [10, 0]), ev("b", [12, 30], [14, 0])];
+    const range = dayRange(events, new Date(2026, 9, 29, 13, 15));
+    expect(range).toEqual({ startHour: 12, endHour: 18 });
+    const placed = layoutDay(events, range);
+    // The 9am meeting is gone; the 12:30 one starts 30 minutes down.
+    expect(placed.map((p) => [p.event.id, p.top, p.height])).toEqual([["b", 30, 90]]);
+  });
+
+  it("clips a meeting that started before the grid", () => {
+    const placed = layoutDay([ev("a", [11, 30], [13, 0])], { startHour: 12, endHour: 18 });
+    expect(placed[0]).toMatchObject({ top: 0, height: 60 });
+  });
+
   it("places the now line only inside the range", () => {
     const range = { startHour: 8, endHour: 18 };
     expect(nowOffset(new Date(2026, 9, 29, 13, 15), range)).toBe(315);

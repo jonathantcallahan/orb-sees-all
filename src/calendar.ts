@@ -11,8 +11,12 @@ const minutesOfDay = (iso: string) => {
   return d.getHours() * 60 + d.getMinutes();
 };
 
-/** 8am to 6pm, stretched to fit any meeting that starts earlier or ends later. */
-export function dayRange(events: Pick<CalendarEvent, "start" | "end">[]): DayRange {
+/**
+ * 8am to 6pm, stretched to fit any meeting that starts earlier or ends later.
+ * With `now`, hours that are long past are dropped: the grid starts one hour
+ * before the current hour.
+ */
+export function dayRange(events: Pick<CalendarEvent, "start" | "end">[], now?: Date): DayRange {
   let startHour = 8;
   let endHour = 18;
   for (const e of events) {
@@ -21,7 +25,9 @@ export function dayRange(events: Pick<CalendarEvent, "start" | "end">[]): DayRan
     // A meeting ending at midnight reads as 0; treat it as the end of the day.
     endHour = Math.max(endHour, Math.ceil((end === 0 ? 24 * 60 : end) / 60));
   }
-  return { startHour, endHour: Math.min(endHour, 24) };
+  endHour = Math.min(endHour, 24);
+  if (now) startHour = Math.max(startHour, Math.min(now.getHours() - 1, endHour - 1));
+  return { startHour, endHour };
 }
 
 export interface PlacedEvent<T> {
@@ -42,11 +48,14 @@ export interface PlacedEvent<T> {
 export function layoutDay<T extends Pick<CalendarEvent, "start" | "end">>(events: T[], range: DayRange): PlacedEvent<T>[] {
   const items = events
     .map((event) => {
-      const start = minutesOfDay(event.start);
+      const rawStart = minutesOfDay(event.start);
       const rawEnd = minutesOfDay(event.end);
-      const end = rawEnd <= start ? 24 * 60 : rawEnd;
+      const end = rawEnd <= rawStart ? 24 * 60 : rawEnd;
+      // Meetings already running when the grid starts are clipped at the top.
+      const start = Math.max(rawStart, range.startHour * 60);
       return { event, start, end };
     })
+    .filter((item) => item.end > item.start)
     .sort((a, b) => a.start - b.start || b.end - a.end);
 
   const placed: PlacedEvent<T>[] = [];
