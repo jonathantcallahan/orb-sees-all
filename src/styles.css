@@ -264,8 +264,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .work-items .age { font-size: 11px; color: var(--muted); }
 .project-meta { display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
 .task-count { color: var(--accent); }
-.project-summary { margin-top: 6px; }
-.project-summary p { margin: 4px 0 0; }
 
 /* Tasks column: project badges and the project filter */
 .project-badge { color: var(--accent); }

@@ -324,12 +324,6 @@ export function ProjectCard({
 
       {s && (
         <>
-          <details className="project-summary">
-            <summary className="muted small">Summary</summary>
-            {s.description && <p className="small">{s.description}</p>}
-            {s.summary && <p className="small">{s.summary}</p>}
-          </details>
-
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
           {blockers.length > 0 && (
