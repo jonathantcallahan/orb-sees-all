@@ -182,6 +182,14 @@ export async function logFinish(id: number, result: { error?: string; costUsd?: 
   ]);
 }
 
+/** Jobs still marked running belong to a previous launch that quit mid-refresh. */
+export async function markInterruptedJobs() {
+  await (await db()).execute(
+    "UPDATE refresh_log SET status = 'error', error = 'Interrupted: the app quit during this refresh', finished_at = $1 WHERE status = 'running'",
+    [nowIso()],
+  );
+}
+
 export interface LogEntry {
   id: number;
   job: string;

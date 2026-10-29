@@ -4,6 +4,7 @@ import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
+import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { compareProjects } from "./tasks";
 import { useAppData, useRunningJobs } from "./useAppData";
@@ -13,7 +14,7 @@ const refreshAllSafely = () => refreshAll().catch(() => {});
 function useScheduler() {
   useEffect(() => {
     const check = () => maybeRunMorning().catch(() => {});
-    check();
+    markInterruptedJobs().then(check, check);
     // The Rust side emits a tick every minute, which reaches the webview even
     // while the window is hidden; the interval and focus check are backups.
     const interval = setInterval(check, 60_000);
