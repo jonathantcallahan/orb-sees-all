@@ -87,26 +87,37 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
     const el = ref.current;
     if (el && !expanded) setOverflows(el.scrollHeight - el.clientHeight > 4);
   }, [text, expanded]);
+  const edit = onEdit && (
+    <button className="link-button small muted inline-action" onClick={onEdit}>
+      Edit
+    </button>
+  );
 
   return (
-    <div>
+    <div className="description-wrap">
       <p ref={ref} className={`description small${expanded ? "" : " clamped"}`}>
         {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
         {text}
+        {/* Expanded, or short enough to fit: actions follow the text inline. */}
+        {(expanded || !overflows) && (
+          <>
+            {expanded && (
+              <button className="link-button small inline-action" onClick={() => setExpanded(false)}>
+                Less
+              </button>
+            )}
+            {edit}
+          </>
+        )}
       </p>
-      {(overflows || onEdit) && (
-        <div className="description-actions">
-          {overflows && (
-            <button className="link-button small" onClick={() => setExpanded((e) => !e)}>
-              {expanded ? "Less" : "More"}
-            </button>
-          )}
-          {onEdit && (
-            <button className="link-button small muted" onClick={onEdit}>
-              Edit
-            </button>
-          )}
-        </div>
+      {/* Clamped: More sits at the end of the second line, fading the text under it. */}
+      {overflows && !expanded && (
+        <span className="more-overlay">
+          <button className="link-button small" onClick={() => setExpanded(true)}>
+            More
+          </button>
+          {edit}
+        </span>
       )}
     </div>
   );
@@ -152,7 +163,7 @@ const PRIORITY_LABEL: Record<EffectivePriority, string> = {
 function RecommendedBadge() {
   return (
     <span className="badge recommended" title="The Orb recommends doing this today to move a P0 project forward">
-      ✦ Recommended
+      <span className="sparkle" aria-hidden>✦</span>Recommended
     </span>
   );
 }
@@ -212,7 +223,6 @@ function PlanOutline({ steps, action }: { steps: string[]; action?: ReactNode })
   if (steps.length === 0 && !action) return null;
   return (
     <div className="plan-outline">
-      <span className="follow-up-kind">Plan</span>
       <ol className="plan-outline-steps">
         {steps.map((step, i) => (
           <li key={i}>
@@ -231,15 +241,15 @@ function PlanOutline({ steps, action }: { steps: string[]; action?: ReactNode })
 function AssessmentView({
   assessment,
   steps,
+  actions,
   onAddDetails,
-  onStart,
 }: {
   assessment: Assessment;
-  /** Plan step titles (or the next action), shown inside the assessment. */
+  /** Steps Claude can complete on its own, shown inside the assessment. */
   steps: string[];
+  /** Approve & start and Show plan details, under the steps. */
+  actions?: ReactNode;
   onAddDetails?: () => void;
-  /** Approve Claude's approach and start on it; offered when Claude can help or do it. */
-  onStart?: () => void;
 }) {
   return (
     <>
@@ -256,20 +266,7 @@ function AssessmentView({
       <div className={`automation ${assessment.automation}`}>
         <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
         <span className="small">{assessment.suggestion}</span>
-        <PlanOutline
-          steps={steps}
-          action={
-            onStart && (
-              <button
-                className="link-button small approve-start"
-                onClick={onStart}
-                title="Mark this in progress and open a Claude Code session to start on it"
-              >
-                Approve & start
-              </button>
-            )
-          }
-        />
+        <PlanOutline steps={steps} action={actions} />
       </div>
     </>
   );
@@ -328,6 +325,21 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
+  const planActions =
+    planSteps.length > 0 || plan ? (
+      <div className="plan-actions">
+        {planSteps.length > 0 && assessment && (
+          <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session to start on these steps">
+            Approve & start
+          </button>
+        )}
+        {plan && !planning && (
+          <button className="cta-secondary" onClick={() => setShowPlan((v) => !v)}>
+            {showPlan ? "Hide plan details" : "Show plan details"}
+          </button>
+        )}
+      </div>
+    ) : null;
   const runPlan = () => {
     setShowPlan(true);
     planTask({
@@ -427,7 +439,7 @@ export function TaskCard({
           assessment={assessment}
           steps={planSteps}
           onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
-          onStart={planSteps.length > 0 ? approveAndStart : undefined}
+          actions={planActions}
         />
       ) : (
         <>
@@ -437,7 +449,7 @@ export function TaskCard({
             </div>
           )}
           {/* No assessment to nest it in yet. */}
-          <PlanOutline steps={planSteps} />
+          <PlanOutline steps={planSteps} action={planActions} />
         </>
       )}
 
@@ -453,14 +465,8 @@ export function TaskCard({
           </span>
         ) : plan ? (
           <>
-            <button className="link-button small" onClick={() => setShowPlan((s) => !s)}>
-              {showPlan ? "Hide plan" : `Show plan (${plan.plan.steps.length} steps)`}
-            </button>
             <button className="link-button small" onClick={openInClaude} title="Open a new Claude Code session with this task and its plan filled in">
               Open in Claude
-            </button>
-            <button className="link-button small muted" onClick={runPlan}>
-              Regenerate
             </button>
           </>
         ) : description ? (

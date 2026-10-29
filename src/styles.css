@@ -279,7 +279,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Task descriptions: two lines until expanded */
 .description.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.description-actions { display: flex; gap: 10px; margin-top: 2px; }
 .draft-label { color: var(--accent); }
 .add-description { align-self: flex-start; font-style: italic; }
 
@@ -512,6 +511,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
+.badge.recommended, .filter-select.recommended { display: inline-flex; align-items: center; gap: 3px; }
+/* The four-pointed star glyph sits high on its baseline; center it on its own box. */
+.sparkle { display: inline-block; font-size: 9px; line-height: 1; transform: translateY(-0.5px); }
 
 .motto { color: var(--muted); font-size: 17px; margin-left: 2px; }
 
@@ -562,6 +564,27 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   color: var(--muted);
 }
 .plan-outline-steps li .small { padding-top: 2px; }
-.approve-start { align-self: flex-start; }
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
+
+/* Plan panel actions: Claude-style primary approve, quiet secondary */
+.plan-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+.cta-primary { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--text); background: var(--text); color: var(--bg); font-size: 12px; }
+.cta-primary:hover { opacity: 0.88; }
+.cta-secondary { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; }
+.cta-secondary:hover { background: var(--surface); }
+
+/* Description: More inline at the end of line two */
+.description-wrap { position: relative; }
+.inline-action { margin-left: 6px; }
+.more-overlay {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  gap: 6px;
+  padding-left: 28px;
+  font-size: 12px;
+  line-height: 1.45;
+  background: linear-gradient(to right, transparent, var(--surface) 24px);
+}

@@ -70,7 +70,7 @@ function FilterSelect<V extends string>({
 function RecommendedToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
     <button className={`filter-select recommended${on ? " on" : ""}`} aria-pressed={on} onClick={() => onChange(!on)}>
-      ✦ Recommended
+      <span className="sparkle" aria-hidden>✦</span>Recommended
     </button>
   );
 }
