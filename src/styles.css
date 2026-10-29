@@ -297,6 +297,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Task status, estimate and Today controls */
 .task-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .status-select {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  text-align: center;
   font-size: 11px;
   font-weight: 600;
   padding: 1px 6px;

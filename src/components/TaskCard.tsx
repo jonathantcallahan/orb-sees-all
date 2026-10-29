@@ -147,6 +147,8 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   done: "Done",
 };
 
+const DISMISS = "dismiss";
+
 function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
   return (
     <select
@@ -154,7 +156,8 @@ function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void
       value={task.status}
       aria-label="Status"
       onChange={async (e) => {
-        await setTaskState(task.id, { status: e.target.value as TaskStatus });
+        // Dismiss lives in the same menu: it hides the task rather than setting a status.
+        await setTaskState(task.id, e.target.value === DISMISS ? { dismissed: true } : { status: e.target.value as TaskStatus });
         onChange();
       }}
     >
@@ -163,6 +166,8 @@ function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void
           {STATUS_LABEL[s]}
         </option>
       ))}
+      <option disabled>──────</option>
+      <option value={DISMISS}>Dismiss</option>
     </select>
   );
 }
@@ -250,17 +255,7 @@ export function TaskCard({
         <ExternalLink href={task.link} className="task-title">
           {task.title}
         </ExternalLink>
-        <button
-          className="icon-button dismiss"
-          title="Dismiss"
-          aria-label="Dismiss"
-          onClick={async () => {
-            await setTaskState(task.id, { dismissed: true });
-            onChange();
-          }}
-        >
-          ×
-        </button>
+        <StatusSelect task={task} onChange={onChange} />
       </header>
 
       {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
@@ -274,7 +269,6 @@ export function TaskCard({
       )}
 
       <div className="task-controls">
-        <StatusSelect task={task} onChange={onChange} />
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Claude's estimate of your hands-on time">
             ~{formatMinutes(assessment.estimate_minutes)}
