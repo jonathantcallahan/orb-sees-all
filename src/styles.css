@@ -307,12 +307,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-select.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 .status-select.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
-.carried { font-size: 11px; color: var(--amber); }
+.carried { font-size: 11px; color: var(--muted); }
 
 /* Today's plan at the top of Tasks */
-.today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .today-plan.empty { background: none; padding: 0 10px; }
-.today-plan h4 { margin: 0; color: var(--amber); display: flex; justify-content: space-between; }
+.today-plan h4 { margin: 0; color: var(--text); display: flex; justify-content: space-between; }
 .today-plan .today-heading { font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 
@@ -321,7 +321,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card[draggable="true"]:active { cursor: grabbing; }
 .today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
 .today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
-.today-plan.drop { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.today-plan.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 10%, transparent); }
 
 /* Tasks outside Today: one row until clicked */
 .task-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; }
