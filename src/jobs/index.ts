@@ -165,8 +165,8 @@ export async function refreshAdhoc(): Promise<void> {
         schema: AdhocSnapshot,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
         model: await model(),
-        // Skimming wider channels for news takes more reads than mentions alone.
-        maxTurns: 70,
+        // Reading every DM and mention thread, plus skimming wider channels for news.
+        maxTurns: 100,
       });
       await db.saveAdhoc({ tasks: data.tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
       return { value: undefined, costUsd };

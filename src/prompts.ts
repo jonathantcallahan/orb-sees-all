@@ -101,6 +101,8 @@ export interface AdhocPromptInput {
 
 export function adhocPrompt(p: AdhocPromptInput): string {
   const since = windowStart(p.lastRefreshedAt, p.now, 7);
+  // Unanswered messages are rechecked over a fixed week, so one missed by an earlier refresh still turns up.
+  const replyWindow = windowStart(null, p.now, 7);
   return `Build the user's list of open ad-hoc tasks: requests or commitments that are NOT part of a project channel (channels named tmp-*). The user is Slack user ${p.userId}.
 
 Currently open tasks from the last refresh (${p.lastRefreshedAt ?? "never"}):
@@ -110,13 +112,17 @@ Messages waiting on a quick reply from the last refresh:
 ${JSON.stringify(p.previousReplies)}
 
 Look for new items since ${since.date}:
-- Slack: slack_search_public_and_private with "<@${p.userId}> after:${since.date}" and with "is:dm after:${since.date}". Skip anything in a tmp-* channel. A task is a direct request of the user, a question awaiting their answer, or something they said they'd do.
+- Slack messages awaiting the user's response, since ${replyWindow.date}. Check all of these, in every channel including tmp-* ones:
+  - @-mentions: slack_search_public_and_private with "<@${p.userId}> after:${replyWindow.date}".
+  - DMs and group DMs: slack_list_user_channels with types "im,mpim", then slack_read_channel (oldest ${replyWindow.unix}, response_format "concise") on each one with activity in that window. Also run slack_search_public_and_private with "is:dm after:${replyWindow.date}" to catch any you missed.
+  For each message, decide whether a response from the user is expected: a question to them, a request or ask, a review or opinion they were asked for, an invitation or proposal awaiting a yes or no, or a follow-up on something they owe. Not expected: FYIs, thanks, announcements, @here/@channel blasts that don't ask them anything, bots, and messages where someone else already gave the answer that was needed. Then check whether the user has responded: read the thread (slack_read_thread) and, in a DM, the messages after it. A reply in the thread, a later message in the DM that addresses it, or an emoji reaction that fully answers it (a ✅ on "can you confirm?") counts as responded. Anything expected and not responded to is a reply below.
+  A task is a direct request of the user, a question awaiting their answer, or something they said they'd do, outside tmp-* channels (project channels have their own task lists).
 - Gmail: search_threads with "in:inbox after:${since.date.replaceAll("-", "/")} -category:promotions -category:social -category:updates". A task is a thread where a person (not an automated sender) asks the user to reply, decide, review, or do something, and the user hasn't replied after that ask.
 - News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")} from:unity3d.com" or company-wide lists). Keep only what matters to someone working on the Asset Store, commerce and package distribution: launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
 Sort what's still open into two lists:
-- replies: every Slack message and email addressed to the user that is waiting on a response from them and that they haven't answered, quick or not.
+- replies: every Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, quick or not, including in tmp-* channels. Drop a carried-over reply once the user has responded.
 - tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply. A message that needs both a response and real work goes in both lists, with the same id.
 
 Return the full lists of what's still open: carried-over items that aren't resolved, plus new ones.
