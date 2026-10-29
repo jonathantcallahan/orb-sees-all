@@ -117,6 +117,7 @@ export default function App() {
           onClearFilter={() => setFilterProject(null)}
           taskStates={data.taskStates}
           plans={data.plans}
+          assessments={data.assessments}
           running={running}
           onChange={reload}
         />

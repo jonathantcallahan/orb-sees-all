@@ -3,6 +3,13 @@ import type { AdhocTask, ProjectSnapshot, RepoState } from "./schema";
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 
+/** Shared definition of a task assessment, used by every prompt that produces tasks. */
+const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and Unity's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
+  - automation: "human" = needs the user's judgment, relationships or presence (a decision, a negotiation, a 1:1); "assisted" = the user does it, but Claude can do much of the legwork (research, a first draft, a summary, a ticket write-up); "claude" = Claude could produce the finished result for the user to review and send (a status summary, a ticket from a clear spec, a reply that only restates facts).
+  - suggestion: one sentence with a concrete first take: how to approach it, or what Claude would produce.
+  - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.`;
+const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null}`;
+
 /** ISO date (YYYY-MM-DD) and unix seconds for an incremental read window. */
 export function windowStart(lastRefreshedAt: string | null, now: Date, firstRunDays: number) {
   // Overlap by an hour so messages near the boundary aren't lost.
@@ -59,7 +66,7 @@ Fields:
 - raci: the user's role, inferred from how they participate. "accountable" = they own the outcome (they set direction, make the calls, report status upward, or others ask them for decisions). "responsible" = they do the work but someone else owns the outcome. "consulted" = people ask their input but they don't drive. "informed" = they mostly read along. reason: one short sentence of evidence.
 - priority: strategic priority to the business, not urgency. "critical" = exec-visible, revenue or legal/compliance impact, or a hard external date; "high" = a committed roadmap item or a dependency for other teams; "medium" = planned work with moderate impact; "low" = exploratory, nice-to-have, or social. reason: one short sentence.
 - blockers: the tasks currently holding the project up (an unanswered question, a missing decision, review, ticket, or deliverable). what names the task; owners are the people responsible for it, with is_me true for the user. A project can have no blockers. id is the permalink of the message that raised it; link is the same or a better permalink; since is when it was raised (YYYY-MM-DD).
-- my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null.
+- my_tasks: things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
 - summary: three to five sentences on where the project stands.
 - last_activity: YYYY-MM-DD of the latest message.
 
@@ -69,7 +76,7 @@ ${JSON_ONLY} Shape:
  "raci": {"role": "responsible"|"accountable"|"consulted"|"informed", "reason": string},
  "priority": {"level": "critical"|"high"|"medium"|"low", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
- "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, "link": string|null, "due": "YYYY-MM-DD"|null}],
+ "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
 }
 
@@ -98,9 +105,10 @@ Return the full list of tasks that are still open: carried-over ones that aren't
 - requester: the person's name. due: YYYY-MM-DD or null. link: permalink or Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>".
 - description: two to four sentences: what exactly is being asked, by whom and why, and any context or constraints from the thread. Keep a carried-over task's description unless the thread added something.
 - follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
+- ${ASSESSMENT_GUIDE}
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {
@@ -148,4 +156,25 @@ Then propose a plan:
 
 ${READ_ONLY} Don't take any of the steps yourself; only propose them.
 ${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
+}
+
+export interface AssessPromptInput {
+  userId: string | null;
+  tasks: { id: string; title: string; description: string | null }[];
+}
+
+export function assessPrompt(p: AssessPromptInput): string {
+  return `The user (a product manager on Unity's Asset Store${p.userId ? `, Slack user ${p.userId}` : ""}) keeps a personal to-do list of short notes. For each task below, work out what it means and how it could get done.
+
+Tasks:
+${JSON.stringify(p.tasks)}
+
+For each task:
+- description: when the task has no description, write two or three sentences on what it most likely involves and why, using context you find. Search Slack (slack_search_public_and_private), Gmail (search_threads) and Jira (jira_search) for the task's key terms, people and tickets; a quick search or two per task is enough. Say what you found, not what you guessed: if you found nothing, describe the task only as far as its wording supports. When the task already has a description, return null.
+- ${ASSESSMENT_GUIDE}
+
+Return exactly one entry per task, with the same id.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null}]}`;
 }

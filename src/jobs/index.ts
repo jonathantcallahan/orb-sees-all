@@ -1,8 +1,8 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, calendarPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, CalendarDay, Discovery, ProjectSnapshot, TaskPlan } from "../schema";
+import { AdhocSnapshot, CalendarDay, Discovery, ManualAssessmentBatch, ProjectSnapshot, TaskPlan } from "../schema";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 
@@ -151,6 +151,42 @@ export function refreshCalendar(): Promise<void> {
   );
 }
 
+/** Tasks per Claude call when assessing the user's own tasks. */
+const ASSESS_BATCH = 12;
+
+/**
+ * Has Claude assess the user's own open tasks that don't have an assessment
+ * yet, drafting a description where they left none. Works in batches and
+ * rechecks between them, so tasks added mid-run are picked up.
+ */
+export function assessPendingTasks(): Promise<void> {
+  return queue.run("assess", async () => {
+    for (;;) {
+      const [tasks, assessed, states] = await Promise.all([db.listManualTasks(), db.getAssessments(), db.getTaskStates()]);
+      const pending = tasks.filter((t) => !assessed.has(t.id) && !states.get(t.id)?.done && !states.get(t.id)?.dismissed);
+      if (pending.length === 0) return;
+      const batch = pending.slice(0, ASSESS_BATCH);
+      await logged("assess", `${batch.length} tasks`, async () => {
+        const { data, costUsd } = await runClaude({
+          prompt: assessPrompt({
+            userId: await db.getSetting("slack_user_id"),
+            tasks: batch.map((t) => ({ id: t.id, title: t.title, description: t.description })),
+          }),
+          schema: ManualAssessmentBatch,
+          tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead],
+          model: await model(),
+          maxTurns: 60,
+        });
+        const ids = new Set(batch.map((t) => t.id));
+        const results = data.assessments.filter((a) => ids.has(a.id));
+        if (results.length === 0) throw new Error("Claude returned no assessments for this batch");
+        await db.saveAssessments(results);
+        return { value: undefined, costUsd };
+      });
+    }
+  });
+}
+
 export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };
 
 /** Asks Claude to research a task and propose a plan; the latest plan per task is kept. */
@@ -181,7 +217,12 @@ export function refreshAll(): Promise<void> {
         // Still refresh the projects we already know about.
       }
       const projects = (await db.listProjects()).filter((p) => !p.hidden);
-      await Promise.allSettled([refreshCalendar(), refreshAdhoc(), ...projects.map((p) => refreshProject(p.channel_id))]);
+      await Promise.allSettled([
+        refreshCalendar(),
+        refreshAdhoc(),
+        assessPendingTasks(),
+        ...projects.map((p) => refreshProject(p.channel_id)),
+      ]);
     },
     false,
   );

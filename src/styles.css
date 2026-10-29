@@ -259,3 +259,18 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   color: var(--accent);
   font-size: 12px;
 }
+
+/* Task descriptions: two lines until expanded */
+.description.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.description-actions { display: flex; gap: 10px; margin-top: 2px; }
+.draft-label { color: var(--accent); font-weight: 600; }
+.add-description { align-self: flex-start; font-style: italic; }
+
+/* Claude's assessment of a task */
+.automation { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
+.automation-kind { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.automation.human .automation-kind { color: var(--muted); }
+.automation.assisted .automation-kind { color: var(--accent); }
+.automation.claude .automation-kind { color: var(--green); }
+.needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
+.needs-details .link-button { color: inherit; text-decoration: underline; }

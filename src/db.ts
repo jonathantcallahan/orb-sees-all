@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, CalendarDay, ProjectSnapshot, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, CalendarDay, ManualAssessment, ProjectSnapshot, RepoState, TaskPlan } from "./schema";
 import type { TaskState } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -152,6 +152,26 @@ export async function addManualTask(title: string, projectId: string | null = nu
 
 export async function updateManualTask(id: string, fields: { title: string; description: string | null }) {
   await (await db()).execute("UPDATE manual_tasks SET title = $1, description = $2 WHERE id = $3", [fields.title, fields.description, id]);
+}
+
+export async function getAssessments(): Promise<Map<string, ManualAssessment>> {
+  const rows = await (await db()).select<{ task_id: string; data: string }[]>("SELECT task_id, data FROM task_assessments");
+  return new Map(rows.map((r) => [r.task_id, JSON.parse(r.data)]));
+}
+
+export async function saveAssessments(list: ManualAssessment[]) {
+  const d = await db();
+  for (const a of list) {
+    await d.execute(
+      "INSERT INTO task_assessments (task_id, data, created_at) VALUES ($1, $2, $3) ON CONFLICT(task_id) DO UPDATE SET data = excluded.data, created_at = excluded.created_at",
+      [a.id, JSON.stringify(a), nowIso()],
+    );
+  }
+}
+
+/** Drops a task's assessment so the next assessment run redoes it, e.g. after the user edits it. */
+export async function clearAssessment(taskId: string) {
+  await (await db()).execute("DELETE FROM task_assessments WHERE task_id = $1", [taskId]);
 }
 
 export interface StoredPlan {

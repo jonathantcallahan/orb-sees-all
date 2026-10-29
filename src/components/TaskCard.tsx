@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { setTaskState, updateManualTask, type StoredPlan } from "../db";
-import { planTask } from "../jobs";
-import type { FollowUp, FollowUpKind } from "../schema";
+import { useLayoutEffect, useRef, useState } from "react";
+import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
+import { assessPendingTasks, planTask } from "../jobs";
+import type { Assessment, Automation, FollowUp, FollowUpKind, ManualAssessment } from "../schema";
 import { ExternalLink } from "./common";
 
 export interface CardTask {
@@ -16,6 +16,8 @@ export interface CardTask {
   project?: { id: string; name: string };
   /** The task is holding its project up. */
   blocking?: boolean;
+  /** From the refresh that found the task; the user's own tasks are assessed separately. */
+  assessment?: Assessment | null;
   done: boolean;
 }
 
@@ -68,37 +70,93 @@ function Plan({ stored }: { stored: StoredPlan }) {
   );
 }
 
-function EditableDescription({ task, onChange }: { task: CardTask; onChange: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(task.description ?? "");
-  if (!editing) {
-    return (
-      <p className={`description small${task.description ? "" : " muted placeholder"}`} onClick={() => setEditing(true)} title="Click to edit">
-        {task.description || "Add a description…"}
+/** A description clamped to two lines, with More/Less when it runs longer. */
+function Description({ text, draft, onEdit }: { text: string; draft: boolean; onEdit?: () => void }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [text, expanded]);
+
+  return (
+    <div>
+      <p ref={ref} className={`description small${expanded ? "" : " clamped"}`}>
+        {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
+        {text}
       </p>
-    );
-  }
+      {(overflows || onEdit) && (
+        <div className="description-actions">
+          {overflows && (
+            <button className="link-button small" onClick={() => setExpanded((e) => !e)}>
+              {expanded ? "Less" : "More"}
+            </button>
+          )}
+          {onEdit && (
+            <button className="link-button small muted" onClick={onEdit}>
+              Edit
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DescriptionEditor({ task, initial, onDone }: { task: CardTask; initial: string; onDone: (changed: boolean) => void }) {
+  const [text, setText] = useState(initial);
+  const save = async () => {
+    const next = text.trim() || null;
+    const changed = next !== (task.description ?? null);
+    if (changed) {
+      await updateManualTask(task.id, { title: task.title, description: next });
+      // The old assessment was based on the old text; have Claude look again.
+      await clearAssessment(task.id);
+      assessPendingTasks().catch(() => {});
+    }
+    onDone(changed);
+  };
   return (
     <textarea
       autoFocus
-      rows={3}
+      rows={4}
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={async () => {
-        setEditing(false);
-        if (text.trim() !== (task.description ?? "")) {
-          await updateManualTask(task.id, { title: task.title, description: text.trim() || null });
-          onChange();
-        }
-      }}
+      onBlur={save}
       onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          setText(task.description ?? "");
-          setEditing(false);
-        }
+        if (e.key === "Escape") onDone(false);
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
       }}
       placeholder="What's involved, who it's for, links…"
     />
+  );
+}
+
+const AUTOMATION_LABEL: Record<Automation, string> = {
+  human: "You do it",
+  assisted: "Claude can help",
+  claude: "Claude can do it",
+};
+
+function AssessmentView({ assessment, onAddDetails }: { assessment: Assessment; onAddDetails?: () => void }) {
+  return (
+    <>
+      {assessment.needs_details && (
+        <div className="needs-details small">
+          <strong>Needs more detail.</strong> {assessment.details_question}
+          {onAddDetails && (
+            <button className="link-button small" onClick={onAddDetails}>
+              Add details
+            </button>
+          )}
+        </div>
+      )}
+      <div className={`automation ${assessment.automation}`}>
+        <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
+        <span className="small">{assessment.suggestion}</span>
+      </div>
+    </>
   );
 }
 
@@ -106,14 +164,26 @@ export function TaskCard({
   task,
   plan,
   planning,
+  manualAssessment,
+  assessing,
   onChange,
 }: {
   task: CardTask;
   plan: StoredPlan | undefined;
   planning: boolean;
+  /** Claude's assessment of one of the user's own tasks. */
+  manualAssessment?: ManualAssessment;
+  /** An assessment run is in progress and this task has none yet. */
+  assessing: boolean;
   onChange: () => void;
 }) {
   const [showPlan, setShowPlan] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const manual = task.source === "manual";
+  const assessment = manual ? manualAssessment : task.assessment;
+  // Show the user's own words when there are any; otherwise Claude's draft.
+  const draft = manual && !task.description ? manualAssessment?.description : null;
+  const description = task.description || draft;
   // Inbox tasks come with a follow-up; for the rest, the plan's first step is the next action.
   const firstStep = plan?.plan.steps[0];
   const followUp: FollowUp | null = task.follow_up ?? (firstStep ? { kind: "do", action: firstStep.title } : null);
@@ -171,10 +241,34 @@ export function TaskCard({
         </div>
       )}
 
-      {task.source === "manual" ? (
-        <EditableDescription key={task.description ?? ""} task={task} onChange={onChange} />
+      {editing ? (
+        <DescriptionEditor
+          task={task}
+          initial={task.description ?? ""}
+          onDone={(changed) => {
+            setEditing(false);
+            if (changed) onChange();
+          }}
+        />
+      ) : description ? (
+        <Description text={description} draft={!!draft} onEdit={manual ? () => setEditing(true) : undefined} />
       ) : (
-        task.description && <p className="description small">{task.description}</p>
+        manual && (
+          <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
+            Add a description…
+          </button>
+        )
+      )}
+
+      {assessment ? (
+        <AssessmentView assessment={assessment} onAddDetails={manual && !editing ? () => setEditing(true) : undefined} />
+      ) : (
+        manual &&
+        assessing && (
+          <div className="muted small">
+            <span className="spin">✦</span> Claude is reviewing this task…
+          </div>
+        )
       )}
 
       {followUp && (

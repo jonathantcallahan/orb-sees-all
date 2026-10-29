@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as db from "./db";
 import { dataVersion, queue } from "./jobs";
 import { localDate } from "./scheduler";
-import type { CalendarDay } from "./schema";
+import type { CalendarDay, ManualAssessment } from "./schema";
 import type { TaskState } from "./tasks";
 
 export interface AppData {
@@ -12,20 +12,22 @@ export interface AppData {
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   plans: Map<string, db.StoredPlan>;
+  assessments: Map<string, ManualAssessment>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
     db.getCalendarDay(localDate(new Date())),
     db.getTaskStates(),
     db.getTaskPlans(),
+    db.getAssessments(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

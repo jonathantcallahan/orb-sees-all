@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
-import { refreshAdhoc } from "../jobs";
+import { assessPendingTasks, refreshAdhoc } from "../jobs";
+import type { ManualAssessment } from "../schema";
 import { applyTaskState, type TaskState } from "../tasks";
 import { RefreshButton, Updated } from "./common";
 import { TaskCard, type CardTask } from "./TaskCard";
@@ -10,6 +11,7 @@ function Group({
   tasks,
   empty,
   plans,
+  assessments,
   running,
   onChange,
 }: {
@@ -17,6 +19,7 @@ function Group({
   tasks: CardTask[];
   empty: string;
   plans: Map<string, StoredPlan>;
+  assessments: Map<string, ManualAssessment>;
   running: string[];
   onChange: () => void;
 }) {
@@ -25,7 +28,15 @@ function Group({
       <h4>{title}</h4>
       {tasks.length === 0 && <p className="muted small">{empty}</p>}
       {tasks.map((t) => (
-        <TaskCard key={t.id} task={t} plan={plans.get(t.id)} planning={running.includes(`plan:${t.id}`)} onChange={onChange} />
+        <TaskCard
+          key={t.id}
+          task={t}
+          plan={plans.get(t.id)}
+          planning={running.includes(`plan:${t.id}`)}
+          manualAssessment={assessments.get(t.id)}
+          assessing={running.includes("assess")}
+          onChange={onChange}
+        />
       ))}
     </>
   );
@@ -39,6 +50,7 @@ export function TaskColumn({
   onClearFilter,
   taskStates,
   plans,
+  assessments,
   running,
   onChange,
 }: {
@@ -51,6 +63,7 @@ export function TaskColumn({
   onClearFilter: () => void;
   taskStates: Map<string, TaskState>;
   plans: Map<string, StoredPlan>;
+  assessments: Map<string, ManualAssessment>;
   running: string[];
   onChange: () => void;
 }) {
@@ -60,7 +73,7 @@ export function TaskColumn({
     [...adhoc.tasks].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
     taskStates,
   );
-  const shared = { plans, running, onChange };
+  const shared = { plans, assessments, running, onChange };
 
   // The user's tasks from project snapshots: blockers first, then by due date.
   const projectTasks = (filterProject ? [filterProject] : projects).flatMap((p) => {
@@ -89,7 +102,10 @@ export function TaskColumn({
           <h2>Tasks</h2>
           <Updated at={adhoc.refreshed_at} />
         </div>
-        <RefreshButton busy={running.includes("adhoc")} title="Refresh tasks" onClick={() => refreshAdhoc().catch(() => {})} />
+        <RefreshButton busy={running.includes("adhoc") || running.includes("assess")} title="Refresh tasks" onClick={() => {
+            refreshAdhoc().catch(() => {});
+            assessPendingTasks().catch(() => {});
+          }} />
       </header>
 
       <form
@@ -100,6 +116,7 @@ export function TaskColumn({
           await addManualTask(draft.trim());
           setDraft("");
           onChange();
+          assessPendingTasks().catch(() => {});
         }}
       >
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" />

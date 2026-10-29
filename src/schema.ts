@@ -24,6 +24,21 @@ export const FollowUp = z.object({
 });
 export type FollowUp = z.infer<typeof FollowUp>;
 
+/** Who can get a task done: the user alone, the user with Claude's help, or Claude. */
+export const Automation = z.enum(["human", "assisted", "claude"]);
+export type Automation = z.infer<typeof Automation>;
+
+export const Assessment = z.object({
+  automation: Automation,
+  /** One sentence: a first take on how to approach it, or what Claude would do. */
+  suggestion: z.string(),
+  /** Too vague to act on without more from the user. */
+  needs_details: z.boolean(),
+  /** What to ask the user when needs_details is true. */
+  details_question: z.string().nullish(),
+});
+export type Assessment = z.infer<typeof Assessment>;
+
 /** The user's inferred role on a project. */
 export const Raci = z.enum(["responsible", "accountable", "consulted", "informed"]);
 export type Raci = z.infer<typeof Raci>;
@@ -52,6 +67,7 @@ export type Blocker = z.infer<typeof Blocker>;
 export const ProjectTask = Task.extend({
   description: z.string().nullish(),
   follow_up: FollowUp.nullish(),
+  assessment: Assessment.nullish(),
 });
 export type ProjectTask = z.infer<typeof ProjectTask>;
 
@@ -79,6 +95,7 @@ export const AdhocTask = Task.extend({
   requester: z.string().nullish(),
   description: z.string().nullish(),
   follow_up: FollowUp.nullish(),
+  assessment: Assessment.nullish(),
 });
 export type AdhocTask = z.infer<typeof AdhocTask>;
 
@@ -109,6 +126,15 @@ export const CalendarDay = z.object({
   events: z.array(CalendarEvent),
 });
 export type CalendarDay = z.infer<typeof CalendarDay>;
+
+/** Claude's assessment of one of the user's own tasks, with a drafted description if they gave none. */
+export const ManualAssessment = Assessment.extend({
+  id: z.string(),
+  description: z.string().nullish(),
+});
+export type ManualAssessment = z.infer<typeof ManualAssessment>;
+
+export const ManualAssessmentBatch = z.object({ assessments: z.array(ManualAssessment) });
 
 export const TaskPlan = z.object({
   approach: z.string(),
