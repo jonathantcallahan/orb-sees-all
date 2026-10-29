@@ -1,5 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, setTaskState, updateManualTask, type StoredPlan } from "../db";
 import { assessPendingTasks, planTask } from "../jobs";
@@ -39,42 +40,68 @@ export interface CardTask {
 
 const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null } as const;
 
-function Plan({ stored }: { stored: StoredPlan }) {
+/** The full plan in a centered modal; long plans scroll inside it. Esc or the backdrop closes it. */
+function PlanModal({ title, stored, actions, onClose }: { title: string; stored: StoredPlan; actions?: ReactNode; onClose: () => void }) {
   const { plan } = stored;
-  return (
-    <div className="plan">
-      <p className="small">{plan.approach}</p>
-      <ol className="plan-steps small">
-        {plan.steps.map((step, i) => (
-          <li key={i}>
-            <ExternalLink href={step.link} className="plan-step-title">
-              {step.title}
-            </ExternalLink>
-            {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
-            {step.detail && <div className="muted">{step.detail}</div>}
-          </li>
-        ))}
-      </ol>
-      {plan.open_questions.length > 0 && (
-        <>
-          <h4>Open questions</h4>
-          <ul className="small plan-list">
-            {plan.open_questions.map((q, i) => (
-              <li key={i}>{q}</li>
-            ))}
-          </ul>
-        </>
-      )}
-      {plan.sources.length > 0 && (
-        <div className="chips">
-          {plan.sources.map((s) => (
-            <ExternalLink key={s.link} href={s.link} className="chip">
-              {s.title}
-            </ExternalLink>
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Rendered into <body> so the scrolling column can't clip or offset it.
+  return createPortal(
+    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
+      <div className="modal plan-modal" role="dialog" aria-label={`Plan for ${title}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
+            ×
+          </button>
+        </header>
+        <p className="plan-approach">{plan.approach}</p>
+        <ol className="plan-modal-steps">
+          {plan.steps.map((step, i) => (
+            <li key={i}>
+              <span className="step-circle" aria-hidden>
+                {i + 1}
+              </span>
+              <div>
+                <ExternalLink href={step.link} className="plan-step-title">
+                  {step.title}
+                </ExternalLink>
+                {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
+                {step.detail && <div className="muted small">{step.detail}</div>}
+              </div>
+            </li>
           ))}
-        </div>
-      )}
-    </div>
+        </ol>
+        {plan.open_questions.length > 0 && (
+          <section>
+            <h4>Open questions</h4>
+            <ul className="small plan-list">
+              {plan.open_questions.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {plan.sources.length > 0 && (
+          <section>
+            <h4>Sources</h4>
+            <div className="chips">
+              {plan.sources.map((src) => (
+                <ExternalLink key={src.link} href={src.link} className="chip">
+                  {src.title}
+                </ExternalLink>
+              ))}
+            </div>
+          </section>
+        )}
+        {actions && <footer className="plan-modal-actions">{actions}</footer>}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -334,14 +361,13 @@ export function TaskCard({
           </button>
         )}
         {plan && !planning && (
-          <button className="cta-secondary" onClick={() => setShowPlan((v) => !v)}>
-            {showPlan ? "Hide plan details" : "Show plan details"}
+          <button className="link-button small" onClick={() => setShowPlan(true)}>
+            Show plan details
           </button>
         )}
       </div>
     ) : null;
   const runPlan = () => {
-    setShowPlan(true);
     planTask({
       id: task.id,
       title: task.title,
@@ -482,7 +508,25 @@ export function TaskCard({
         )}
       </footer>
 
-      {showPlan && plan && !planning && <Plan stored={plan} />}
+      {showPlan && plan && !planning && (
+        <PlanModal
+          title={task.title}
+          stored={plan}
+          onClose={() => setShowPlan(false)}
+          actions={
+            <>
+              {planSteps.length > 0 && assessment && (
+                <button className="cta-primary" onClick={() => { setShowPlan(false); approveAndStart(); }}>
+                  Approve & start
+                </button>
+              )}
+              <button className="link-button small" onClick={openInClaude}>
+                Open in Claude
+              </button>
+            </>
+          }
+        />
+      )}
     </article>
   );
 }

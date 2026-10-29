@@ -191,9 +191,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card-actions { display: flex; gap: 12px; }
 .link-button { border: none; background: none; padding: 0; color: var(--accent); }
 .link-button:hover:not(:disabled) { text-decoration: underline; }
-.plan { border-top: 1px solid var(--border); padding-top: 8px; }
-.plan p { margin: 0 0 6px; }
-.plan-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .plan-list { margin: 0; padding-left: 18px; }
 
 /* Scroll with the wheel or trackpad; no visible scrollbars. */
@@ -567,12 +564,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
 
-/* Plan panel actions: Claude-style primary approve, quiet secondary */
-.plan-actions { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+/* Plan panel actions: the Claude-style approve button, then text links */
+.plan-actions { display: flex; gap: 14px; align-items: center; margin-top: 2px; }
 .cta-primary { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--text); background: var(--text); color: var(--bg); font-size: 12px; }
 .cta-primary:hover { opacity: 0.88; }
-.cta-secondary { padding: 3px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; }
-.cta-secondary:hover { background: var(--surface); }
 
 /* Description: More inline at the end of line two */
 .description-wrap { position: relative; }
@@ -588,3 +583,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   line-height: 1.45;
   background: linear-gradient(to right, transparent, var(--surface) 24px);
 }
+
+/* Plan details modal, centered */
+.plan-modal-backdrop { align-items: center; z-index: 30; }
+.plan-modal { width: min(640px, 100%); max-height: calc(100vh - 80px); border: 1px solid var(--border); box-shadow: 0 16px 48px rgb(0 0 0 / 0.3); }
+.plan-modal h2 { font-size: 15px; }
+.plan-approach { margin: 0; }
+.plan-modal-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.plan-modal-steps li { display: flex; gap: 10px; align-items: flex-start; }
+.plan-modal-steps .step-circle { width: 24px; height: 24px; font-size: 12px; }
+.plan-modal-steps li > div { padding-top: 3px; }
+.plan-modal section h4 { margin-top: 0; }
+.plan-modal-actions { display: flex; gap: 14px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
