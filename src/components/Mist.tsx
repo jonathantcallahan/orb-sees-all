@@ -53,7 +53,7 @@ void main() {
   float density = smoothstep(0.2, 0.9, d);
   float edge = smoothstep(0.0, 0.75, depth + (d - 0.5) * 0.7);
   float alpha = pow(edge, 0.7) * (0.3 + 0.7 * density) * smoothstep(0.0, 0.3, depth + 0.1);
-  alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9);
+  alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9) * 0.7;
 
   // The orb's mood, blended into the page background: icy blue when calm,
   // violet when restless, ember when stressed.
@@ -62,8 +62,8 @@ void main() {
   vec3 moodWisp = mix(vec3(0.70, 0.80, 1.00), vec3(0.80, 0.70, 1.00), smoothstep(0.0, 0.5, uStress));
   moodWisp = mix(moodWisp, vec3(1.00, 0.62, 0.30), smoothstep(0.5, 1.0, uStress));
   // Dense swirls take some of the mood color; thin areas glow faintly with a pale tint.
-  vec3 glow = mix(uBg, mix(moodWisp, vec3(1.0), 0.35), 0.3);
-  vec3 color = mix(glow, mix(uBg, moodDeep, 0.4), density);
+  vec3 glow = mix(uBg, mix(moodWisp, vec3(1.0), 0.35), 0.2);
+  vec3 color = mix(glow, mix(uBg, moodDeep, 0.3), density);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
