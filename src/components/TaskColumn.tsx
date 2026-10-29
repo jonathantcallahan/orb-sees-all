@@ -4,6 +4,7 @@ import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment } from "../schema";
 import { applyTaskState, formatMinutes, splitToday, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
+import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
 import { setTaskState } from "../db";
 import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
@@ -92,7 +93,7 @@ export function TaskColumn({
     return (p.snapshot?.my_tasks ?? []).map((t) => ({
       ...t,
       source: "project" as const,
-      project: { id: p.channel_id, name: p.name },
+      project: { id: p.channel_id, name: projectName(p) },
       blocking: blocking.has(t.id),
     }));
   });
@@ -201,7 +202,7 @@ export function TaskColumn({
         <>
           <div className="filter-chip">
             <span>
-              Tasks for <strong>#{filterProject.name}</strong>
+              Tasks for <strong>{projectName(filterProject)}</strong>
             </span>
             <button className="icon-button" onClick={onClearFilter} title="Show all tasks" aria-label="Show all tasks">
               ×

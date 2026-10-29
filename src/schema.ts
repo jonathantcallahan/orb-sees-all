@@ -75,6 +75,8 @@ export const ProjectTask = Task.extend({
 export type ProjectTask = z.infer<typeof ProjectTask>;
 
 export const ProjectSnapshot = z.object({
+  /** A short proper name for the project, e.g. "Asset refunds". */
+  name: z.string().nullish(),
   description: z.string(),
   status: ProjectStatus,
   status_reason: z.string(),

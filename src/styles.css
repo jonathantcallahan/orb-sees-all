@@ -13,7 +13,7 @@
   --green: #22803e;
   --green-bg: #e5f4e9;
   --grey-bg: #ececea;
-  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
 }
@@ -58,9 +58,9 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 h1, h2, h3, h4 { margin: 0; }
-h1 { font-size: 20px; }
-h2 { font-size: 16px; }
-h3 { font-size: 14px; }
+h1 { font-size: 17px; }
+h2 { font-size: 14px; }
+h3 { font-size: 13px; font-weight: 400; }
 h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 10px 0 4px; }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--accent); text-decoration: underline; }
@@ -155,7 +155,7 @@ summary { cursor: pointer; }
 
 .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .event-time { font-size: 12px; color: var(--muted); }
-.event-title { font-weight: 600; display: block; margin: 2px 0; }
+.event-title { display: block; margin: 2px 0; }
 .event.past { opacity: 0.55; }
 .event.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
@@ -181,7 +181,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card.done .task-title { text-decoration: line-through; }
 .task-card-header { display: flex; gap: 8px; align-items: flex-start; }
 .task-card-header input { margin-top: 3px; }
-.task-card-header .task-title { flex: 1; font-weight: 600; }
+.task-card-header .task-title { flex: 1; }
 .task-card .dismiss { visibility: hidden; }
 .task-card:hover .dismiss { visibility: visible; }
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -203,7 +203,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan { border-top: 1px solid var(--border); padding-top: 8px; }
 .plan p { margin: 0 0 6px; }
 .plan-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
-.plan-step-title { font-weight: 600; }
 .plan-list { margin: 0; padding-left: 18px; }
 
 /* Scroll with the wheel or trackpad; no visible scrollbars. */
@@ -330,9 +329,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Tasks outside Today: one row until clicked */
 .task-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; }
-.task-row .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.task-row .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-row.done { opacity: 0.6; }
 .task-row.done .task-title { text-decoration: line-through; }
 .task-row .badge, .task-row .estimate { flex-shrink: 0; }
 .badge.priority.medium { color: var(--muted); }
 .badge.priority.low { color: var(--muted); opacity: 0.8; }
+
+/* Project name with its Slack channel underneath */
+.project-channel { display: block; font-size: 11px; color: var(--accent); }

@@ -3,6 +3,7 @@ import type { CalendarDay } from "../schema";
 import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, ExternalLink, RefreshButton, Updated } from "./common";
 import { PressureBlob } from "./PressureBlob";
+import { nameFromChannel } from "../projects";
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
@@ -48,7 +49,7 @@ export function TodayColumn({
               <ExternalLink href={ev.link} className="event-title">
                 {ev.title}
               </ExternalLink>
-              {ev.related_project && <span className="chip">#{ev.related_project}</span>}
+              {ev.related_project && <span className="chip">{nameFromChannel(ev.related_project)}</span>}
               {ev.attendees.length > 0 && <div className="muted small">{ev.attendees.join(", ")}</div>}
               {ev.prep.length > 0 && (
                 <div className="prep">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { JobQueue } from "./jobs/queue";
+import { nameFromChannel, projectName } from "./projects";
 import { windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
 import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, orbMood, pressure, splitToday, type TaskState } from "./tasks";
@@ -205,5 +206,17 @@ describe("orbMood", () => {
     expect(orbMood(p(2, 2, 0.3))).toBe("restless");
     expect(orbMood(p(4, 5, 0.6))).toBe("agitated");
     expect(orbMood(p(6, 8, 1))).toBe("furious");
+  });
+});
+
+describe("project names", () => {
+  it("derives a readable name from the channel", () => {
+    expect(nameFromChannel("tmp-asset-refunds")).toBe("Asset refunds");
+    expect(nameFromChannel("tmp-ucs-googleadmob")).toBe("Ucs googleadmob");
+  });
+
+  it("prefers the name Claude gave the project", () => {
+    expect(projectName({ name: "tmp-ucs-googleadmob", snapshot: null })).toBe("Ucs googleadmob");
+    expect(projectName({ name: "tmp-ucs-googleadmob", snapshot: { name: "UCS Google AdMob" } as never })).toBe("UCS Google AdMob");
   });
 });

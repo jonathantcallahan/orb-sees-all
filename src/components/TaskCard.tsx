@@ -257,7 +257,7 @@ export function TaskCard({
         task.source === "manual"
           ? "the user's own to-do list"
           : task.project
-            ? `project channel #${task.project.name}${task.blocking ? " (this task is blocking the project)" : ""}`
+            ? `the "${task.project.name}" project's Slack channel${task.blocking ? " (this task is blocking the project)" : ""}`
             : task.source,
     }).catch(() => {});
   };
@@ -299,7 +299,7 @@ export function TaskCard({
 
       {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
         <div className="muted small task-meta">
-          {task.project && <span className="badge project-badge">#{task.project.name}</span>}
+          {task.project && <span className="badge project-badge">{task.project.name}</span>}
           {task.blocking && <span className="badge blocking">Blocking</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}

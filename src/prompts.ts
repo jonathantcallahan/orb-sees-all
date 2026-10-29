@@ -62,6 +62,7 @@ ${reading}
 ${repos}
 
 Fields:
+- name: the project's proper name as people refer to it, two to four words in sentence case (e.g. "Asset refunds", "UPM paid products"). Not the channel name.
 - description: what the project is and what it delivers, at most two short lines (about 160 characters). No status here.
 - status: "blocked" = progress cannot continue until someone acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.
 - status_reason: one sentence naming the specific late item or dependency.
@@ -74,7 +75,7 @@ Fields:
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape:
-{"description": string, "status": "on_track"|"at_risk"|"blocked"|"idle", "status_reason": string,
+{"name": string, "description": string, "status": "on_track"|"at_risk"|"blocked"|"idle", "status_reason": string,
  "raci": {"role": "responsible"|"accountable"|"consulted"|"informed", "reason": string},
  "priority": {"level": "critical"|"high"|"medium"|"low", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],

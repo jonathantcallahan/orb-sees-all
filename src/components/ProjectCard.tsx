@@ -2,6 +2,7 @@ import { updateProjectConfig, type Project } from "../db";
 import { refreshProject } from "../jobs";
 import type { Priority, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, applyTaskState, type TaskState } from "../tasks";
+import { projectName, slackChannelUrl } from "../projects";
 import { ExternalLink, RefreshButton, Updated } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -63,7 +64,10 @@ export function ProjectCard({
     >
       <header className="card-header">
         <div>
-          <h3>#{project.name}</h3>
+          <h3>{projectName(project)}</h3>
+          <ExternalLink href={slackChannelUrl(project.channel_id)} className="project-channel">
+            #{project.name}
+          </ExternalLink>
           <Updated at={project.last_refreshed_at} />
         </div>
         <div className="row">
@@ -78,7 +82,7 @@ export function ProjectCard({
             Untrack
           </button>
           {status && <span className={`pill ${status}`}>{STATUS_LABEL[status]}</span>}
-          <RefreshButton busy={busy} title={`Refresh #${project.name}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
+          <RefreshButton busy={busy} title={`Refresh ${projectName(project)}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
         </div>
       </header>
 
