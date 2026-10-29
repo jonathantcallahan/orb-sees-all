@@ -204,6 +204,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .mist canvas { display: block; width: 100%; height: 100%; }
 .column { padding-bottom: calc(var(--mist-height) - 20px); }
 .modal-backdrop { z-index: 10; }
+/* The briefing and header stay put; only the project cards scroll. */
+.projects-column { overflow: hidden; padding-bottom: 0; }
+.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) - 20px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
    starts above the mist and runs under it to the bottom edge. */

@@ -136,10 +136,10 @@ export default function App() {
             <div className="row">
               <h2>Projects</h2>
               {counts.blocked > 0 && <span className="pill blocked">{counts.blocked} blocked</span>}
-              {counts.at_risk > 0 && <span className="pill at_risk">{counts.at_risk} at risk</span>}
             </div>
             <ProjectFilters filter={projectFilter} onChange={setProjectFilter} />
           </header>
+          <div className="project-list">
           {projects.length === 0 && (
             <p className="muted small">
               {running.includes("discover") ? "Finding your #tmp- channels…" : "No projects yet. Refresh all to find your #tmp- channels."}
@@ -159,6 +159,7 @@ export default function App() {
               onChange={reload}
             />
           ))}
+          </div>
         </section>
 
         <TaskColumn
