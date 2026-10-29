@@ -8,6 +8,7 @@ import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { compareProjects, pressure } from "./tasks";
+import { isDark, useTheme } from "./theme";
 import { useAppData, useRunningJobs } from "./useAppData";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
@@ -43,6 +44,7 @@ export default function App() {
   const running = useRunningJobs();
   const [showSettings, setShowSettings] = useState(false);
   const [filterProject, setFilterProject] = useState<string | null>(null);
+  const [theme, setTheme] = useTheme();
   useScheduler();
 
   // Pick up anything written to the database while the window was in the background.
@@ -79,6 +81,14 @@ export default function App() {
           {running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>}
           <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title="Refresh everything (⌘R)">
             {refreshingAll ? "Refreshing…" : "Refresh all"}
+          </button>
+          <button
+            className="icon-button theme-toggle"
+            onClick={() => setTheme(isDark(theme) ? "light" : "dark")}
+            title={isDark(theme) ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={isDark(theme) ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {isDark(theme) ? "☀" : "☾"}
           </button>
           <button onClick={() => setShowSettings(true)}>Settings</button>
         </div>
@@ -125,7 +135,7 @@ export default function App() {
 
       <Mist />
 
-      {showSettings && <Settings projects={data.projects} onClose={() => setShowSettings(false)} onSaved={reload} />}
+      {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>
   );
 }

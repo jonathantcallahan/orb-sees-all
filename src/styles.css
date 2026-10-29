@@ -18,8 +18,27 @@
   background: var(--bg);
 }
 
+/* Theme: data-theme on <html> is "light", "dark" or "system" (follow macOS). */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1b1a;
+  --surface: #252524;
+  --border: #383836;
+  --text: #ececea;
+  --muted: #9b9b96;
+  --accent: #6b9cf0;
+  --red: #f07b72;
+  --red-bg: #45231f;
+  --amber: #f0b45a;
+  --amber-bg: #42321a;
+  --green: #6fcf8a;
+  --green-bg: #1f3a27;
+  --grey-bg: #333331;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #1b1b1a;
     --surface: #252524;
     --border: #383836;

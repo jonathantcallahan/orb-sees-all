@@ -100,6 +100,8 @@ export function Mist() {
     };
     readBg();
     scheme.addEventListener("change", readBg);
+    const themeObserver = new MutationObserver(readBg);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const material = new THREE.ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -136,6 +138,7 @@ export function Mist() {
     return () => {
       cancelAnimationFrame(frame);
       scheme.removeEventListener("change", readBg);
+      themeObserver.disconnect();
       observer.disconnect();
       geometry.dispose();
       material.dispose();

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
+import type { Theme } from "../theme";
 
 const lines = (text: string) =>
   text
@@ -43,7 +44,19 @@ function ProjectRow({ project, onSaved }: { project: db.Project; onSaved: () => 
   );
 }
 
-export function Settings({ projects, onClose, onSaved }: { projects: db.Project[]; onClose: () => void; onSaved: () => void }) {
+export function Settings({
+  projects,
+  theme,
+  onThemeChange,
+  onClose,
+  onSaved,
+}: {
+  projects: db.Project[];
+  theme: Theme;
+  onThemeChange: (t: Theme) => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [model, setModel] = useState("opus");
@@ -93,6 +106,14 @@ export function Settings({ projects, onClose, onSaved }: { projects: db.Project[
               }}
             />
             Weekdays only
+          </label>
+          <label>
+            Appearance
+            <select value={theme} onChange={(e) => onThemeChange(e.target.value as Theme)}>
+              <option value="system">Match macOS</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
           </label>
           <label>
             Model
