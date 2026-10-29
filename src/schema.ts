@@ -190,6 +190,18 @@ export const BlockerCheck = z.object({
 });
 export type BlockerCheck = z.infer<typeof BlockerCheck>;
 
+/** Claude's critical second look at a task. */
+export const TaskCheck = z.object({
+  verdict: z.enum(["looks_right", "already_done", "not_needed", "captured_wrong", "duplicate", "unclear"]),
+  summary: z.string(),
+  /** Each check and what was found, e.g. {check: "Still needed", finding: "Ben closed the thread on Oct 28."}. */
+  findings: z.array(z.object({ check: z.string(), finding: z.string(), ok: z.boolean() })).default([]),
+  /** A corrected description when the task was captured wrong or is missing context. */
+  corrected_description: z.string().nullish(),
+  evidence: z.array(z.object({ title: z.string(), link: z.string() })).default([]),
+});
+export type TaskCheck = z.infer<typeof TaskCheck>;
+
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
 export const DailyReading = z.object({

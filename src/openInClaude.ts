@@ -42,17 +42,26 @@ function taskLines(task: SessionTask): string[] {
   return lines;
 }
 
+export interface StartStep {
+  title: string;
+  /** Who does it; only the user's steps are marked, the rest are Claude's. */
+  by: "claude" | "you" | null;
+}
+
 /**
- * The prompt behind "Approve & start": the user approved the steps Claude said
- * it can complete on its own, and wants Claude to do them.
+ * The prompt behind "Approve & start": the whole plan in order, with the user's
+ * steps marked. Claude does only its own steps, and stops to ask for
+ * the result of any earlier step of the user's that it depends on.
  */
-export function startPrompt(task: SessionTask, suggestion: string, claudeSteps: string[]): string {
+export function startPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
   const lines = ["I've approved your suggested approach for this task from my day planner. Please start on it.", "", ...taskLines(task)];
-  lines.push("", `Your suggestion: ${suggestion}`, "", "Do these steps, which you said you can complete on your own:");
-  claudeSteps.forEach((step, i) => lines.push(`${i + 1}. ${step}`));
+  lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
+  steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
   lines.push(
     "",
-    "Work through them in order and show me the results to review. Stop after these steps. Don't send, post, file or change anything outside this session, and don't make decisions for me; ask me instead.",
+    "Do your steps in order. Don't do the steps marked [Me].",
+    "When one of your steps depends on an earlier step of mine, prepare everything you can without it, then stop and ask me for that step's result before going on. If you can't tell whether I've done a step of mine yet, ask.",
+    "Show me the results of each of your steps to review. You can post in Slack and follow up with people there, but show me each message and where it's going, and wait for my OK before posting. Don't send email, file tickets or change anything else outside this session, and don't make decisions for me; ask me instead.",
   );
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;

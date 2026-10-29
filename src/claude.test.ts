@@ -121,3 +121,25 @@ describe("streaming", () => {
     expect(describeTool("mcp__something__unknown", {})).toBe("Working");
   });
 });
+
+describe("task double check", () => {
+  it("parses a check and defaults missing lists", async () => {
+    const { TaskCheck } = await import("./schema");
+    const c = TaskCheck.parse({ verdict: "already_done", summary: "Ben shipped it on Oct 28." });
+    expect(c.findings).toEqual([]);
+    expect(c.evidence).toEqual([]);
+    expect(() => TaskCheck.parse({ verdict: "maybe", summary: "" })).toThrow();
+  });
+
+  it("asks for every check and stays read-only", async () => {
+    const { checkTaskPrompt } = await import("./prompts");
+    const p = checkTaskPrompt({
+      task: { title: "Send Q4 numbers", description: null, source: "Slack", link: "https://x/1", requester: "Ben", due: null, priority: null },
+      otherTasks: ["Send Q4 figures to Ben"],
+      userId: "U1",
+    });
+    for (const check of ["Captured correctly", "Still necessary", "Duplicate", "Priority", "Missing context"]) expect(p).toContain(check);
+    expect(p).toContain("Send Q4 figures to Ben");
+    expect(p).toMatch(/Never send, post/);
+  });
+});

@@ -6,7 +6,7 @@ import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingId
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
-import { setTaskState } from "../db";
+import { setTaskState, type StoredTaskCheck } from "../db";
 import { Inbox } from "./Inbox";
 import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
@@ -18,6 +18,8 @@ function Group({
   empty,
   plans,
   assessments,
+  checks,
+  openTitles,
   running,
   filtered = false,
   controls,
@@ -32,6 +34,8 @@ function Group({
   filtered?: boolean;
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
+  checks: Record<string, StoredTaskCheck>;
+  openTitles: string[];
   running: string[];
   onChange: () => void;
 }) {
@@ -52,6 +56,8 @@ function Group({
           planning={running.includes(`plan:${t.id}`)}
           manualAssessment={assessments.get(t.id)}
           assessing={running.includes("assess")}
+          check={checks[t.id]}
+          openTitles={openTitles}
           compact
           onChange={onChange}
         />
@@ -72,6 +78,7 @@ export function TaskColumn({
   drafts,
   recommended,
   descriptionOverrides,
+  taskChecks,
   running,
   onChange,
 }: {
@@ -90,6 +97,8 @@ export function TaskColumn({
   recommended: Set<string>;
   /** Descriptions the user edited on refreshed tasks. */
   descriptionOverrides: Record<string, string>;
+  /** Double checks of tasks, by task id. */
+  taskChecks: Record<string, StoredTaskCheck>;
   running: string[];
   onChange: () => void;
 }) {
@@ -104,7 +113,6 @@ export function TaskColumn({
   const keep = <T extends CardTask>(list: T[]) =>
     filtering ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended }, filter)) : list;
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
-  const shared = { plans, assessments, running, onChange };
   const today = localDate(new Date());
 
   // Slack and email items share one inbox; dated items first, soonest first.
@@ -145,6 +153,12 @@ export function TaskColumn({
     today,
   );
 
+  // Every open task's title, so a double check can spot duplicates.
+  const openTitles = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest]
+    .filter((t) => !t.done)
+    .map((t) => t.title);
+  const shared = { plans, assessments, checks: taskChecks, openTitles, running, onChange };
+
   // Today's plan pulls from every group; open tasks first.
   const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
     (a, b) => Number(a.done) - Number(b.done),
@@ -173,6 +187,8 @@ export function TaskColumn({
             planning={running.includes(`plan:${t.id}`)}
             manualAssessment={assessments.get(t.id)}
             assessing={running.includes("assess")}
+            check={taskChecks[t.id]}
+            openTitles={openTitles}
             onChange={onChange}
           />
         ))

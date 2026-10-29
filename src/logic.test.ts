@@ -438,12 +438,19 @@ describe("open in Claude", () => {
   });
 
   it("asks Claude to do only the steps it said it can do alone, then stop", () => {
-    const p = startPrompt(task, "Claude can draft the ticket.", ["Read CPS-6931", "Draft the ticket text"]);
+    const p = startPrompt(task, "Claude can draft the ticket.", [
+      { title: "Get the export from Eric", by: "you" },
+      { title: "Draft the ticket text", by: "claude" },
+      { title: "Check the numbers", by: null },
+      { title: "File the ticket", by: "you" },
+    ]);
     expect(p).toMatch(/^I've approved your suggested approach/);
     expect(p).toContain("Your suggestion: Claude can draft the ticket.");
-    expect(p).toContain("1. Read CPS-6931\n2. Draft the ticket text");
-    expect(p).toMatch(/Stop after these steps/);
-    expect(p).toMatch(/Don't send, post, file or change anything/);
+    expect(p).toContain("1. [Me] Get the export from Eric\n2. Draft the ticket text\n3. Check the numbers\n4. [Me] File the ticket");
+    expect(p).toMatch(/Don't do the steps marked \[Me\]/);
+    expect(p).toMatch(/stop and ask me for that step's result/);
+    expect(p).toMatch(/wait for my OK before posting/);
+    expect(p).toMatch(/Don't send email, file tickets/);
   });
 
 

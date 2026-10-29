@@ -499,6 +499,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-result.resolved .check-verdict, .check-result.not_blocking .check-verdict { color: var(--green); }
 .check-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .check-buttons { margin-left: auto; display: flex; gap: 10px; }
+.check-result.looks_right .check-verdict { color: var(--green); }
+.check-result.captured_wrong .check-verdict, .check-result.already_done .check-verdict, .check-result.not_needed .check-verdict, .check-result.duplicate .check-verdict { color: var(--amber, #c98a1b); }
+.check-findings { list-style: none; margin: 2px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.check-findings li { display: flex; gap: 6px; align-items: baseline; }
+.finding-mark { width: 10px; flex: none; text-align: center; color: var(--muted); }
+.check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
+.check-result .corrected { color: var(--text); }
 .reminded { font-size: 11px; }
 .remind-composer { width: 100%; margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
 .remind-composer textarea { font-size: 12px; }

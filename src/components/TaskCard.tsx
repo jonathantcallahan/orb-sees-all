@@ -2,10 +2,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan } from "../db";
-import { assessPendingTasks, planTask } from "../jobs";
+import { clearAssessment, clearTaskCheck, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { assessPendingTasks, checkTask, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, ProjectPriority } from "../schema";
-import { formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
+import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
@@ -68,7 +68,7 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
                 <ExternalLink href={step.link} className="plan-step-title">
                   {step.title}
                 </ExternalLink>
-                {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
+                {step.by === "you" && <span className="step-by you">You</span>}
                 {step.detail && <div className="muted small">{step.detail}</div>}
               </div>
             </li>
@@ -296,7 +296,7 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
             <StepCircle />
             <span className="small">
               {step.title}
-              {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
+              {step.by === "you" && <span className="step-by you">You</span>}
             </span>
           </li>
         ))}
@@ -340,12 +340,89 @@ function AssessmentView({
   );
 }
 
+const CHECK_VERDICT: Record<StoredTaskCheck["verdict"], string> = {
+  looks_right: "Looks right",
+  already_done: "Already done",
+  not_needed: "No longer needed",
+  captured_wrong: "Captured wrong",
+  duplicate: "Duplicate",
+  unclear: "Unclear",
+};
+
+/** The result of a double check: verdict, what each check found, evidence, and the fix it points to. */
+function TaskCheckResult({
+  check,
+  onDone,
+  onDismiss,
+  onApply,
+  onHide,
+}: {
+  check: StoredTaskCheck;
+  onDone: () => void;
+  onDismiss: () => void;
+  onApply: (description: string) => void;
+  onHide: () => void;
+}) {
+  const corrected = check.corrected_description?.trim();
+  return (
+    <div className={`check-result task-check ${check.verdict}`}>
+      <div className="check-head small">
+        <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span>
+        <span className="muted">checked {ago(check.at)}</span>
+      </div>
+      <p className="small">{check.summary}</p>
+      {check.findings.length > 0 && (
+        <ul className="check-findings small">
+          {check.findings.map((f) => (
+            <li key={f.check} className={f.ok ? "ok" : "flag"}>
+              <span className="finding-mark" aria-label={f.ok ? "Passed" : "Flagged"}>{f.ok ? "✓" : "!"}</span>
+              <span>
+                <span className="finding-check">{f.check}:</span> <span className="muted">{f.finding}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {corrected && <p className="small corrected">Suggested description: {corrected}</p>}
+      <div className="check-actions small">
+        {check.evidence.map((e) => (
+          <ExternalLink key={e.link} href={e.link} className="chip">
+            {e.title}
+          </ExternalLink>
+        ))}
+        <span className="check-buttons">
+          {corrected && (
+            <button className="link-button small" onClick={() => onApply(corrected)} title="Use this description and plan again">
+              Apply correction
+            </button>
+          )}
+          {check.verdict === "already_done" && (
+            <button className="link-button small" onClick={onDone}>
+              Mark done
+            </button>
+          )}
+          {(check.verdict === "not_needed" || check.verdict === "duplicate") && (
+            <button className="link-button small" onClick={onDismiss}>
+              Dismiss task
+            </button>
+          )}
+          <button className="link-button small muted" onClick={onHide}>
+            Hide
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function TaskCard({
   task,
   plan,
   planning,
   manualAssessment,
   assessing,
+  check,
+  openTitles = [],
   compact = false,
   onChange,
 }: {
@@ -356,12 +433,17 @@ export function TaskCard({
   manualAssessment?: ManualAssessment;
   /** An assessment run is in progress and this task has none yet. */
   assessing: boolean;
+  /** Claude's latest double check of the task. */
+  check?: StoredTaskCheck;
+  /** Titles of the user's other open tasks, for spotting duplicates. */
+  openTitles?: string[];
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
   compact?: boolean;
   onChange: () => void;
 }) {
   const [showPlan, setShowPlan] = useState(false);
   const planStatus = useJobStatus(`plan:${task.id}`);
+  const checkStatus = useJobStatus(`taskcheck:${task.id}`);
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const manual = task.source === "manual";
@@ -383,7 +465,8 @@ export function TaskCard({
     ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
     : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }));
   // Approve & start only ever hands Claude the steps it can complete on its own.
-  const planSteps = outlineSteps.filter((st) => st.by === "claude").map((st) => st.title);
+  // Approve & start sends the whole sequence; Claude does every step that isn't the user's.
+  const hasClaudeSteps = outlineSteps.some((st) => st.by !== "you");
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
@@ -391,15 +474,15 @@ export function TaskCard({
     const prompt = startPrompt(
       { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
       assessment.suggestion,
-      planSteps,
+      outlineSteps,
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
   const planActions =
     outlineSteps.length > 0 ? (
       <div className="plan-actions">
-        {planSteps.length > 0 && assessment && (
-          <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session to start on these steps">
+        {hasClaudeSteps && assessment && (
+          <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours">
             Approve & start
           </button>
         )}
@@ -438,6 +521,12 @@ export function TaskCard({
     onChange();
     if (next) runPlan(next);
   };
+  const source =
+    task.source === "manual"
+      ? "the user's own to-do list"
+      : task.project
+        ? `the "${task.project.name}" project's Slack channel${task.blocking ? " (this task is blocking the project)" : ""}`
+        : task.source;
   const runPlan = (descriptionText: string | null = description ?? null) => {
     planTask({
       id: task.id,
@@ -445,13 +534,29 @@ export function TaskCard({
       description: descriptionText,
       link: task.link ?? null,
       requester: task.requester ?? null,
-      source:
-        task.source === "manual"
-          ? "the user's own to-do list"
-          : task.project
-            ? `the "${task.project.name}" project's Slack channel${task.blocking ? " (this task is blocking the project)" : ""}`
-            : task.source,
+      source,
     }).catch(() => {});
+  };
+  const runCheck = () => {
+    checkTask(
+      task.id,
+      {
+        title: task.title,
+        description: description ?? null,
+        source,
+        link: task.link ?? null,
+        requester: task.requester ?? null,
+        due: task.due ?? null,
+        priority,
+      },
+      openTitles.filter((t) => t !== task.title),
+    )
+      .then(onChange)
+      .catch(() => {});
+  };
+  const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
+    await setTaskState(task.id, patch);
+    onChange();
   };
 
   const drag = {
@@ -543,6 +648,19 @@ export function TaskCard({
         </>
       )}
 
+      {check && !checkStatus && (
+        <TaskCheckResult
+          check={check}
+          onDone={() => setStateAndRefresh({ status: "done" })}
+          onDismiss={() => setStateAndRefresh({ dismissed: true })}
+          onApply={(text) => saveDescription(text)}
+          onHide={async () => {
+            await clearTaskCheck(task.id);
+            onChange();
+          }}
+        />
+      )}
+
       <footer className="task-card-actions">
         {compact && (
           <button className="link-button small muted" onClick={() => setExpanded(false)}>
@@ -568,6 +686,19 @@ export function TaskCard({
             Add a description to plan with Claude
           </button>
         )}
+        {checkStatus ? (
+          <span className="muted small checking" title={checkStatus}>
+            <span className="spin">✦</span> {checkStatus}…
+          </span>
+        ) : (
+          <button
+            className="link-button small more-link"
+            onClick={runCheck}
+            title="Have Claude check the task was captured right, is still needed, and isn't a duplicate"
+          >
+            Double check
+          </button>
+        )}
       </footer>
 
       {showPlan && plan && !planning && (
@@ -577,7 +708,7 @@ export function TaskCard({
           onClose={() => setShowPlan(false)}
           actions={
             <>
-              {planSteps.length > 0 && assessment && (
+              {hasClaudeSteps && assessment && (
                 <button className="cta-primary" onClick={() => { setShowPlan(false); approveAndStart(); }}>
                   Approve & start
                 </button>

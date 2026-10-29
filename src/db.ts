@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, BlockerCheck, CalendarDay, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -141,6 +141,27 @@ export async function saveDescriptionOverride(taskId: string, text: string | nul
   if (text) all[taskId] = text;
   else delete all[taskId];
   await setSetting("description_overrides", JSON.stringify(all));
+}
+
+export interface StoredTaskCheck extends TaskCheck {
+  at: string;
+}
+
+/** Double checks of tasks, keyed by task id. */
+export async function getTaskChecks(): Promise<Record<string, StoredTaskCheck>> {
+  return json<Record<string, StoredTaskCheck>>(await getSetting("task_checks")) ?? {};
+}
+
+export async function clearTaskCheck(taskId: string) {
+  const all = await getTaskChecks();
+  delete all[taskId];
+  await setSetting("task_checks", JSON.stringify(all));
+}
+
+export async function saveTaskCheck(taskId: string, check: TaskCheck) {
+  const all = await getTaskChecks();
+  all[taskId] = { ...check, at: new Date().toISOString() };
+  await setSetting("task_checks", JSON.stringify(all));
 }
 
 export interface StoredBlockerCheck extends BlockerCheck {

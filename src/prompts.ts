@@ -4,7 +4,7 @@ const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 
 /** What counts as a step Claude can do on its own, shared by assessments and plans. */
-const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and Unity's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review. Anything that sends, posts, files or changes something, makes a decision, needs a meeting or another person's input, or needs access Claude doesn't have is the user's.`;
+const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and Unity's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Anything else that sends, files or changes something (email, Jira tickets, docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.`;
 
 /** Shared definition of a task assessment, used by every prompt that produces tasks. */
 const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and Unity's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
@@ -277,4 +277,34 @@ next_step: if it's still blocking or partly resolved, the single action that wou
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"verdict": "still_blocking"|"resolved"|"partly_resolved"|"not_blocking"|"unclear", "summary": string, "evidence": [{"title": string, "link": string}], "next_step": string|null}`;
+}
+
+export interface CheckTaskInput {
+  task: { title: string; description: string | null; source: string; link: string | null; requester: string | null; due: string | null; priority: string | null };
+  otherTasks: string[];
+  userId: string | null;
+}
+
+export function checkTaskPrompt(p: CheckTaskInput): string {
+  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}a product manager on Unity's Asset Store) has this task on their list:
+${JSON.stringify(p.task)}
+
+Their other open tasks, for spotting duplicates:
+${JSON.stringify(p.otherTasks)}
+
+Critically double check it. Read the source (the link) and its thread, then search Slack across channels and DMs, email, Jira and Google Drive for anything newer about it. Check:
+- Captured correctly: is the ask, who asked, the owner and the due date accurate to what was actually said? Is it really the user's to do?
+- Still necessary: was it already done (by the user or someone else), answered elsewhere, cancelled, or superseded?
+- Duplicate: does it overlap another task on the list?
+- Priority: do the deadline and urgency match what was said?
+- Missing context: is there a dependency, blocker or detail the task leaves out that the user needs?
+
+verdict: "looks_right", "already_done", "not_needed" (cancelled, superseded or no longer relevant), "captured_wrong" (wrong ask, owner or date), "duplicate", or "unclear" (not enough evidence).
+summary: two or three sentences explaining the verdict.
+findings: one entry per check above: check (its short name), finding (what you found, one sentence), ok (true if it passed).
+corrected_description: when it was captured wrong or is missing important context, a corrected two-to-four sentence description of the task as it really stands; otherwise null.
+evidence: the threads, emails, tickets and docs you relied on, with links.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"verdict": "looks_right"|"already_done"|"not_needed"|"captured_wrong"|"duplicate"|"unclear", "summary": string, "findings": [{"check": string, "finding": string, "ok": boolean}], "corrected_description": string|null, "evidence": [{"title": string, "link": string}]}`;
 }

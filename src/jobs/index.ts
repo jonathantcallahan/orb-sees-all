@@ -1,8 +1,8 @@
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -245,6 +245,23 @@ export function draftReply(reply: QuickReply): Promise<void> {
         maxTurns: 15,
       });
       await db.saveReplyDraft(reply.id, data.draft, costUsd);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/** Has Claude critically re-examine a task: captured right, still needed, not a duplicate. */
+export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTasks: string[]): Promise<void> {
+  return track(`taskcheck:${taskId}`, (status) =>
+    logged("taskcheck", taskId, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: checkTaskPrompt({ task, otherTasks, userId: await db.getSetting("slack_user_id") }),
+        schema: TaskCheck,
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead, ...TOOLS.driveRead],
+        model: await model(),
+      });
+      await db.saveTaskCheck(taskId, data);
       return { value: undefined, costUsd };
     }),
   );
