@@ -4,6 +4,7 @@ import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
+import { COLORED_ICONS } from "../linkIcons";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton, Updated } from "./common";
@@ -23,19 +24,9 @@ const RACI_LABEL: Record<Raci, string> = {
   informed: "Informed",
 };
 
-/** Slack's mark: one arm (a long bar and a short nub) repeated at 90° in each brand color. */
+/** Slack's mark, the same icon the link chips use. */
 function SlackIcon() {
-  const arms = ["#36C5F0", "#2EB67D", "#ECB22E", "#E01E5A"];
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden>
-      {arms.map((color, i) => (
-        <g key={color} transform={`rotate(${i * 90} 12 12)`} fill={color}>
-          <rect x="8.5" y="1" width="4" height="10" rx="2" />
-          <rect x="3.5" y="7" width="4" height="4" rx="2" />
-        </g>
-      ))}
-    </svg>
-  );
+  return <img src={COLORED_ICONS.slack} width={12} height={12} alt="" />;
 }
 
 /** Hides a project from the dashboard after an inline confirmation. */
