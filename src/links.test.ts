@@ -55,3 +55,14 @@ describe("link titles", () => {
     expect(links.map((l) => l.title)).toEqual(["Slack thread", "Slack thread", "Slack thread", "Pricing decision thread"]);
   });
 });
+
+describe("withoutChannels", () => {
+  it("drops channel names from titles", async () => {
+    const { withoutChannels } = await import("./links");
+    expect(withoutChannels("Pricing thread in #tmp-asset-pricing")).toBe("Pricing thread");
+    expect(withoutChannels("#asset-store-eng: launch date")).toBe("launch date");
+    expect(withoutChannels("Ben's ask on #general")).toBe("Ben's ask");
+    expect(withoutChannels("CPS-6931 export ticket")).toBe("CPS-6931 export ticket");
+    expect(collectLinks([{ url: "https://unity.slack.com/archives/C1/p1", title: "#tmp-asset-pricing" }])[0].title).toBe("Slack thread");
+  });
+});

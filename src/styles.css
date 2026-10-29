@@ -576,7 +576,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .cta-primary:hover { opacity: 0.88; }
 
 /* Description: cut to two lines with "…" and a gray More at the end */
-.inline-action { margin-left: 6px; }
+.description-actions { display: flex; gap: 10px; align-items: baseline; }
 .link-button.more-link { color: var(--muted); }
 
 /* Plan details modal, centered */
@@ -594,6 +594,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Relevant links on a task, as Google Docs–style smart chips */
 .link-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.link-chips.list { flex-direction: column; align-items: flex-start; }
 .link-chip {
   display: inline-flex;
   align-items: center;

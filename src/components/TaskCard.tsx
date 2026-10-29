@@ -140,7 +140,7 @@ function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string)
   }
 }
 
-function Description({ text, draft, onEdit }: { text: string; draft: boolean; onEdit?: () => void }) {
+function Description({ text, draft, onEdit, actions }: { text: string; draft: boolean; onEdit?: () => void; actions?: ReactNode }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   /** Characters shown when collapsed, or null when the whole text fits. */
@@ -149,36 +149,40 @@ function Description({ text, draft, onEdit }: { text: string; draft: boolean; on
   useLayoutEffect(() => {
     const p = ref.current;
     if (!p || expanded) return;
-    const actions = `<button class="link-button small inline-action">More</button>${onEdit ? '<button class="link-button small inline-action">Edit</button>' : ""}`;
-    const measure = () => setCut(fitTwoLines(p, text, actions));
+    const measure = () => setCut(fitTwoLines(p, text, ""));
     measure();
     // Re-fit when the card changes width.
     const observer = new ResizeObserver(measure);
     observer.observe(p);
     return () => observer.disconnect();
-  }, [text, expanded, onEdit]);
+  }, [text, expanded]);
 
   const truncated = !expanded && cut !== null;
   return (
-    <p ref={ref} className="description small">
-      {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
-      <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
-      {truncated && (
-        <button className="link-button small inline-action more-link" onClick={() => setExpanded(true)}>
-          More
-        </button>
-      )}
-      {expanded && (
-        <button className="link-button small inline-action more-link" onClick={() => setExpanded(false)}>
-          Less
-        </button>
-      )}
-      {onEdit && (
-        <button className="link-button small inline-action more-link" onClick={onEdit}>
-          Edit
-        </button>
-      )}
-    </p>
+    <>
+      <p ref={ref} className="description small">
+        {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
+        <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
+      </p>
+      <div className="description-actions small">
+        {truncated && (
+          <button className="link-button small more-link" onClick={() => setExpanded(true)}>
+            More
+          </button>
+        )}
+        {expanded && (
+          <button className="link-button small more-link" onClick={() => setExpanded(false)}>
+            Less
+          </button>
+        )}
+        {onEdit && (
+          <button className="link-button small more-link" onClick={onEdit}>
+            Edit
+          </button>
+        )}
+        {actions}
+      </div>
+    </>
   );
 }
 
@@ -458,6 +462,7 @@ export function TaskCard({
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
   const priority = taskPriority(assessment?.priority, task.projectPriority, task.blocking);
@@ -568,7 +573,12 @@ export function TaskCard({
     ],
     [description],
   );
-  const relevantLinks = <LinkChips links={links} />;
+  const linksToggle =
+    links.length > 0 ? (
+      <button className="link-button small more-link" onClick={() => setLinksOpen(!linksOpen)} aria-expanded={linksOpen}>
+        {linksOpen ? "Hide links" : `Show links (${links.length})`}
+      </button>
+    ) : null;
   const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
     await setTaskState(task.id, patch);
     onChange();
@@ -635,7 +645,7 @@ export function TaskCard({
       {editing ? (
         <DescriptionEditor initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       ) : description ? (
-        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} />
+        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} actions={linksToggle} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
@@ -644,7 +654,8 @@ export function TaskCard({
         )
       )}
 
-      {relevantLinks}
+      {!description && !editing && linksToggle && <div className="description-actions small">{linksToggle}</div>}
+      {linksOpen && <LinkChips links={links} layout="list" />}
 
       {assessment ? (
         <AssessmentView

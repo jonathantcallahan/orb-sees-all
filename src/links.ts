@@ -88,6 +88,17 @@ function placeOnly(title: string): boolean {
   return channelName || /^https?:\/\//.test(t) || /^(DM|Slack|Email|Gmail)$/i.test(t);
 }
 
+/** Removes Slack channel names ("in #tmp-pricing", "#asset-store-eng") from a title. */
+export function withoutChannels(title: string): string {
+  return title
+    .replace(/\s*\b(?:in|from|on)\s+#[\w-]+/gi, "")
+    .replace(/#[a-z0-9][\w-]*/gi, "")
+    .replace(/\s*[-–—:·|]\s*$/, "")
+    .replace(/^\s*[-–—:·|]\s*/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 const URL_IN_TEXT = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
 
 /**
@@ -102,10 +113,11 @@ export function collectLinks(sources: { url?: string | null; title?: string | nu
     const kind = linkKind(url);
     const existing = byUrl.get(url);
     if (existing) {
-      if (title?.trim() && !placeOnly(title) && existing.title === fallbackTitle(url, kind)) existing.title = title.trim();
+      const better = title ? withoutChannels(title) : null;
+      if (better && !placeOnly(better) && existing.title === fallbackTitle(url, kind)) existing.title = better;
       return;
     }
-    const given = title?.trim();
+    const given = title ? withoutChannels(title) : null;
     byUrl.set(url, { url, kind, title: given && !placeOnly(given) ? given : fallbackTitle(url, kind) });
   };
   const [first, ...rest] = sources;
