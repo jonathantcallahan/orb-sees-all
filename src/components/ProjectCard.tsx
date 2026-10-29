@@ -281,6 +281,8 @@ export function ProjectCard({
   const status = s?.status;
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
+  // Blocked by and Active start collapsed; one opens at a time.
+  const [openList, setOpenList] = useState<"blockers" | "active" | null>(null);
   // Blockers the user marked resolved after a double check stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
   const openTasks = applyTaskState(s?.my_tasks ?? [], taskStates).filter((t) => !t.done).length;
@@ -326,7 +328,23 @@ export function ProjectCard({
         <>
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
-          {blockers.length > 0 && (
+          {(blockers.length > 0 || (s.active?.length ?? 0) > 0) && (
+            <div className="work-toggles">
+              {blockers.length > 0 && (
+                <button className={`work-toggle${openList === "blockers" ? " open" : ""}`} onClick={() => setOpenList((o) => (o === "blockers" ? null : "blockers"))}>
+                  {openList === "blockers" ? "▾" : "▸"} Blocked by {blockers.length}
+                  {blockers.some((b) => b.owners.some((o) => o.is_me)) && <span className="owner me">You</span>}
+                </button>
+              )}
+              {(s.active?.length ?? 0) > 0 && (
+                <button className={`work-toggle${openList === "active" ? " open" : ""}`} onClick={() => setOpenList((o) => (o === "active" ? null : "active"))}>
+                  {openList === "active" ? "▾" : "▸"} Active {s.active.length}
+                </button>
+              )}
+            </div>
+          )}
+
+          {openList === "blockers" && blockers.length > 0 && (
             <ul className="work-items">
               {blockers.map((b) => (
                 <WorkItem
@@ -348,7 +366,7 @@ export function ProjectCard({
             </ul>
           )}
 
-          {s.active?.length > 0 && (
+          {openList === "active" && s.active?.length > 0 && (
             <ul className="work-items">
               {s.active.map((a) => (
                 <WorkItem key={a.id} item={a} label="Active" kind="active" />
