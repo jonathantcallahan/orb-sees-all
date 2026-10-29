@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import { nameFromChannel } from "../projects";
-import type { CalendarDay, CalendarEvent } from "../schema";
+import type { CalendarDay, CalendarEvent, NewsItem } from "../schema";
+import type { Project, StoredReading } from "../db";
 import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, RefreshButton, Updated } from "./common";
+import { DailyReading } from "./DailyReading";
 import { PressureBlob } from "./PressureBlob";
 
 /** Pixels per minute on the day grid (72px an hour). */
@@ -32,11 +34,51 @@ function useNow(): Date {
   return now;
 }
 
+function VideoIcon() {
+  return (
+    <svg width="14" height="10" viewBox="0 0 14 10" aria-hidden>
+      <rect x="0.5" y="1" width="9" height="8" rx="2" fill="currentColor" />
+      <path d="M10 4 L13.5 1.8 V8.2 L10 6 Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Details shown while hovering a meeting: what it's about and how to prepare. */
+function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
+  const width = 280;
+  // Beside the block, kept inside the window. In the lower half of the window it
+  // grows upward from the block's bottom edge so it isn't cut off.
+  const left = Math.min(anchor.right + 8, window.innerWidth - width - 8);
+  const vertical = anchor.top > window.innerHeight / 2 ? { bottom: Math.max(8, window.innerHeight - anchor.bottom) } : { top: anchor.top };
+  return (
+    <div className="card meeting-card" style={{ left, width, ...vertical }} role="tooltip">
+      <div className="meeting-card-title">{ev.title}</div>
+      <div className="muted small">
+        {time(ev.start)} – {time(ev.end)}
+        {ev.video_link && ` · ${hostOf(ev.video_link)}`}
+      </div>
+      {ev.summary && <p className="small">{ev.summary}</p>}
+      {ev.attendees.length > 0 && <div className="muted small">With {ev.attendees.join(", ")}</div>}
+      {ev.prep.length > 0 && (
+        <>
+          <h4>Prep</h4>
+          <ul className="small meeting-prep">
+            {ev.prep.map((p) => (
+              <li key={p.id}>{p.title}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
   const range = dayRange(events, now);
   const hours = Array.from({ length: range.endHour - range.startHour }, (_, i) => range.startHour + i);
   const placed = layoutDay(events, range);
   const nowTop = nowOffset(now, range);
+  const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
 
   return (
     <div className="day-grid" style={{ height: hours.length * 60 * PX_PER_MIN }}>
@@ -49,9 +91,6 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
         {placed.map(({ event: ev, top, height, column, columns }) => {
           const past = new Date(ev.end) < now;
           const current = !past && new Date(ev.start) <= now;
-          const tooltip = [`${ev.title}`, `${time(ev.start)} – ${time(ev.end)}`, ev.prep.length ? `${ev.prep.length} prep` : ""]
-            .filter(Boolean)
-            .join("\n");
           // The call is worth surfacing from 10 minutes before until the meeting ends.
           const joinSoon = !past && new Date(ev.start).getTime() - now.getTime() <= 10 * 60_000;
           return (
@@ -60,7 +99,6 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
               role="link"
               tabIndex={0}
               className={`event-block${past ? " past" : ""}${current ? " current" : ""}`}
-              title={tooltip}
               style={{
                 top: top * PX_PER_MIN,
                 height: Math.max(height * PX_PER_MIN, 18),
@@ -69,43 +107,51 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
               }}
               onClick={() => ev.link && openUrl(ev.link)}
               onKeyDown={(e) => e.key === "Enter" && ev.link && openUrl(ev.link)}
+              onMouseEnter={(e) => setHover({ ev, anchor: e.currentTarget.getBoundingClientRect() })}
+              onMouseLeave={() => setHover(null)}
             >
-              <div className="event-top">
-                <span className="event-name">{ev.title}</span>
-                {ev.video_link && !past && (
-                  <button
-                    className={`join${joinSoon ? " soon" : ""}`}
-                    title={`Join the call (${hostOf(ev.video_link)})`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openUrl(ev.video_link!);
-                    }}
-                  >
-                    Join
-                  </button>
-                )}
-              </div>
+              <span className="event-name">{ev.title}</span>
               {height >= 40 && <span className="event-when">{time(ev.start)}</span>}
               {ev.prep.length > 0 && <span className="event-prep">{ev.prep.length} prep</span>}
+              {ev.video_link && !past && (
+                <button
+                  className={`join${joinSoon ? " soon" : ""}`}
+                  title={`Join the call (${hostOf(ev.video_link)})`}
+                  aria-label="Join the call"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openUrl(ev.video_link!);
+                  }}
+                >
+                  <VideoIcon />
+                </button>
+              )}
             </div>
           );
         })}
       </div>
-      {nowTop != null && (
-        <div className="now-line" style={{ top: nowTop * PX_PER_MIN }} title={`Now, ${time(now.toISOString())}`} />
-      )}
+      {nowTop != null && <div className="now-line" style={{ top: nowTop * PX_PER_MIN }} />}
+      {hover && <MeetingCard ev={hover.ev} anchor={hover.anchor} />}
     </div>
   );
 }
 
 export function TodayColumn({
   pressure,
+  reading,
+  projects,
+  news,
+  readingBusy,
   calendar,
   taskStates,
   busy,
   onChange,
 }: {
   pressure: Pressure;
+  reading: StoredReading | null;
+  projects: Project[];
+  news: NewsItem[];
+  readingBusy: boolean;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   busy: boolean;
@@ -121,6 +167,7 @@ export function TodayColumn({
   return (
     <section className="column">
       <PressureBlob pressure={pressure} />
+      <DailyReading reading={reading} projects={projects} news={news} busy={readingBusy} />
       <header className="column-header">
         <div>
           <h2>Today</h2>
