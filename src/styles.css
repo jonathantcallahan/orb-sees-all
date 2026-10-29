@@ -180,7 +180,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card .dismiss { visibility: hidden; }
 .task-card:hover .dismiss { visibility: visible; }
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.source { }
 .source.slack { color: #9b5de5; }
 .source.email { color: var(--accent); }
 .description { margin: 0; white-space: pre-wrap; }
