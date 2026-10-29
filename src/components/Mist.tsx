@@ -37,7 +37,7 @@ float fbm(vec2 p) {
 void main() {
   // Keep the noise square regardless of the strip's aspect ratio.
   vec2 p = vUv * vec2(uResolution.x / uResolution.y, 1.0) * 2.2;
-  float t = uTime * 0.11;
+  float t = uTime * 0.22;
   // Domain warping: noise displaced by noise gives the slow swirl.
   vec2 q = vec2(fbm(p + vec2(t, -t * 0.5)), fbm(p + vec2(5.2, 1.3) - t));
   vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + t * 1.5), fbm(p + 3.0 * q + vec2(8.3, 2.8) - t * 1.2));
