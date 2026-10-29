@@ -278,17 +278,26 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
  * With no plan yet, the next action stands in as step one. `action` (e.g.
  * Approve & start) sits inside, under the steps.
  */
-function PlanOutline({ steps, action }: { steps: string[]; action?: ReactNode }) {
+interface OutlineStep {
+  title: string;
+  /** Who does it; null for older plans that didn't say. */
+  by: "claude" | "you" | null;
+}
+
+function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNode }) {
   if (steps.length === 0 && !action) return null;
   return (
     <div className="plan-outline">
       <ol className="plan-outline-steps">
         {steps.map((step, i) => (
-          <li key={i}>
+          <li key={i} className={step.by ? `by-${step.by}` : undefined}>
             <span className="step-circle" aria-hidden>
               {i + 1}
             </span>
-            <span className="small">{step}</span>
+            <span className="small">
+              {step.title}
+              {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
+            </span>
           </li>
         ))}
       </ol>
@@ -304,8 +313,8 @@ function AssessmentView({
   onAddDetails,
 }: {
   assessment: Assessment;
-  /** Steps Claude can complete on its own, shown inside the assessment. */
-  steps: string[];
+  /** Plan steps tagged by who does them, shown inside the assessment. */
+  steps: OutlineStep[];
   /** Approve & start and Show plan details, under the steps. */
   actions?: ReactNode;
   onAddDetails?: () => void;
@@ -369,10 +378,12 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
-  // Only steps Claude can complete on its own: from the plan when there is one, else the assessment.
-  const planSteps = plan
-    ? plan.plan.steps.filter((st) => st.by === "claude").map((st) => st.title)
-    : (assessment?.claude_steps ?? []);
+  // Every plan step, tagged by who does it; with no plan yet, the steps the assessment says Claude can do.
+  const outlineSteps: OutlineStep[] = plan
+    ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
+    : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }));
+  // Approve & start only ever hands Claude the steps it can complete on its own.
+  const planSteps = outlineSteps.filter((st) => st.by === "claude").map((st) => st.title);
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
@@ -385,7 +396,7 @@ export function TaskCard({
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
   const planActions =
-    planSteps.length > 0 || plan ? (
+    outlineSteps.length > 0 ? (
       <div className="plan-actions">
         {planSteps.length > 0 && assessment && (
           <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session to start on these steps">
@@ -495,7 +506,7 @@ export function TaskCard({
       {assessment ? (
         <AssessmentView
           assessment={assessment}
-          steps={planSteps}
+          steps={outlineSteps}
           onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
           actions={planActions}
         />
@@ -507,7 +518,7 @@ export function TaskCard({
             </div>
           )}
           {/* No assessment to nest it in yet. */}
-          <PlanOutline steps={planSteps} action={planActions} />
+          <PlanOutline steps={outlineSteps} action={planActions} />
         </>
       )}
 
