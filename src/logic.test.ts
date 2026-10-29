@@ -437,15 +437,15 @@ describe("open in Claude", () => {
     expect(sessionPrompt({ title: "x", description: "y".repeat(20000) }, plan).length).toBeLessThanOrEqual(13500);
   });
 
-  it("starts on the approved next action without needing a plan", () => {
-    const assessment = { automation: "assisted" as const, suggestion: "Claude can draft the ticket.", needs_details: false };
-    const p = startPrompt(task, assessment, { kind: "do", action: "Draft the CPS ticket for Romen" }, null);
+  it("asks Claude to do only the steps it said it can do alone, then stop", () => {
+    const p = startPrompt(task, "Claude can draft the ticket.", ["Read CPS-6931", "Draft the ticket text"]);
     expect(p).toMatch(/^I've approved your suggested approach/);
     expect(p).toContain("Your suggestion: Claude can draft the ticket.");
-    expect(p).toContain("Next action (do): Draft the CPS ticket for Romen");
-    expect(p).toMatch(/Don't send, post or change anything/);
-    expect(p).not.toContain("Plan:");
+    expect(p).toContain("1. Read CPS-6931\n2. Draft the ticket text");
+    expect(p).toMatch(/Stop after these steps/);
+    expect(p).toMatch(/Don't send, post, file or change anything/);
   });
+
 
   it("builds a claude://code/new link that decodes back to the prompt and folder", () => {
     const url = claudeSessionUrl("Fix the test & ship it", "/Users/me/repo");

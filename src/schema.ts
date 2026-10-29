@@ -42,6 +42,8 @@ export const Assessment = z.object({
   /** Expected hands-on time for the user, in minutes. */
   estimate_minutes: z.number().nullish(),
   priority: Priority.nullish(),
+  /** Steps Claude is confident it can complete on its own (research, drafting); never sending or deciding. */
+  claude_steps: z.array(z.string()).nullish(),
 });
 export type Assessment = z.infer<typeof Assessment>;
 
@@ -207,7 +209,15 @@ export const ManualAssessmentBatch = z.object({ assessments: z.array(ManualAsses
 
 export const TaskPlan = z.object({
   approach: z.string(),
-  steps: z.array(z.object({ title: z.string(), detail: z.string().nullish(), link: z.string().nullish() })),
+  steps: z.array(
+    z.object({
+      title: z.string(),
+      detail: z.string().nullish(),
+      link: z.string().nullish(),
+      /** Who does it: "claude" only if Claude can complete it independently. Older plans lack it. */
+      by: z.enum(["claude", "you"]).nullish(),
+    }),
+  ),
   open_questions: z.array(z.string()),
   sources: z.array(z.object({ title: z.string(), link: z.string() })),
 });

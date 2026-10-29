@@ -563,3 +563,5 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .plan-outline-steps li .small { padding-top: 2px; }
 .approve-start { align-self: flex-start; }
+.step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
+.step-by.claude { color: var(--accent); }

@@ -50,6 +50,7 @@ function Plan({ stored }: { stored: StoredPlan }) {
             <ExternalLink href={step.link} className="plan-step-title">
               {step.title}
             </ExternalLink>
+            {step.by && <span className={`step-by ${step.by}`}>{step.by === "claude" ? "Claude" : "You"}</span>}
             {step.detail && <div className="muted">{step.detail}</div>}
           </li>
         ))}
@@ -304,9 +305,6 @@ export function TaskCard({
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
-  // Inbox tasks come with a follow-up; for the rest, the plan's first step is the next action.
-  const firstStep = plan?.plan.steps[0];
-  const followUp: FollowUp | null = task.follow_up ?? (firstStep ? { kind: "do", action: firstStep.title } : null);
   const openInClaude = () => {
     if (!plan) return;
     const prompt = sessionPrompt(
@@ -315,17 +313,18 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
-  // The plan's step titles, or the next action as a one-step plan until there's a real one.
-  const planSteps = plan ? plan.plan.steps.map((st) => st.title) : followUp ? [followUp.action] : [];
+  // Only steps Claude can complete on its own: from the plan when there is one, else the assessment.
+  const planSteps = plan
+    ? plan.plan.steps.filter((st) => st.by === "claude").map((st) => st.title)
+    : (assessment?.claude_steps ?? []);
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
     onChange();
     const prompt = startPrompt(
       { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
-      assessment,
-      followUp,
-      plan?.plan ?? null,
+      assessment.suggestion,
+      planSteps,
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
@@ -428,7 +427,7 @@ export function TaskCard({
           assessment={assessment}
           steps={planSteps}
           onAddDetails={manual && !editing ? () => setEditing(true) : undefined}
-          onStart={assessment.automation !== "human" ? approveAndStart : undefined}
+          onStart={planSteps.length > 0 ? approveAndStart : undefined}
         />
       ) : (
         <>

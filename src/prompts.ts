@@ -3,14 +3,18 @@ import type { AdhocTask, Blocker, ProjectSnapshot, QuickReply, RepoState } from 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 
+/** What counts as a step Claude can do on its own, shared by assessments and plans. */
+const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and Unity's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review. Anything that sends, posts, files or changes something, makes a decision, needs a meeting or another person's input, or needs access Claude doesn't have is the user's.`;
+
 /** Shared definition of a task assessment, used by every prompt that produces tasks. */
 const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and Unity's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
   - automation: "human" = needs the user's judgment, relationships or presence (a decision, a negotiation, a 1:1); "assisted" = the user does it, but Claude can do much of the legwork (research, a first draft, a summary, a ticket write-up); "claude" = Claude could produce the finished result for the user to review and send (a status summary, a ticket from a clear spec, a reply that only restates facts).
   - suggestion: one sentence with a concrete first take: how to approach it, or what Claude would produce.
   - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.
   - estimate_minutes: realistic hands-on time for the user to finish it, counting Claude's help when automation is "assisted" or "claude" (then it's mostly review time), and not counting time spent waiting on others. Use 5, 10, 15, 30, 45, 60, 90, 120, 180 or 240. For a vague task, estimate the likely version.
-  - priority: how much the task matters now. "critical" = part of a P0 project, blocks others or a launch, has an exec or external deadline, or is due within two days; "high" = someone is actively waiting on it, or it moves a high-priority project; "medium" = should happen this week or two; "low" = nice to have, no one is waiting.`;
-const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low"}`;
+  - priority: how much the task matters now. "critical" = part of a P0 project, blocks others or a launch, has an exec or external deadline, or is due within two days; "high" = someone is actively waiting on it, or it moves a high-priority project; "medium" = should happen this week or two; "low" = nice to have, no one is waiting.
+  - claude_steps: up to four short, ordered steps that Claude can do on its own toward this task, by this rule: ${CLAUDE_STEP_RULE} Empty when there are none (for example when automation is "human").`;
+const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}`;
 
 /** ISO date (YYYY-MM-DD) and unix seconds for an incremental read window. */
 export function windowStart(lastRefreshedAt: string | null, now: Date, firstRunDays: number) {
@@ -173,12 +177,12 @@ First research it. Read the source thread if there's a link. Search Slack, Gmail
 
 Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
-- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one.
+- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you".
 - open_questions: what's unclear or needs a decision before or during the work. Empty if none.
 - sources: the threads, docs and tickets you relied on.
 
 ${READ_ONLY} Don't take any of the steps yourself; only propose them.
-${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
+${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null, "by": "claude"|"you"}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
 }
 
 export interface AssessPromptInput {
@@ -199,7 +203,7 @@ For each task:
 Return exactly one entry per task, with the same id.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low"}]}`;
+${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}]}`;
 }
 
 export function draftReplyPrompt(r: QuickReply, userId: string | null): string {
