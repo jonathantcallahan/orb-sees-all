@@ -97,7 +97,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .columns {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(420px, 1.6fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(210px, 0.68fr) minmax(420px, 1.6fr) minmax(280px, 1fr);
   gap: 16px;
   padding: 16px 20px;
   overflow: hidden;
