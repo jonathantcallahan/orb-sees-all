@@ -3,7 +3,7 @@ import { setTaskState, updateProjectConfig, type Project, type Reminder, type St
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
-import { age, ago, applyTaskState, blockerKey, stateOf, type TaskState } from "../tasks";
+import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton, Updated } from "./common";
@@ -192,6 +192,11 @@ function RemindAction({
   );
 }
 
+/** Marks a list that includes something owned by the user. */
+function MineDot() {
+  return <span className="mine-dot" title="Includes something of yours" aria-label="Includes something of yours" />;
+}
+
 /** One line of label, owners and age, with the work itself underneath. */
 function WorkItem({
   item,
@@ -281,11 +286,12 @@ export function ProjectCard({
   const status = s?.status;
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
-  // Blocked by and Active start collapsed; one opens at a time.
-  const [openList, setOpenList] = useState<"blockers" | "active" | null>(null);
+  // Blocking and Active are tabs: none open at first, clicking the open tab closes it,
+  // clicking the other one switches to it.
+  const [tab, setTab] = useState<"blockers" | "active" | null>(null);
+  const toggle = (next: "blockers" | "active") => setTab((current) => (current === next ? null : next));
   // Blockers the user marked resolved after a double check stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
-  const openTasks = applyTaskState(s?.my_tasks ?? [], taskStates).filter((t) => !t.done).length;
 
   return (
     <article
@@ -329,22 +335,23 @@ export function ProjectCard({
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
           {(blockers.length > 0 || (s.active?.length ?? 0) > 0) && (
-            <div className="work-toggles">
+            <div className="work-tabs" role="tablist">
               {blockers.length > 0 && (
-                <button className={`work-toggle${openList === "blockers" ? " open" : ""}`} onClick={() => setOpenList((o) => (o === "blockers" ? null : "blockers"))}>
-                  {openList === "blockers" ? "▾" : "▸"} Blocked by {blockers.length}
-                  {blockers.some((b) => b.owners.some((o) => o.is_me)) && <span className="owner me">You</span>}
+                <button role="tab" aria-selected={tab === "blockers"} className={`work-tab${tab === "blockers" ? " open" : ""}`} onClick={() => toggle("blockers")}>
+                  Blocking {blockers.length}
+                  {blockers.some((b) => b.owners.some((o) => o.is_me)) && <MineDot />}
                 </button>
               )}
               {(s.active?.length ?? 0) > 0 && (
-                <button className={`work-toggle${openList === "active" ? " open" : ""}`} onClick={() => setOpenList((o) => (o === "active" ? null : "active"))}>
-                  {openList === "active" ? "▾" : "▸"} Active {s.active.length}
+                <button role="tab" aria-selected={tab === "active"} className={`work-tab${tab === "active" ? " open" : ""}`} onClick={() => toggle("active")}>
+                  Active {s.active.length}
+                  {s.active.some((a) => a.owners.some((o) => o.is_me)) && <MineDot />}
                 </button>
               )}
             </div>
           )}
 
-          {openList === "blockers" && blockers.length > 0 && (
+          {tab === "blockers" && blockers.length > 0 && (
             <ul className="work-items">
               {blockers.map((b) => (
                 <WorkItem
@@ -366,7 +373,7 @@ export function ProjectCard({
             </ul>
           )}
 
-          {openList === "active" && s.active?.length > 0 && (
+          {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items">
               {s.active.map((a) => (
                 <WorkItem key={a.id} item={a} label="Active" kind="active" />
@@ -403,11 +410,6 @@ export function ProjectCard({
       <div className="project-footer">
         <div className="project-meta">
           <Updated at={project.last_refreshed_at} />
-          {openTasks > 0 && (
-            <span className="small task-count">
-              · {openTasks} task{openTasks === 1 ? "" : "s"} for you{selected ? " (shown in Tasks)" : ""}
-            </span>
-          )}
         </div>
         <Untrack
           name={projectName(project)}
