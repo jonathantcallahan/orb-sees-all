@@ -191,13 +191,11 @@ function MineDot() {
 /** One line of label, owners and age, with the work itself underneath. */
 function WorkItem({
   item,
-  label,
   kind,
   remind,
   check,
 }: {
   item: Blocker;
-  label: string;
   kind: "blocker" | "active";
   /** For blockers: the channel to post a reminder in, and any reminder already sent. */
   remind?: { channelId: string; reminder: Reminder | undefined; onSent: () => void };
@@ -213,7 +211,6 @@ function WorkItem({
   return (
     <li className={`work-item ${kind}`}>
       <div className="owners">
-        <h4>{label}</h4>
         {item.owners.map((o) => (
           <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
             {o.is_me ? "You" : o.name}
@@ -346,7 +343,6 @@ export function ProjectCard({
                 <WorkItem
                   key={b.id}
                   item={b}
-                  label="Blocked by"
                   kind="blocker"
                   remind={{ channelId: project.channel_id, reminder: reminders[b.id], onSent: onChange }}
                   check={{
@@ -365,7 +361,7 @@ export function ProjectCard({
           {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items">
               {s.active.map((a) => (
-                <WorkItem key={a.id} item={a} label="Active" kind="active" />
+                <WorkItem key={a.id} item={a} kind="active" />
               ))}
             </ul>
           )}
