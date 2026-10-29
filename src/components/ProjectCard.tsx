@@ -91,7 +91,14 @@ export function ProjectCard({
           <ExternalLink href={slackChannelUrl(project.channel_id)} className="project-channel">
             #{project.name}
           </ExternalLink>
-          <Updated at={project.last_refreshed_at} />
+          <div className="project-meta">
+            <Updated at={project.last_refreshed_at} />
+            {openTasks > 0 && (
+              <span className="small task-count">
+                · {openTasks} task{openTasks === 1 ? "" : "s"} for you{selected ? " (shown in Tasks)" : ""}
+              </span>
+            )}
+          </div>
         </div>
         <div className="row">
           <button
@@ -104,6 +111,11 @@ export function ProjectCard({
           >
             Untrack
           </button>
+          {s?.raci && (
+            <span className={`badge raci ${s.raci.role}`} title={`${RACI_LABEL[s.raci.role]}: ${s.raci.reason}`}>
+              {s.raci.role[0].toUpperCase()}
+            </span>
+          )}
           {status && <span className={`pill ${status}`}>{STATUS_LABEL[status]}</span>}
           <RefreshButton busy={busy} status={refreshStatus} title={`Refresh ${projectName(project)}`} onClick={() => refreshProject(project.channel_id).catch(() => {})} />
         </div>
@@ -114,15 +126,12 @@ export function ProjectCard({
 
       {s && (
         <>
-          <div className="badges">
-            {s.raci && (
-              <span className={`badge raci ${s.raci.role}`} title={s.raci.reason}>
-                <strong>{s.raci.role[0].toUpperCase()}</strong> {RACI_LABEL[s.raci.role]}
-              </span>
-            )}
-          </div>
+          <details className="project-summary">
+            <summary className="muted small">Summary</summary>
+            {s.description && <p className="small">{s.description}</p>}
+            {s.summary && <p className="small">{s.summary}</p>}
+          </details>
 
-          {s.description && <p className="project-description">{s.description}</p>}
           {status !== "on_track" && status !== "idle" && <p className="reason small">{s.status_reason}</p>}
 
           {s.blockers?.length > 0 && (
@@ -141,16 +150,6 @@ export function ProjectCard({
             </ul>
           )}
 
-          {openTasks > 0 && (
-            <p className="small task-count">
-              {openTasks} task{openTasks === 1 ? "" : "s"} for you {selected ? "· shown in Tasks" : "→"}
-            </p>
-          )}
-
-          <details>
-            <summary className="muted small">Summary</summary>
-            <p className="small">{s.summary}</p>
-          </details>
         </>
       )}
 
