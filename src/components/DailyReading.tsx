@@ -67,7 +67,7 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
           <span className="muted">{updates.length > 1 ? `${updates.length - 1} more` : "Last one"}</span>
           <span className="update-links">
             {top.link && (
-              <ExternalLink href={top.link} className="link-button small">
+              <ExternalLink href={top.link} className="link-button small source-link">
                 {sourceLabel(top.link)}
               </ExternalLink>
             )}

@@ -479,6 +479,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .update-meta { display: flex; justify-content: space-between; gap: 8px; }
 .update-text { font-size: 13px; margin: 0; }
 .update-links { display: flex; gap: 12px; }
+.update-links .source-link { color: var(--muted); }
 .update-actions { display: flex; justify-content: space-between; align-items: center; }
 
 .slack-link { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -1px; line-height: 0; opacity: 0.85; }
