@@ -41,7 +41,7 @@ ${NOISE}
 void main() {
   // Keep the noise square regardless of the strip's aspect ratio.
   vec2 p = vUv * vec2(uResolution.x / uResolution.y, 1.0) * 2.2;
-  float t = uTime * 0.22;
+  float t = uTime * 0.15;
   // Domain warping: noise displaced by noise gives the slow swirl.
   vec2 q = vec2(fbm(p + vec2(t, -t * 0.5)), fbm(p + vec2(5.2, 1.3) - t));
   vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + t * 1.5), fbm(p + 3.0 * q + vec2(8.3, 2.8) - t * 1.2));
@@ -50,9 +50,9 @@ void main() {
   // Thick at the bottom, wispy and ragged where it fades out at the top. Opacity
   // follows the swirl density, so thin areas are see-through and wisps stand out.
   float depth = 1.0 - vUv.y;
-  float density = smoothstep(0.3, 0.8, d);
+  float density = smoothstep(0.2, 0.9, d);
   float edge = smoothstep(0.0, 0.75, depth + (d - 0.5) * 0.7);
-  float alpha = pow(edge, 0.7) * (0.15 + 0.85 * density) * smoothstep(0.0, 0.3, depth + 0.1);
+  float alpha = pow(edge, 0.7) * (0.3 + 0.7 * density) * smoothstep(0.0, 0.3, depth + 0.1);
   alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9);
 
   // The orb's mood, blended into the page background: icy blue when calm,
@@ -61,8 +61,9 @@ void main() {
   moodDeep = mix(moodDeep, vec3(0.80, 0.22, 0.12), smoothstep(0.5, 1.0, uStress));
   vec3 moodWisp = mix(vec3(0.70, 0.80, 1.00), vec3(0.80, 0.70, 1.00), smoothstep(0.0, 0.5, uStress));
   moodWisp = mix(moodWisp, vec3(1.00, 0.62, 0.30), smoothstep(0.5, 1.0, uStress));
-  // Dense swirls take most of the mood color; the thinner edges a lighter tint.
-  vec3 color = mix(mix(uBg, moodWisp, 0.35), mix(uBg, moodDeep, 0.6), density);
+  // Dense swirls take some of the mood color; thin areas glow faintly with a pale tint.
+  vec3 glow = mix(uBg, mix(moodWisp, vec3(1.0), 0.35), 0.3);
+  vec3 color = mix(glow, mix(uBg, moodDeep, 0.4), density);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
