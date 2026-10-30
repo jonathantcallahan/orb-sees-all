@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { MOD } from "../platform";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, planTask } from "../jobs";
@@ -189,7 +190,7 @@ function Description({ text, onEdit, actions }: { text: string; onEdit?: () => v
   );
 }
 
-/** Edits a task's description in a centered modal. Esc cancels; ⌘↩ saves. */
+/** Edits a task's description in a centered modal. Esc cancels; ⌘↩ (Ctrl+↩) saves. */
 function DescriptionEditor({
   title,
   initial,
@@ -234,7 +235,7 @@ function DescriptionEditor({
           <button className="cta-ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button className="cta-primary" onClick={save} title="Save, then plan again from the new description (⌘↩)">
+          <button className="cta-primary" onClick={save} title={`Save, then plan again from the new description (${MOD}↩)`}>
             Save
           </button>
         </footer>

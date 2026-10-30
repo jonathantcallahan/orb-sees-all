@@ -27,8 +27,8 @@ pub struct SessionProgress {
 }
 
 fn projects_dir() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME isn't set".to_string())?;
-    Ok(PathBuf::from(home).join(".claude").join("projects"))
+    let home = crate::home_dir().ok_or_else(|| "Couldn't find the home folder".to_string())?;
+    Ok(home.join(".claude").join("projects"))
 }
 
 fn modified_ms(path: &Path) -> u64 {

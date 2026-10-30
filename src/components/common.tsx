@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
 import { formatWhen } from "../scheduler";
 import type { ViewTask } from "../tasks";
+import { MOD } from "../platform";
 
 export function ExternalLink({
   href,
@@ -133,7 +134,7 @@ export function Spinner() {
   );
 }
 
-/** A message to post, editable in a centered modal before it goes out. Esc cancels; ⌘↩ sends. */
+/** A message to post, editable in a centered modal before it goes out. Esc cancels; ⌘↩ (Ctrl+↩) sends. */
 export function ComposeModal({
   heading,
   note,
@@ -197,7 +198,7 @@ export function ComposeModal({
             {onSend ? "Cancel" : "Close"}
           </button>
           {onSend && (
-            <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Send (⌘↩)">
+            <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title={`Send (${MOD}↩)`}>
               Send
             </button>
           )}

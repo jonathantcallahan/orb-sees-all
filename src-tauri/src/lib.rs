@@ -23,23 +23,47 @@ struct CliOutput {
 /// if the app was started from a shell that carries another tool's Anthropic
 /// credentials (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ...), claude would use
 /// those instead of the user's own login and lose the claude.ai connectors.
-const PASSTHROUGH_ENV: [&str; 8] = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"];
+#[cfg(not(windows))]
+const PASSTHROUGH_ENV: &[&str] = &["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"];
+/// On Windows, Claude Code finds its login and config through the profile folders, and Git Bash
+/// (which it needs) through the program folders.
+#[cfg(windows)]
+const PASSTHROUGH_ENV: &[&str] = &[
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "USERNAME", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SystemRoot",
+    "SystemDrive", "windir", "ComSpec", "PATHEXT", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+    "CLAUDE_CODE_GIT_BASH_PATH",
+];
 
-/// Apps launched from Finder don't inherit the login shell's PATH, so add the
-/// usual install locations for claude, gh and git.
-fn search_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut parts = vec![
-        format!("{home}/.local/bin"),
-        "/opt/homebrew/bin".to_string(),
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-        "/bin".to_string(),
-    ];
-    if let Ok(existing) = std::env::var("PATH") {
-        parts.push(existing);
+/// The user's home folder: HOME on macOS and Linux, USERPROFILE on Windows.
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
+}
+
+/// Apps launched from Finder or the Start menu don't inherit the login shell's
+/// PATH, so add the usual install locations for claude, gh and git.
+fn search_path() -> std::ffi::OsString {
+    let home = home_dir().unwrap_or_default();
+    let mut parts: Vec<PathBuf> = vec![home.join(".local").join("bin")];
+    #[cfg(windows)]
+    {
+        let env_dir = |var: &str, rest: &[&str]| std::env::var_os(var).map(|v| rest.iter().fold(PathBuf::from(v), |p, r| p.join(r)));
+        parts.extend(
+            [
+                env_dir("APPDATA", &["npm"]),
+                env_dir("ProgramFiles", &["Git", "cmd"]),
+                env_dir("ProgramFiles", &["GitHub CLI"]),
+                env_dir("LOCALAPPDATA", &["Programs", "Git", "cmd"]),
+            ]
+            .into_iter()
+            .flatten(),
+        );
     }
-    parts.join(":")
+    #[cfg(not(windows))]
+    parts.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].map(PathBuf::from));
+    if let Some(existing) = std::env::var_os("PATH") {
+        parts.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(parts).unwrap_or_default()
 }
 
 fn passthrough_env() -> Vec<(&'static str, String)> {
@@ -47,6 +71,20 @@ fn passthrough_env() -> Vec<(&'static str, String)> {
         .iter()
         .filter_map(|key| std::env::var(key).ok().map(|value| (*key, value)))
         .collect()
+}
+
+/// A child process with only the passthrough environment, the search path, and (on Windows) no
+/// console window flashing up.
+fn command(exe: &PathBuf, args: &[String], dir: &PathBuf, path: &std::ffi::OsString) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.args(args).current_dir(dir).env_clear().envs(passthrough_env()).env("PATH", path).stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
 }
 
 /// Where child processes run. claude runs outside any repo so it doesn't pick
@@ -62,10 +100,14 @@ fn work_dir(app: &AppHandle, cwd: Option<String>) -> Result<PathBuf, String> {
     }
 }
 
-fn resolve(program: &str, path: &str) -> Option<PathBuf> {
-    path.split(':')
-        .map(|dir| PathBuf::from(dir).join(program))
-        .find(|candidate| candidate.is_file())
+fn resolve(program: &str, path: &std::ffi::OsString) -> Option<PathBuf> {
+    // Windows programs carry an extension; npm installs claude as a .cmd shim.
+    let names: Vec<String> = if cfg!(windows) {
+        ["exe", "cmd"].iter().map(|ext| format!("{program}.{ext}")).collect()
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::split_paths(path).find_map(|dir| names.iter().map(|n| dir.join(n)).find(|candidate| candidate.is_file()))
 }
 
 #[tauri::command]
@@ -83,13 +125,7 @@ async fn run_cli(
     let dir = work_dir(&app, cwd)?;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let output = Command::new(exe)
-            .args(&args)
-            .current_dir(dir)
-            .env_clear()
-            .envs(passthrough_env())
-            .env("PATH", path)
-            .stdin(Stdio::null())
+        let output = command(&exe, &args, &dir, &path)
             .output()
             .map_err(|e| e.to_string())?;
         Ok(CliOutput {
@@ -129,13 +165,7 @@ async fn run_cli_stream(
     let dir = work_dir(&app, cwd)?;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut child = Command::new(exe)
-            .args(&args)
-            .current_dir(dir)
-            .env_clear()
-            .envs(passthrough_env())
-            .env("PATH", path)
-            .stdin(Stdio::null())
+        let mut child = command(&exe, &args, &dir, &path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -223,11 +253,18 @@ fn migrations() -> Vec<Migration> {
 }
 
 /// The identifier the app had before it was shared; its data folders move to the current one.
+#[cfg(target_os = "macos")]
 const OLD_IDENTIFIER: &str = "com.jcallahan.dayplanner";
+#[cfg(target_os = "macos")]
 const IDENTIFIER: &str = "com.orb.app";
+
+/// Only macOS installs ever had the old identifier.
+#[cfg(not(target_os = "macos"))]
+fn migrate_old_identifier() {}
 
 /// Moves the old identifier's folders (database, backups, web storage, caches) to the current
 /// identifier's, once, before anything opens them. A folder that already exists is left alone.
+#[cfg(target_os = "macos")]
 fn migrate_old_identifier() {
     let Ok(home) = std::env::var("HOME") else { return };
     let library = PathBuf::from(home).join("Library");

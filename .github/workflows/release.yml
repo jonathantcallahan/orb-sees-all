@@ -1,17 +1,35 @@
 # Builds a signed release for a version tag (made with `pnpm release <version>`) and publishes it
-# with latest.json, which installed copies of the app check for updates.
+# with latest.json, which installed copies of the app check for updates. Both platforms land in
+# the same release and the same latest.json.
+#
+# Run it by hand (Actions > Release > Run workflow) to build Windows only, as a draft release no
+# installed copy sees: for trying a Windows build before it ships to everyone.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   release:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            # One app for Apple silicon and Intel Macs.
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles app,dmg
+          - os: windows-latest
+            rust_targets: ""
+            args: --bundles nsis
+    runs-on: ${{ matrix.os }}
+    # A manual run builds Windows only.
+    if: github.event_name == 'push' || matrix.os == 'windows-latest'
     steps:
       - uses: actions/checkout@v4
 
@@ -23,8 +41,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # One app for Apple silicon and Intel Macs.
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.rust_targets }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -38,8 +55,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Orb Sees All ${{ github.ref_name }}
-          releaseBody: "See the README for setup. First launch on a new Mac: right-click the app and choose Open."
-          releaseDraft: false
-          args: --target universal-apple-darwin --bundles app,dmg
+          tagName: ${{ github.event_name == 'push' && github.ref_name || format('windows-test-{0}', github.run_number) }}
+          releaseName: ${{ github.event_name == 'push' && format('Orb Sees All {0}', github.ref_name) || format('Windows test build {0}', github.run_number) }}
+          releaseBody: "See the README for setup. First launch on a new Mac: right-click the app and choose Open. On Windows: if SmartScreen warns you, choose More info, then Run anyway."
+          releaseDraft: ${{ github.event_name != 'push' }}
+          args: ${{ matrix.args }}

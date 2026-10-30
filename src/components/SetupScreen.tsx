@@ -4,8 +4,8 @@ import * as db from "../db";
 import { setUserProfile } from "../prompts";
 import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
+import { INSTALL_CLAUDE, isWindows, TERMINAL } from "../platform";
 
-const INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 const CONNECTORS_URL = "https://claude.ai/settings/connectors";
 
 type Mark = "ok" | "bad" | "warn" | "wait" | "todo";
@@ -15,7 +15,7 @@ function StatusMark({ mark }: { mark: Mark }) {
   return <span className={`setup-mark ${mark}`}>{{ ok: "✓", bad: "×", warn: "!", todo: "○" }[mark]}</span>;
 }
 
-/** A shell command with a Copy button, for steps the user runs in Terminal. */
+/** A shell command with a Copy button, for steps the user runs in Terminal (PowerShell on Windows). */
 function Command({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -136,8 +136,13 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
           <Step mark={mark(r?.claude)} title={r?.claude?.ok ? `Claude Code ${r.claude.version ?? ""} is installed` : "Install Claude Code"}>
             {r?.claude && !r.claude.ok && (
               <>
-                Open Terminal, run this, then check again:
-                <Command text={INSTALL_COMMAND} />
+                Open {TERMINAL}, run this, then check again:
+                <Command text={INSTALL_CLAUDE} />
+                {isWindows && (
+                  <span>
+                    Claude Code on Windows also needs <ExternalLink href="https://git-scm.com/downloads/win">Git for Windows</ExternalLink>.
+                  </span>
+                )}
                 <ExternalLink href="https://docs.claude.com/en/docs/claude-code/setup">Install guide</ExternalLink>
               </>
             )}
@@ -146,7 +151,7 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
           <Step mark={mark(r?.login)} title={r?.login?.ok ? `Claude Code is signed in${r.login.email ? ` as ${r.login.email}` : ""}` : "Sign in to Claude Code"}>
             {r?.login && !r.login.ok && (
               <>
-                In Terminal, run <code>claude</code>, type <code>/login</code> and choose your Claude account (a Pro, Max, Team or Enterprise subscription). Then
+                In {TERMINAL}, run <code>claude</code>, type <code>/login</code> and choose your Claude account (a Pro, Max, Team or Enterprise subscription). Then
                 check again.
               </>
             )}
@@ -156,7 +161,7 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
             {r?.probeError && <span className="error">Claude Code didn't start: {r.probeError}</span>}
             {r?.noClaudeAi && (
               <span className="error">
-                Claude Code can't see any claude.ai connectors, so it isn't using a claude.ai account. In Terminal, run <code>claude</code>, type{" "}
+                Claude Code can't see any claude.ai connectors, so it isn't using a claude.ai account. In {TERMINAL}, run <code>claude</code>, type{" "}
                 <code>/login</code> and choose your Claude account (not an API key), then check again.
               </span>
             )}

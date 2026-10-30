@@ -6,6 +6,7 @@ import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
 import { SetupScreen } from "./components/SetupScreen";
+import { isWindows, MOD } from "./platform";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
@@ -34,7 +35,7 @@ function useScheduler() {
     document.addEventListener("visibilitychange", onVisible);
     const unlisteners = [listen("scheduler-tick", check), listen("tray-refresh-all", refreshAllSafely)];
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key.toLowerCase() === "r") {
+      if ((isWindows ? e.ctrlKey : e.metaKey) && e.key.toLowerCase() === "r") {
         e.preventDefault();
         refreshAllSafely();
       }
@@ -161,7 +162,7 @@ export default function App() {
             running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>
           )}
           <UpdateButton />
-          <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title="Refresh everything (⌘R)">
+          <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title={`Refresh everything (${MOD}R)`}>
             {refreshingAll ? "Refreshing…" : "Refresh all"}
           </button>
           <button
