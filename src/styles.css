@@ -387,6 +387,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   line-height: 0;
 }
 .join:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* The join button shows only while you hover the meeting (or tab to it). */
+.join { opacity: 0; transition: opacity 0.15s ease; }
+.event-block:hover .join, .join:focus-visible { opacity: 1; }
 .join.soon { color: var(--green); }
 
 /* Meeting details on hover */
@@ -730,3 +733,18 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .duplicate-actions { display: flex; gap: 10px; }
 .duplicate-note .link-button { color: inherit; }
 .duplicate-note .link-button.more-link { color: var(--muted); }
+
+/* Your RSVP on calendar blocks: no response is grayed out, maybe is striped, yes is full color.
+   Declined meetings aren't shown. */
+.event-block.rsvp-needs_action { background: var(--grey-bg); border-color: var(--border); color: var(--muted); }
+.event-block.rsvp-needs_action:hover { background: color-mix(in srgb, var(--text) 10%, var(--surface)); }
+.event-block.rsvp-tentative {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent) 0 4px, transparent 4px 9px),
+    var(--surface);
+}
+.event-block.rsvp-tentative:hover {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 32%, transparent) 0 4px, transparent 4px 9px),
+    var(--surface);
+}

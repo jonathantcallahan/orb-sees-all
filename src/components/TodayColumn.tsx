@@ -12,7 +12,7 @@ import { useJobStatus } from "../useAppData";
 /** Pixels per minute on the day grid (72px an hour). */
 const PX_PER_MIN = 1.2;
 /** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
-const EVENT_INSET_TOP = 1;
+const EVENT_INSET_TOP = 2;
 const EVENT_INSET_BOTTOM = 2;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -75,7 +75,9 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
   );
 }
 
-function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
+function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
+  // Meetings you declined don't take up space on your day.
+  const events = all.filter((ev) => ev.my_response !== "declined");
   const range = dayRange(events, now);
   const hours = Array.from({ length: range.endHour - range.startHour }, (_, i) => range.startHour + i);
   const placed = layoutDay(events, range);
@@ -100,7 +102,8 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
               key={ev.id}
               role="link"
               tabIndex={0}
-              className={`event-block${past ? " past" : ""}${current ? " current" : ""}`}
+              className={`event-block rsvp-${ev.my_response ?? "accepted"}${past ? " past" : ""}${current ? " current" : ""}`}
+              title={ev.my_response === "tentative" ? "You said maybe" : ev.my_response === "needs_action" ? "You haven't responded" : undefined}
               style={{
                 top: top * PX_PER_MIN + EVENT_INSET_TOP,
                 height: Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18),
@@ -157,7 +160,7 @@ export function TodayColumn({
   // Prep only matters for meetings that haven't ended.
   const upcomingPrep = [...events]
     .sort((a, b) => a.start.localeCompare(b.start))
-    .filter((ev) => ev.prep.length > 0 && new Date(ev.end) >= now);
+    .filter((ev) => ev.prep.length > 0 && ev.my_response !== "declined" && new Date(ev.end) >= now);
 
   return (
     <section className="column">

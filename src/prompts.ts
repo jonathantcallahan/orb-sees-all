@@ -180,10 +180,11 @@ export function calendarPrompt(p: CalendarPromptInput): string {
 - id: the calendar event id. Prep id: "<event id>#<short-kebab-slug>", stable for the same prep item.
 - start and end: ISO 8601 with offset. attendees: display names (not the user), at most 8. link: the event's htmlLink.
 - summary: two or three sentences on what the meeting is likely to cover and what the user is expected to bring or decide, drawn from the description, agenda, attached docs and related threads. For a routine meeting with nothing specific, one short sentence.
+- my_response: the user's own RSVP, from their entry in the event's attendees (responseStatus): "accepted", "tentative", "declined" or "needs_action". If the user organized the event or it has no attendee list, "accepted". Include declined events too, marked "declined".
 - video_link: the URL to join the call: the event's Google Meet link (hangoutLink or conferenceData), or a Zoom, Teams or other meeting URL from the location or description. null when there's no call.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": string, "start": string, "end": string, "attendees": [string], "link": string|null, "summary": string|null, "video_link": string|null, "related_project": string|null, "prep": [{"id": string, "title": string, "link": string|null}]}]}`;
+${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": string, "start": string, "end": string, "attendees": [string], "link": string|null, "summary": string|null, "my_response": "accepted"|"tentative"|"declined"|"needs_action", "video_link": string|null, "related_project": string|null, "prep": [{"id": string, "title": string, "link": string|null}]}]}`;
 }
 
 export interface PlanPromptInput {

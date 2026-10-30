@@ -172,6 +172,8 @@ export const CalendarEvent = z.object({
   video_link: z.string().nullish(),
   /** What the meeting is likely to cover. */
   summary: z.string().nullish(),
+  /** The user's own RSVP. Missing on days fetched before this was recorded; treated as accepted. */
+  my_response: z.enum(["accepted", "tentative", "declined", "needs_action"]).nullish(),
   related_project: z.string().nullish(),
   prep: z.array(PrepItem),
 });
