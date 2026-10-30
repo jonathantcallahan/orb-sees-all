@@ -1,3 +1,4 @@
+import type { IndexEntry } from "./taskIndex";
 import type { AdhocTask, Blocker, ProjectSnapshot, QuickReply, RepoState } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
@@ -19,6 +20,20 @@ const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude ca
   - claude_steps: up to four short, ordered steps that Claude can do on its own toward this task, by this rule: ${CLAUDE_STEP_RULE} Required, with at least one step, whenever automation is "assisted" or "claude": if Claude can do or help with the task, say what it would do. Empty only when automation is "human". When a task carried over from the previous refresh has an assessment without claude_steps, add them.`;
 const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}`;
 
+/**
+ * The user's open tasks from every source, and how to use them: new work that matches one refines it
+ * instead of becoming a duplicate.
+ */
+function taskIndexSection(index: IndexEntry[], listName: string): string {
+  if (!index.length) return "";
+  return `
+The user's open tasks from every source (their project channels, Slack and email requests, and their own list), as id, title, project and gist:
+${index.map((e) => JSON.stringify(e)).join("\n")}
+
+Before you add anything to ${listName}, check it against that list. If it's the same work as a listed task (the same ask, even if worded differently or raised in a different message, channel or source), it is not new: still list it with its own id, but set refines to the listed task's id and write its description to bring the listed task up to date with what's new. Only set refines when you're confident it's the same piece of work; related but separate work is its own task. Otherwise refines is null.
+`;
+}
+
 /** ISO date (YYYY-MM-DD) and unix seconds for an incremental read window. */
 export function windowStart(lastRefreshedAt: string | null, now: Date, firstRunDays: number) {
   // Overlap by an hour so messages near the boundary aren't lost.
@@ -35,6 +50,8 @@ ${JSON_ONLY} Shape: {"user_id": string, "channels": [{"channel_id": string, "nam
 }
 
 export interface ProjectPromptInput {
+  /** Open tasks from every source, so new ones can refine them instead of duplicating them. */
+  index?: IndexEntry[];
   channelId: string;
   channelName: string;
   userId: string;
@@ -67,7 +84,7 @@ The project channel is #${p.channelName} (${p.channelId}). Do not look at other 
 
 ${reading}
 ${repos}
-
+${taskIndexSection(p.index ?? [], "my_tasks")}
 Fields:
 - name: the project's proper name as people refer to it, two to four words in sentence case (e.g. "Asset refunds", "UPM paid products"). Not the channel name.
 - description: what the project is and what it delivers, at most two short lines (about 160 characters). No status here.
@@ -89,12 +106,14 @@ ${JSON_ONLY} Shape:
  "priority": {"level": "P0"|"P1"|"P2"|"P3"|"P4", "reason": string},
  "blockers": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "active": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
- "my_tasks": [{"id": string, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
+ "my_tasks": [{"id": string, "refines": string|null, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
  "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
 }
 
 export interface AdhocPromptInput {
+  /** Open tasks from every source, so new ones can refine them instead of duplicating them. */
+  index?: IndexEntry[];
   userId: string;
   previous: AdhocTask[];
   previousReplies: QuickReply[];
@@ -124,6 +143,7 @@ Look for new items since ${since.date}:
 - News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")} from:unity3d.com" or company-wide lists). Keep only what matters to someone working on the Asset Store, commerce and package distribution: launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
+${taskIndexSection(p.index ?? [], "tasks")}
 Sort what's still open into two lists:
 - replies: every Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, quick or not, including in tmp-* channels. Drop a carried-over reply once the user has responded.
 - tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply. A message that needs both a response and real work goes in both lists, with the same id.
@@ -142,7 +162,7 @@ For each reply:
 - id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: when the message was sent, as ISO 8601 date-time with offset (e.g. "2026-10-29T14:05:00-07:00"). link: as for tasks.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": string|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": string|null, "link": string|null}], "tasks": [{"id": string, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
+${JSON_ONLY} Shape: {"news": [{"id": string, "headline": string, "detail": string|null, "where": string|null, "date": string|null, "link": string|null}], "replies": [{"id": string, "source": "slack"|"email", "from": string, "summary": string, "where": string|null, "received": string|null, "link": string|null}], "tasks": [{"id": string, "refines": string|null, "title": string, "description": string, "source": "slack"|"email", "follow_up": {"kind": "reply"|"review"|"decide"|"do"|"schedule"|"share", "action": string}, ${ASSESSMENT_SHAPE}, "requester": string|null, "link": string|null, "due": "YYYY-MM-DD"|null}]}`;
 }
 
 export interface CalendarPromptInput {

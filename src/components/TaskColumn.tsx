@@ -90,6 +90,7 @@ export function TaskColumn({
   sessionLinks,
   priorityOverrides,
   taskAliases,
+  refinedDescriptions,
   running,
   onChange,
 }: {
@@ -116,6 +117,8 @@ export function TaskColumn({
   priorityOverrides: Record<string, Priority>;
   /** Other ids for the same tasks, mapped to their canonical ids. */
   taskAliases: Aliases;
+  /** Descriptions refreshes brought up to date, by canonical id; the user's own edits win. */
+  refinedDescriptions: Record<string, string>;
   running: string[];
   onChange: () => void;
 }) {
@@ -149,8 +152,12 @@ export function TaskColumn({
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const today = localDate(new Date());
 
-  // Edits and Recommended may be keyed by any of a task's ids; the canonical one wins.
-  const editedDescription = (id: string) => descriptionOverrides[canonicalId(id, taskAliases)] ?? descriptionOverrides[id];
+  // Edits and Recommended may be keyed by any of a task's ids; the canonical one wins. A description
+  // you edited beats one a refresh brought up to date with new information.
+  const editedDescription = (id: string) => {
+    const cid = canonicalId(id, taskAliases);
+    return descriptionOverrides[cid] ?? descriptionOverrides[id] ?? refinedDescriptions[cid];
+  };
   const isRecommended = (id: string) => recommended.has(id) || recommended.has(canonicalId(id, taskAliases));
 
   // Slack and email items share one inbox; dated items first, soonest first.
@@ -176,7 +183,13 @@ export function TaskColumn({
 
   const rawMine = manual
     .filter((t) => !filterProject || t.project_id === filterProject.channel_id)
-    .map((t) => ({ ...t, source: "manual" as const, recommended: isRecommended(t.id) }));
+    // Your own words stay; a refresh's update only fills in a task you left without a description.
+    .map((t) => ({
+      ...t,
+      description: t.description || refinedDescriptions[canonicalId(t.id, taskAliases)] || null,
+      source: "manual" as const,
+      recommended: isRecommended(t.id),
+    }));
 
   // The same work from several sources (or merged by hand) shows once, under its canonical id.
   type Raw = (typeof rawMine)[number] | (typeof rawProjects)[number] | (typeof rawInbox)[number];

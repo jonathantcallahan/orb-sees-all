@@ -213,6 +213,7 @@ export default function App() {
           sessionLinks={data.sessionLinks}
           priorityOverrides={data.priorityOverrides}
           taskAliases={data.taskAliases}
+          refinedDescriptions={data.refinedDescriptions}
           running={running}
           onChange={reload}
         />

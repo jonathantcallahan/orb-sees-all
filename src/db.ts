@@ -131,7 +131,15 @@ export async function saveReading(reading: StoredReading) {
 
 // ---- per-task data: one row per item in task_data, so concurrent saves can't clobber each other
 
-type Store = "description_overrides" | "priority_overrides" | "session_links" | "task_checks" | "blocker_checks" | "reminders" | "not_duplicates";
+type Store =
+  | "description_overrides"
+  | "refined_descriptions"
+  | "priority_overrides"
+  | "session_links"
+  | "task_checks"
+  | "blocker_checks"
+  | "reminders"
+  | "not_duplicates";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -165,6 +173,14 @@ export async function saveDescriptionOverride(taskId: string, text: string | nul
   if (text) await putRow("description_overrides", taskId, text);
   else await deleteRow("description_overrides", taskId);
 }
+
+/**
+ * Descriptions a refresh wrote when it found new information about an existing task (see
+ * taskIndex.ts), by canonical task id. Shown unless the user edited the description themselves.
+ */
+export const getRefinedDescriptions = () => getRows<string>("refined_descriptions");
+
+export const saveRefinedDescription = (taskId: string, text: string) => putRow("refined_descriptions", taskId, text);
 
 export interface StoredTaskCheck extends TaskCheck {
   at: string;

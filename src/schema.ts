@@ -74,6 +74,8 @@ export const Blocker = z.object({
 export type Blocker = z.infer<typeof Blocker>;
 
 export const ProjectTask = Task.extend({
+  /** The id of an existing open task (any source) that this is the same work as; see taskIndex.ts. */
+  refines: z.string().nullish(),
   description: z.string().nullish(),
   follow_up: FollowUp.nullish(),
   assessment: Assessment.nullish(),
@@ -106,6 +108,8 @@ export const Discovery = z.object({
 export type Discovery = z.infer<typeof Discovery>;
 
 export const AdhocTask = Task.extend({
+  /** The id of an existing open task (any source) that this is the same work as; see taskIndex.ts. */
+  refines: z.string().nullish(),
   source: z.enum(["slack", "email"]),
   requester: z.string().nullish(),
   description: z.string().nullish(),

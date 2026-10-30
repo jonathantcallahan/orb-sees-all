@@ -1,4 +1,5 @@
-import { slackThread } from "../projects";
+import { projectName, slackThread } from "../projects";
+import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
@@ -105,6 +106,47 @@ export function discoverProjects(): Promise<void> {
   );
 }
 
+/** Every open task from every source, for refreshes to check new work against. */
+async function loadTaskIndex(): Promise<IndexEntry[]> {
+  const [projects, adhoc, manual, assessments, states, aliases] = await Promise.all([
+    db.listProjects(),
+    db.getAdhoc(),
+    db.listManualTasks(),
+    db.getAssessments(),
+    db.getTaskStates(),
+    db.getTaskAliases(),
+  ]);
+  const visible = projects.filter((p) => !p.hidden);
+  const nameOf = new Map(visible.map((p) => [p.channel_id, projectName(p)]));
+  return buildIndex(
+    [
+      ...manual.map((t) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description ?? assessments.get(t.id)?.description,
+        project: t.project_id ? nameOf.get(t.project_id) : null,
+      })),
+      ...visible.flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ ...t, project: nameOf.get(p.channel_id) }))),
+      ...adhoc.tasks,
+    ],
+    states,
+    aliases,
+  );
+}
+
+/**
+ * Records the refinements a refresh reported: the new item becomes another source of the existing
+ * task, and its description (the refresh's update of that task) is kept for the card.
+ */
+async function recordRefinements(tasks: { id: string; refines?: string | null; description?: string | null }[], index: IndexEntry[]) {
+  const accepted = acceptedRefinements(tasks, index, await db.getTaskAliases());
+  for (const { id, target } of accepted) {
+    await db.addTaskAlias(id, target, "refined");
+    const description = tasks.find((t) => t.id === id)?.description;
+    if (description) await db.saveRefinedDescription(target, description);
+  }
+}
+
 export async function refreshProject(channelId: string): Promise<void> {
   // Resolve before taking a queue slot: discovery needs a slot of its own.
   const uid = await userId();
@@ -121,9 +163,11 @@ export async function refreshProject(channelId: string): Promise<void> {
         if (repoState) await db.saveRepoState(channelId, repoState);
 
         const startedAt = new Date();
+        const index = await loadTaskIndex();
         const { data, costUsd } = await runClaude({
         onStatus: status,
           prompt: projectPrompt({
+            index,
             channelId,
             channelName: project.name,
             userId: uid,
@@ -139,6 +183,7 @@ export async function refreshProject(channelId: string): Promise<void> {
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
         await db.saveProjectSnapshot(channelId, data, startedAt.toISOString());
+        await recordRefinements(data.my_tasks, index);
         return { value: undefined, costUsd };
       } catch (e) {
         await db.saveProjectError(channelId, (e as Error).message);
@@ -154,9 +199,11 @@ export async function refreshAdhoc(): Promise<void> {
     logged("adhoc", null, async () => {
       const previous = await db.getAdhoc();
       const startedAt = new Date();
+      const index = await loadTaskIndex();
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: adhocPrompt({
+          index,
           userId: uid,
           previous: previous.tasks,
           previousReplies: previous.replies,
@@ -170,6 +217,7 @@ export async function refreshAdhoc(): Promise<void> {
         maxTurns: 100,
       });
       await db.saveAdhoc({ tasks: data.tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
+      await recordRefinements(data.tasks, index);
       return { value: undefined, costUsd };
     }),
   );
