@@ -715,10 +715,10 @@ export function TaskCard({
         title="Click for details"
       >
         <span className="task-title">{task.title}</span>
+        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         {task.recommended && <RecommendedBadge />}
         {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
         <StatusSelect task={task} onChange={onChange} />
-        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
       </article>
     );
   }
@@ -729,14 +729,14 @@ export function TaskCard({
         <ExternalLink href={task.link} className="task-title">
           {task.title}
         </ExternalLink>
-        {task.recommended && <RecommendedBadge />}
-        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
-        <StatusSelect task={task} onChange={onChange} />
         {assessment?.estimate_minutes != null && (
-          <span className="estimate" title="Claude's estimate of your hands-on time">
+          <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
             ~{formatMinutes(assessment.estimate_minutes)}
           </span>
         )}
+        {task.recommended && <RecommendedBadge />}
+        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
+        <StatusSelect task={task} onChange={onChange} />
       </header>
 
       {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
