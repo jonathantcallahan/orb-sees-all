@@ -1,6 +1,6 @@
 import type { Automation, Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
 
-export type TaskStatus = "todo" | "in_progress" | "waiting" | "done";
+export type TaskStatus = "todo" | "in_progress" | "waiting" | "blocked" | "done";
 
 export interface TaskState {
   status: TaskStatus;

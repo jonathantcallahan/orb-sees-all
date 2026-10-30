@@ -75,6 +75,8 @@ function progressInstructions(): string[] {
     "- `[orb] step N started` when you begin one of the numbered steps above,",
     "- `[orb] step N done` when you finish it, always before you start the next step,",
     "- `[orb] step N waiting: <what you need from me>` when you stop to ask me for something.",
+    "- `[orb] step N blocked: <who or what>` when a step can't move until someone else acts,",
+    "- `[orb] step N skipped: <why>` when a step turns out not to be needed.",
     "N is the step's number in the list above.",
     "",
     "Don't post to Slack yourself. When a Slack message is ready, hand it to my planner, which shows it to me to review and send. Write it as its own block:",

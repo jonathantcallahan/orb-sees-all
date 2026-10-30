@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  Renders the app icon: the Demian (crystal) orb on a dark rounded square, at 1024px.
+  Open http://localhost:1420/scripts/orb-icon.html with `pnpm dev` running; the image appears on
+  the page (right-click to save it). Then: pnpm tauri icon app-icon.png
+-->
+<html>
+  <body style="margin: 0; background: #111; display: grid; place-items: center; min-height: 100vh">
+    <canvas id="icon" width="1024" height="1024" style="width: 340px; height: 340px"></canvas>
+    <script type="module">
+      import * as THREE from "three";
+      import { buildGlassOrb } from "/src/components/glassOrb.ts";
+      import { NO_RIPPLE } from "/src/components/orbEffects.ts";
+
+      const SIZE = 1024;
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(SIZE, SIZE, false);
+      // As in the app: three clears glass's transmission buffer to half-white on a transparent canvas.
+      const setClearColor = renderer.setClearColor.bind(renderer);
+      renderer.setClearColor = (color, alpha) =>
+        alpha === 0.5 && new THREE.Color(color).getHex() === 0xffffff ? setClearColor(0x000000, 0) : setClearColor(color, alpha);
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+      camera.position.z = Number(new URLSearchParams(location.search).get("z") ?? 7);
+      const q = new URLSearchParams(location.search);
+      const uniforms = {
+        uTime: { value: Number(q.get("t") ?? 0) },
+        uStress: { value: Number(q.get("s") ?? 0) },
+        uRippleAge: { value: NO_RIPPLE },
+        uRippleOrigin: { value: new THREE.Vector3(0, 0, 1) },
+        uSpike: { value: 0 },
+        uSpikeDir: { value: new THREE.Vector3(0, 0, 1) },
+        uClock: { value: 14 },
+        uWorking: { value: 0 },
+      };
+      const orb = buildGlassOrb(uniforms, renderer, "clear");
+      if (orb.environment) scene.environment = orb.environment;
+      orb.group.rotation.set(0.35, 0.6, 0);
+      scene.add(orb.group);
+      // A couple of frames so the transmission pass has something to refract.
+      renderer.render(scene, camera);
+      renderer.render(scene, camera);
+
+      // The icon: a dark rounded square (macOS's 824px grid with its corner radius), the orb's
+      // light glowing faintly behind it, then the orb.
+      const icon = document.getElementById("icon").getContext("2d");
+      const inset = 100, side = 824, radius = 185;
+      icon.save();
+      icon.beginPath();
+      icon.roundRect(inset, inset, side, side, radius);
+      icon.clip();
+      const bg = icon.createLinearGradient(0, inset, 0, inset + side);
+      bg.addColorStop(0, "#26262a");
+      bg.addColorStop(1, "#111113");
+      icon.fillStyle = bg;
+      icon.fillRect(inset, inset, side, side);
+      for (const [x, y, r, color] of [
+        [470, 440, 380, "rgb(70 190 255 / 0.22)"],
+        [580, 600, 360, "rgb(60 100 240 / 0.2)"],
+        [430, 640, 300, "rgb(120 230 200 / 0.12)"],
+      ]) {
+        const glow = icon.createRadialGradient(x, y, 0, x, y, r);
+        glow.addColorStop(0, color);
+        glow.addColorStop(1, "rgb(0 0 0 / 0)");
+        icon.fillStyle = glow;
+        icon.fillRect(inset, inset, side, side);
+      }
+      icon.drawImage(renderer.domElement, 0, 0, SIZE, SIZE);
+      // A hairline of light along the top edge, as on Apple's own dark icons.
+      icon.strokeStyle = "rgb(255 255 255 / 0.08)";
+      icon.lineWidth = 2;
+      icon.beginPath();
+      icon.roundRect(inset + 1, inset + 1, side - 2, side - 2, radius - 1);
+      icon.stroke();
+      icon.restore();
+      window.iconReady = true;
+    </script>
+  </body>
+</html>

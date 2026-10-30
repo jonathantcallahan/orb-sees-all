@@ -23,7 +23,7 @@ pub struct SessionFile {
 pub struct SessionProgress {
     /// Lines Claude wrote that start with "[orb]", oldest first.
     pub lines: Vec<String>,
-    /// Messages Claude handed to Orb to send, oldest first.
+    /// Blocks Claude handed to Orb (messages to send, revised plans), oldest first.
     pub sends: Vec<SessionSend>,
     /// The conversation as typed: the user's messages and Claude's text, each turn of Claude's text
     /// blocks joined into one message. Tool calls and results are left out.
@@ -38,7 +38,8 @@ pub struct ChatMessage {
     pub text: String,
 }
 
-/// A message handed to Orb: the "[orb] send …" line, and the text up to "[orb] end".
+/// A block handed to Orb: a message to send ("[orb] send …") or a revised plan ("[orb] plan"), and
+/// its text up to "[orb] end".
 #[derive(Serialize, Debug, PartialEq)]
 pub struct SessionSend {
     pub header: String,
@@ -157,7 +158,9 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                 }
                 if trimmed.starts_with("[orb]") {
                     lines.push(trimmed.to_string());
-                    if trimmed.to_ascii_lowercase().starts_with("[orb] send") {
+                    // Hand-offs ("[orb] send …") and plan updates ("[orb] plan") carry a block of text up to "[orb] end".
+                    let lower = trimmed.to_ascii_lowercase();
+                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") {
                         open = Some((trimmed.to_string(), Vec::new()));
                     }
                 }

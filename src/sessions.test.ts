@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("./db", () => ({}));
 
-const { parseProgress } = await import("./sessions");
+const { parseProgress, parsePlan, currentPlan, readableReply, parseSends } = await import("./sessions");
 const { startPrompt, sessionMarker, resumeSessionUrl } = await import("./openInClaude");
 
 describe("session progress", () => {
@@ -96,5 +96,40 @@ describe("readable reply", () => {
     const { readableReply } = await import("./sessions");
     const text = "[orb] step 1 done\n\nTwo rates are on the table:\n- 0.92 (storefront)\n- 0.85 (Finance)\n\n[orb] send step 5 to #refunds\nDraft here\n[orb] end\n`[orb] step 2 waiting: which rate?`";
     expect(readableReply(text)).toBe("Two rates are on the table:\n- 0.92 (storefront)\n- 0.85 (Finance)");
+  });
+});
+
+describe("revised plans", () => {
+  it("reads the steps of a plan block, [Me] marking the user's", () => {
+    expect(parsePlan("1. Draft the summary\n2. [Me] Ask Eric to clear the 15-day window with Legal\n- Post the decisions")).toEqual([
+      { title: "Draft the summary", by: "claude" },
+      { title: "Ask Eric to clear the 15-day window with Legal", by: "you" },
+      { title: "Post the decisions", by: "claude" },
+    ]);
+  });
+
+  it("counts only the reports after the latest plan, which renumbers the steps", () => {
+    const lines = ["[orb] step 3 done", "[orb] step 4 waiting: ask Legal", "[orb] plan", "[orb] step 1 done", "[orb] step 2 skipped: Eric took it"];
+    const { plan, lines: after } = currentPlan(lines, [{ header: "[orb] plan", body: "1. Draft\n2. [Me] Ask Legal\n3. Post" }]);
+    expect(plan).toHaveLength(3);
+    expect(parseProgress(after)).toEqual({ 1: { state: "done" }, 2: { state: "skipped", note: "Eric took it" } });
+  });
+
+  it("keeps the original numbering until the session revises the plan", () => {
+    const lines = ["[orb] step 1 done"];
+    expect(currentPlan(lines, [])).toEqual({ plan: null, lines });
+  });
+
+  it("hides plan blocks from the chat and isn't mistaken for a message to send", () => {
+    expect(readableReply("Updated the plan.\n[orb] plan\n1. Draft\n[orb] end")).toBe("Updated the plan.");
+    expect(parseSends([{ header: "[orb] plan", body: "1. Draft" }])).toEqual([]);
+  });
+});
+
+describe("blocked steps", () => {
+  it("records who or what a blocked step is waiting on", () => {
+    expect(parseProgress(["[orb] step 2 blocked: Legal's answer on the 15-day window"])).toEqual({
+      2: { state: "blocked", note: "Legal's answer on the 15-day window" },
+    });
   });
 });

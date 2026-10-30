@@ -241,14 +241,19 @@ export interface SessionTurn {
  * Orb reads, and it stays a real Claude Code session the user can open in Claude Desktop.
  */
 /**
- * Where a background session's words end up, given on every turn (so sessions already under way
- * pick it up too): Orb shows Claude's latest message in a small chat on the task card, as plain text.
+ * Where a background session's words end up and how to keep Orb's step list in step, given on
+ * every turn (so sessions already under way pick it up too): Orb shows the conversation in a chat,
+ * as plain text, beside the plan's steps.
  */
 export const SESSION_DISPLAY = [
-  "Nobody reads this conversation here. My day planner, Orb, shows your latest message in a small chat on the task's card, next to my reply box, as plain text.",
+  "Nobody reads this conversation here. My day planner, Orb, shows our conversation in a chat window, next to my reply box, as plain text.",
   "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't open with a title or heading line; start straight in with what you have to say. Don't use markdown: no headings, bold or italics, bullet or numbered lists, tables, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
   "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
   "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
+  "Orb also shows the plan's steps with their progress, so keep that list true to what's actually happening.",
+  "When something in our conversation finishes a step, even out of order or one of mine, report it done straight away. When a step is no longer needed, write `[orb] step N skipped: <why>` on its own line.",
+  "When a step can't move until someone else acts (an answer, an approval, a fix from another team), write `[orb] step N blocked: <who or what it's waiting on>`. That's different from waiting, which is for things I need to do. Report the step started or done again once it moves.",
+  "When the plan itself changes (steps added, dropped, reordered, reworded, or handed to someone else), write the whole updated plan as a block: a line `[orb] plan`, then one numbered line per step, finished ones included, with [Me] in front of mine, then a line `[orb] end`. From then on, step numbers refer to that list, so report each step's state again against it.",
 ].join(" ");
 
 export async function runSessionTurn(

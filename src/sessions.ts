@@ -15,6 +15,11 @@ export interface SessionLink {
    * message they sent from Slack or a step of their own.
    */
   doneSteps?: number[];
+  /**
+   * Steps the user marked done by title: these still match once the session revises the plan and
+   * the numbers shift. (doneSteps is kept for marks made before that.)
+   */
+  doneTitles?: string[];
   /** Keys of handed-off messages Orb has already sent (see PendingSend). */
   sentKeys?: string[];
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */
@@ -32,11 +37,14 @@ export interface PendingSend {
   text: string;
 }
 
-export type StepState = "started" | "done" | "waiting";
+export type StepState = "started" | "done" | "waiting" | "skipped" | "blocked";
 
 export interface StepProgress {
   state: StepState;
-  /** For "waiting": what the session needs from the user. */
+  /**
+   * For "waiting": what the session needs from the user. For "blocked": who or what it's waiting
+   * on outside the conversation. For "skipped": why it's no longer needed.
+   */
   note?: string;
 }
 
@@ -53,7 +61,15 @@ export function readableMessages(raw: ChatMessage[]): ChatMessage[] {
     .filter((m) => m.text);
 }
 
+/** A step of the plan as the session last revised it. */
+export interface PlanStep {
+  title: string;
+  by: "claude" | "you";
+}
+
 export interface SessionProgress {
+  /** The plan as the session last revised it ("[orb] plan" … "[orb] end"), or null if it hasn't. Step numbers refer to it. */
+  plan?: PlanStep[] | null;
   /** Progress by step number (1-based), latest report per step. */
   steps: Record<number, StepProgress>;
   /** Messages the session handed to Orb, oldest first. */
@@ -69,7 +85,32 @@ export interface SessionProgress {
   found: boolean;
 }
 
-const LINE = /^\[orb\]\s*step\s+(\d+)\s+(started|done|waiting)\b\s*:?\s*(.*)$/i;
+const LINE = /^\[orb\]\s*step\s+(\d+)\s+(started|done|waiting|skipped|blocked)\b\s*:?\s*(.*)$/i;
+const PLAN = /^\[orb\]\s*plan\b/i;
+
+/** The steps of an "[orb] plan" block: one per numbered (or bulleted) line, "[Me]" marking the user's. */
+export function parsePlan(body: string): PlanStep[] {
+  return body
+    .split("\n")
+    .map((line) => line.trim().replace(/^`+|`+$/g, ""))
+    .map((line) => line.match(/^(?:\d+[.)]|[-*•])\s+(.*)$/)?.[1]?.trim())
+    .filter((line): line is string => !!line)
+    .map((line) => {
+      const mine = /^\[me\]\s*/i.test(line);
+      return { title: line.replace(/^\[me\]\s*/i, ""), by: mine ? ("you" as const) : ("claude" as const) };
+    });
+}
+
+/**
+ * The session's latest revised plan and the report lines that count against it: once the session
+ * restates the plan, earlier reports used the old numbering, so only the ones after it apply.
+ */
+export function currentPlan(lines: string[], blocks: { header: string; body: string }[]): { plan: PlanStep[] | null; lines: string[] } {
+  const block = [...blocks].reverse().find((b) => PLAN.test(b.header));
+  const plan = block ? parsePlan(block.body) : [];
+  if (!plan.length) return { plan: null, lines };
+  return { plan, lines: lines.slice(lines.findLastIndex((l) => PLAN.test(l)) + 1) };
+}
 
 /**
  * Turns the session's "[orb] step N …" lines into each step's latest state. Sessions work through
@@ -83,7 +124,7 @@ export function parseProgress(lines: string[]): Record<number, StepProgress> {
     if (!m) continue;
     const n = Number(m[1]);
     const state = m[2].toLowerCase() as StepState;
-    steps[n] = state === "waiting" && m[3] ? { state, note: m[3].trim() } : { state };
+    steps[n] = state !== "started" && state !== "done" && m[3] ? { state, note: m[3].trim() } : { state };
     for (const [earlier, progress] of Object.entries(steps))
       if (Number(earlier) < n && progress.state === "started") steps[Number(earlier)] = { state: "done" };
   }
@@ -129,7 +170,7 @@ export function unsentMessages(sends: PendingSend[], link: SessionLink | undefin
 /** Claude's message as the user should read it: "[orb]" report lines and hand-off blocks taken out. */
 export function readableReply(text: string): string {
   return text
-    .replace(/^\s*`?\[orb\] send[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    .replace(/^\s*`?\[orb\] (?:send|plan)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
     .split("\n")
     .filter((line) => !/^\s*[-`]*\s*\[orb\]/i.test(line))
     .join("\n")
@@ -156,16 +197,18 @@ export async function linkSession(taskId: string) {
 }
 
 /** A step's state: done if the user marked it so, otherwise what the session last reported. */
-export function stepState(progress: SessionProgress | null, link: SessionLink | undefined, step: number): StepProgress | undefined {
-  if (link?.doneSteps?.includes(step)) return { state: "done" };
+export function stepState(progress: SessionProgress | null, link: SessionLink | undefined, step: number, title?: string): StepProgress | undefined {
+  if (title && link?.doneTitles?.includes(title)) return { state: "done" };
+  // Marks by number only hold for the plan they were made against: the original one.
+  if (!progress?.plan && link?.doneSteps?.includes(step)) return { state: "done" };
   return progress?.steps[step];
 }
 
 /** Marks a step done by hand, for work the session didn't see happen. */
-export async function markStepDone(taskId: string, step: number) {
+export async function markStepDone(taskId: string, title: string) {
   const link = (await db.getSessionLinks())[taskId];
-  if (!link || link.doneSteps?.includes(step)) return;
-  await db.updateSessionLink(taskId, { doneSteps: [...(link.doneSteps ?? []), step] });
+  if (!link || link.doneTitles?.includes(title)) return;
+  await db.updateSessionLink(taskId, { doneTitles: [...(link.doneTitles ?? []), title] });
 }
 
 /**
@@ -203,9 +246,11 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
         const messages = readableMessages(raw);
         const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
         const after = messages.slice(lastUserAt + 1).filter((m) => m.role === "assistant");
+        const revised = currentPlan(lines, sends);
         if (!cancelled)
           setProgress({
-            steps: parseProgress(lines),
+            plan: revised.plan,
+            steps: parseProgress(revised.lines),
             sends: parseSends(sends),
             messages,
             lastUser: lastUserAt >= 0 ? messages[lastUserAt].text : null,

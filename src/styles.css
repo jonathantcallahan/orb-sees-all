@@ -308,6 +308,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-badge:focus-within, .menu-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 .status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+.status-badge.blocked { color: var(--red); background: var(--red-bg); border-color: transparent; }
 .status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
 .carried { font-size: 11px; color: var(--muted); }
@@ -679,6 +680,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
 .step-circle.done { color: var(--green); }
+.step-circle.skipped { color: var(--muted); opacity: 0.7; }
+.step-circle.blocked { color: var(--red); }
+.step-blocked { margin-left: 6px; font-size: 11px; color: var(--red); }
+.plan-outline-steps li.step-skipped > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); animation: step-turn 2.4s linear infinite; }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
 @keyframes step-turn { to { transform: rotate(360deg); } }
@@ -986,8 +991,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .composer-send:disabled { opacity: 0.3; cursor: default; }
 .composer-send:not(:disabled):active { transform: scale(0.92); }
-.composer-hint { align-self: flex-end; font-size: 10px; color: var(--muted); opacity: 0; transition: opacity 120ms ease; }
-.composer-wrap:focus-within .composer-hint { opacity: 1; }
+.composer-wrap.disabled .composer { background: color-mix(in srgb, var(--grey-bg) 60%, var(--surface)); }
+.composer-wrap.disabled textarea { cursor: default; }
 .plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .input-needed, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
 
 /* The arrow at the end of a task's header row, after its badges, that opens and closes the card */
@@ -1071,10 +1076,12 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   width: min(680px, 100%); height: min(760px, calc(100vh - 80px)); padding: 0; gap: 0; overflow: hidden;
   border: 1px solid var(--border); box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
 }
+/* The task and what it's waiting on, set off from the conversation by a hairline. */
+.chat-modal-top { padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .chat-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px 20px; }
 .chat-modal-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-ask {
-  margin: 0 20px 4px; padding: 10px 12px; border-radius: 10px;
+  margin: 0 20px; padding: 10px 12px; border-radius: 10px;
   background: color-mix(in srgb, var(--amber) 10%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
   display: flex; flex-direction: column; gap: 4px;
@@ -1089,7 +1096,10 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   background: var(--grey-bg); white-space: pre-wrap;
 }
 .chat-turn.claude { align-self: stretch; color: var(--text); display: flex; flex-direction: column; gap: 10px; }
-.chat-working { align-self: flex-start; }
+.chat-working { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.claude-spark { color: #d97757; animation: claude-spark 1.6s cubic-bezier(0.5, 0, 0.5, 1) infinite; }
+@keyframes claude-spark { 0% { transform: rotate(0) scale(1); } 50% { transform: rotate(90deg) scale(0.82); } 100% { transform: rotate(180deg) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .claude-spark { animation: none; } }
 .chat-modal-foot { padding: 10px 20px 16px; }
 .chat-modal-foot .composer { border-radius: 18px; padding: 8px 8px 8px 14px; }
 .chat-modal-foot .composer textarea { font-size: 13.5px; }
@@ -1176,3 +1186,55 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .log-job { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .log-error { color: var(--red); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-time { min-width: 56px; text-align: right; }
+
+/* Reviewing a Slack message: a preview drawn like Slack (Lato-like type, a rounded square avatar,
+   name and time, blue mentions), the editable text under it. Bold here is Slack's, not ours. */
+.slack-modal {
+  width: min(640px, 100%); max-height: calc(100vh - 80px); padding: 0; gap: 0; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
+}
+.slack-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px 20px; }
+.slack-modal-head h2 { font-size: 15px; }
+.slack-modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+.slack-modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+.slack-modal-foot .remind-status { margin-right: auto; }
+.slack-preview {
+  --slack-text: #1d1c1d; --slack-muted: #616061; --slack-link: #1264a3; --slack-mention-bg: rgb(29 155 209 / 0.1);
+  --slack-code-bg: rgb(29 28 29 / 0.04); --slack-code-border: rgb(29 28 29 / 0.13); --slack-bg: #fff;
+  background: var(--slack-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px 14px;
+  font-family: Lato, "Slack-Lato", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+:root[data-theme="dark"] .slack-preview {
+  --slack-text: #d1d2d3; --slack-muted: #ababad; --slack-link: #1d9bd1; --slack-bg: #1a1d21;
+  --slack-code-bg: rgb(232 232 232 / 0.04); --slack-code-border: rgb(232 232 232 / 0.13);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .slack-preview {
+    --slack-text: #d1d2d3; --slack-muted: #ababad; --slack-link: #1d9bd1; --slack-bg: #1a1d21;
+    --slack-code-bg: rgb(232 232 232 / 0.04); --slack-code-border: rgb(232 232 232 / 0.13);
+  }
+}
+.slack-thread-note { font-size: 12px; color: var(--slack-muted); margin-bottom: 8px; }
+.slack-message { display: flex; gap: 8px; align-items: flex-start; }
+.slack-avatar {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center;
+  background: #4a154b; color: #fff; font-size: 14px; font-weight: 700; margin-top: 2px;
+}
+.slack-content { min-width: 0; flex: 1; }
+.slack-meta { display: flex; align-items: baseline; gap: 6px; line-height: 1.38; }
+.slack-name { font-size: 15px; font-weight: 900; color: var(--slack-text); }
+.slack-time { font-size: 12px; color: var(--slack-muted); }
+.slack-text { font-size: 15px; line-height: 1.4667; color: var(--slack-text); overflow-wrap: anywhere; }
+.slack-text b { font-weight: 700; }
+.slack-line { min-height: 1.4667em; }
+.slack-bullet { position: relative; padding-left: 22px; }
+.slack-bullet::before { content: "•"; position: absolute; left: 8px; }
+.slack-quote { border-left: 4px solid var(--slack-code-border); padding-left: 12px; }
+.slack-mention { color: var(--slack-link); background: var(--slack-mention-bg); border-radius: 3px; padding: 0 2px; }
+.slack-mention.broadcast { color: #e8a723; background: rgb(242 199 68 / 0.2); }
+.slack-link { color: var(--slack-link); }
+.slack-code { font-family: Monaco, Menlo, monospace; font-size: 12px; color: #e01e5a; background: var(--slack-code-bg); border: 1px solid var(--slack-code-border); border-radius: 3px; padding: 2px 3px; }
+.slack-pre { font-family: Monaco, Menlo, monospace; font-size: 12px; margin: 4px 0; padding: 8px; white-space: pre-wrap; background: var(--slack-code-bg); border: 1px solid var(--slack-code-border); border-radius: 4px; }
+.slack-empty { font-size: 13px; color: var(--slack-muted); }
+.slack-editor { min-height: 120px; border-radius: 8px; resize: none; font-size: 13px; line-height: 1.5; padding: 8px 10px; }
+.slack-editor:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }

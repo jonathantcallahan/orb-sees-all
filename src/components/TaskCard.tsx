@@ -9,7 +9,8 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ComposeModal, ExternalLink, Reveal, Spinner } from "./common";
+import { CloseIcon, ExternalLink, Reveal, Spinner } from "./common";
+import { SlackSendModal } from "./SlackPreview";
 import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
@@ -273,6 +274,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: "To do",
   in_progress: "In progress",
   waiting: "Waiting",
+  blocked: "Blocked",
   done: "Done",
 };
 
@@ -385,11 +387,24 @@ const openCards = new Map<string, boolean>();
 /** Whether the user asked for reduced motion; checked on each use, so a change in System Settings applies at once. */
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** A plan step's marker: dashed when not started, turning while in progress, checked when done. */
+/**
+ * A plan step's marker: dashed when not started, turning while in progress or waiting on you,
+ * checked when done, a red bar when blocked on someone else, struck through when skipped.
+ */
 function StepCircle({ state }: { state?: StepState }) {
   return (
     <svg className={`step-circle${state ? ` ${state}` : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-      {state === "done" ? (
+      {state === "skipped" ? (
+        <>
+          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M3.2 8.8 8.8 3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </>
+      ) : state === "blocked" ? (
+        <>
+          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
+          <path d="M3.5 6h5" stroke="var(--bg)" strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      ) : state === "done" ? (
         <>
           <circle cx="6" cy="6" r="5.5" fill="currentColor" />
           <path d="M3.4 6.2 5.2 8l3.4-3.6" fill="none" stroke="var(--bg)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -439,7 +454,7 @@ function PlanOutline({
         <ol className="plan-outline-steps">
           {steps.map((step, i) => (
             <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
-              {onMarkDone && step.progress?.state !== "done" ? (
+              {onMarkDone && step.progress?.state !== "done" && step.progress?.state !== "skipped" ? (
                 <button className="step-circle-button" onClick={() => onMarkDone(i)} aria-label={`Mark "${step.title}" done`}>
                   <StepCircle state={step.progress?.state} />
                 </button>
@@ -448,7 +463,12 @@ function PlanOutline({
               )}
               <span className="small">
                 {step.title}
-                {step.by === "you" && step.progress?.state !== "done" && <span className="step-by you">Human input needed</span>}
+                {step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked" && (
+                  <span className="step-by you">Human input needed</span>
+                )}
+                {step.progress?.state === "blocked" && (
+                  <span className="step-blocked">Blocked{step.progress.note ? ` on ${step.progress.note.replace(/^(?:on|waiting on|by)\s+/i, "")}` : ""}</span>
+                )}
               </span>
             </li>
           ))}
@@ -523,9 +543,8 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
       </div>
       <div className="muted handoff-preview">{send.text.split("\n")[0]}</div>
       {open && (
-        <ComposeModal
-          heading={`Send to ${where}`}
-          note={`Posts in ${where} as you.`}
+        <SlackSendModal
+          to={send.to}
           text={text}
           status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
           failed={!!error && !sending}
@@ -543,13 +562,6 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
               setError((e as Error).message);
             }
           }}
-          actions={
-            send.to.startsWith("http") ? (
-              <ExternalLink href={send.to} className="link-button small more-link">
-                Open thread
-              </ExternalLink>
-            ) : undefined
-          }
         />
       )}
     </div>
@@ -588,7 +600,7 @@ function ClaudeText({ text }: { text: string }) {
  * Where you write back to the session: grows with what you type; Enter sends, Shift+Enter starts a
  * new line (and text being composed with an input method is never sent early).
  */
-function Composer({ onSend, autoFocus = false }: { onSend: (text: string) => void; autoFocus?: boolean }) {
+function Composer({ onSend, autoFocus = false, disabled = false }: { onSend: (text: string) => void; autoFocus?: boolean; disabled?: boolean }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = () => {
@@ -599,12 +611,16 @@ function Composer({ onSend, autoFocus = false }: { onSend: (text: string) => voi
   };
   useLayoutEffect(fit, [text]);
   const send = () => {
-    if (!text.trim()) return;
+    if (disabled || !text.trim()) return;
     onSend(text.trim());
     setText("");
   };
+  // Back in the box, ready to type, as soon as Claude is done.
+  useEffect(() => {
+    if (!disabled && autoFocus) ref.current?.focus();
+  }, [disabled]);
   return (
-    <div className="composer-wrap">
+    <div className={`composer-wrap${disabled ? " disabled" : ""}`}>
       <form
         className="composer"
         onSubmit={(e) => {
@@ -616,6 +632,7 @@ function Composer({ onSend, autoFocus = false }: { onSend: (text: string) => voi
           ref={ref}
           rows={1}
           autoFocus={autoFocus}
+          disabled={disabled}
           value={text}
           placeholder="Reply to Claude…"
           aria-label="Reply to Claude"
@@ -627,14 +644,24 @@ function Composer({ onSend, autoFocus = false }: { onSend: (text: string) => voi
             }
           }}
         />
-        <button className="composer-send" type="submit" disabled={!text.trim()} aria-label="Send reply">
+        <button className="composer-send" type="submit" disabled={disabled || !text.trim()} aria-label="Send reply">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
             <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       </form>
-      <span className="composer-hint">↩ to send · ⇧↩ for a new line</span>
     </div>
+  );
+}
+
+/** Claude's mark, turning while it works. */
+function ClaudeSpark() {
+  return (
+    <svg className="claude-spark" width="14" height="14" viewBox="0 0 24 24" aria-hidden>
+      {Array.from({ length: 8 }, (_, i) => (
+        <path key={i} d="M12 12 12 2.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" transform={`rotate(${i * 45} 12 12)`} />
+      ))}
+    </svg>
   );
 }
 
@@ -701,21 +728,23 @@ function SessionChat({
   return createPortal(
     <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
       <div className="modal chat-modal" role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
-        <header className="chat-modal-head">
-          <span className="chat-modal-title">{title}</span>
-          <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
-            <CloseIcon />
-          </button>
-        </header>
-        {ask && (
-          <div className="chat-ask">
-            <span className="chat-ask-step">
-              <StepCircle state="waiting" />
-              {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
-            </span>
-            {ask.note && <p className="chat-ask-note">{ask.note}</p>}
-          </div>
-        )}
+        <div className="chat-modal-top">
+          <header className="chat-modal-head">
+            <span className="chat-modal-title">{title}</span>
+            <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
+              <CloseIcon />
+            </button>
+          </header>
+          {ask && (
+            <div className="chat-ask">
+              <span className="chat-ask-step">
+                <StepCircle state="waiting" />
+                {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
+              </span>
+              {ask.note && <p className="chat-ask-note">{ask.note}</p>}
+            </div>
+          )}
+        </div>
         <div className="chat-log" ref={scroller}>
           {shown.map((m, i) =>
             m.role === "user" ? (
@@ -728,16 +757,18 @@ function SessionChat({
               </div>
             ),
           )}
+          {/* Where Claude's reply will appear, as in a Claude session: a turning spark and what it's doing. */}
           {busy && (
-            <span className="muted small session-working chat-working">
-              <Spinner /> Claude is working{working ? `: ${working}` : ""}…
-            </span>
+            <div className="chat-working" role="status">
+              <ClaudeSpark />
+              <span>{working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"}</span>
+            </div>
           )}
           {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
         </div>
-        {canReply && !busy && (
+        {canReply && (
           <footer className="chat-modal-foot">
-            <Composer onSend={send} autoFocus />
+            <Composer onSend={send} autoFocus disabled={busy} />
           </footer>
         )}
       </div>
@@ -1023,15 +1054,18 @@ export function TaskCard({
   };
   // Every plan step, tagged by who does it; with no plan yet, the steps the assessment says Claude can do.
   // They're numbered in this order in the session's prompt, so its "[orb] step N" reports line up.
+  // Once the session revises the plan (a decision in the chat changed it), its version replaces them.
   const outlineSteps: OutlineStep[] = (
-    plan
-      ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
-      : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
-  ).map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1) }));
+    progress?.plan
+      ? progress.plan
+      : plan
+        ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
+        : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
+  ).map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title) }));
   // Once a session is under way, any step not yet done can be marked done by hand.
   const markDone = sessionLink
     ? async (i: number) => {
-        await markStepDone(task.id, i + 1);
+        await markStepDone(task.id, outlineSteps[i].title);
         onChange();
       }
     : undefined;
@@ -1051,6 +1085,16 @@ export function TaskCard({
     onChange();
   };
   const sessionWorking = useJobStatus(`session:${task.id}`);
+  // A step blocked on someone else blocks the task; once it moves, the task is back in progress.
+  const anyBlocked = outlineSteps.some((st) => st.progress?.state === "blocked");
+  const wasBlocked = useRef(anyBlocked);
+  useEffect(() => {
+    const changed = anyBlocked !== wasBlocked.current;
+    wasBlocked.current = anyBlocked;
+    if (!sessionLink) return;
+    if (anyBlocked && task.status !== "blocked" && task.status !== "done") setTaskState(task.id, { status: "blocked" }).then(onChange);
+    else if (!anyBlocked && changed && task.status === "blocked") setTaskState(task.id, { status: "in_progress" }).then(onChange);
+  }, [anyBlocked]);
   const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
   const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
   const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];

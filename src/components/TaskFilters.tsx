@@ -12,6 +12,7 @@ const STATUSES: [TaskStatus, string][] = [
   ["todo", "To do"],
   ["in_progress", "In progress"],
   ["waiting", "Waiting"],
+  ["blocked", "Blocked"],
   ["done", "Done"],
 ];
 
