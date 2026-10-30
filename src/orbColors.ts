@@ -14,19 +14,6 @@ interface MoodPalette {
 }
 
 const PALETTES: Record<OrbLook, MoodPalette> = {
-  // Icy blue, then violet, then ember.
-  classic: {
-    deep: [
-      [0.36, 0.46, 0.92],
-      [0.5, 0.3, 0.8],
-      [0.8, 0.22, 0.12],
-    ],
-    wisp: [
-      [0.7, 0.8, 1.0],
-      [0.8, 0.7, 1.0],
-      [1.0, 0.62, 0.3],
-    ],
-  },
   // The Glass core's cool ramp: cyan-blue, then blue-violet, then violet-magenta.
   glass: {
     deep: [
@@ -53,19 +40,7 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [0.98, 0.72, 0.9],
     ],
   },
-  // Soap-film pastels that warm toward pink and gold.
-  iridescent: {
-    deep: [
-      [0.55, 0.62, 0.95],
-      [0.68, 0.55, 0.92],
-      [0.9, 0.5, 0.7],
-    ],
-    wisp: [
-      [0.82, 0.92, 1.0],
-      [0.9, 0.82, 1.0],
-      [1.0, 0.85, 0.8],
-    ],
-  },
+
 };
 
 const smooth = (e0: number, e1: number, x: number) => {

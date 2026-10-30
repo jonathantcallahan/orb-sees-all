@@ -108,33 +108,41 @@ export function DailyReading({
   // Open or folded away, remembered between launches.
   const [open, setOpen] = useState(() => localStorage.getItem("briefing-open") !== "0");
   useEffect(() => localStorage.setItem("briefing-open", open ? "1" : "0"), [open]);
+  const [updatesOpen, setUpdatesOpen] = useState(() => localStorage.getItem("updates-open") !== "0");
+  useEffect(() => localStorage.setItem("updates-open", updatesOpen ? "1" : "0"), [updatesOpen]);
   const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
   const updates = collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed);
 
   return (
-    <section className="reading">
-      <header className="column-header">
-        <h4 className="section-title">Daily briefing</h4>
-        <div className="row reading-header-actions">
-          <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
-          <button className="task-toggle" aria-expanded={open} aria-label={open ? "Hide the briefing" : "Show the briefing"} onClick={() => setOpen(!open)}>
-            <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-              <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
-      </header>
-      <Reveal open={open} className="reading-body">
-        {current ? (
-          <p className="reading-text">{current.text}</p>
-        ) : (
-          <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
-        )}
+    <>
+      <section className="reading">
+        <header className="column-header">
+          <h4 className="section-title">Daily briefing</h4>
+          <div className="row reading-header-actions">
+            <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
+            <Disclosure open={open} what="the briefing" onToggle={() => setOpen(!open)} />
+          </div>
+        </header>
+        <Reveal open={open} className="reading-body">
+          {current ? (
+            <p className="reading-text">{current.text}</p>
+          ) : (
+            <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
+          )}
+        </Reveal>
+      </section>
 
-        {updates.length > 0 && (
-          <>
+      {/* Updates are their own section, folded away on their own. */}
+      {updates.length > 0 && (
+        <section className="reading">
+          <header className="column-header">
             <h4 className="section-title">Updates</h4>
+            <div className="row reading-header-actions">
+              <Disclosure open={updatesOpen} what="updates" onToggle={() => setUpdatesOpen(!updatesOpen)} />
+            </div>
+          </header>
+          <Reveal open={updatesOpen} className="reading-body">
             <UpdateStack
               updates={updates}
               onRead={async (u) => {
@@ -142,9 +150,20 @@ export function DailyReading({
                 onChange();
               }}
             />
-          </>
-        )}
-      </Reveal>
-    </section>
+          </Reveal>
+        </section>
+      )}
+    </>
+  );
+}
+
+/** The arrow that folds a section away and opens it again. */
+function Disclosure({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }) {
+  return (
+    <button className="task-toggle" aria-expanded={open} aria-label={open ? `Hide ${what}` : `Show ${what}`} onClick={onToggle}>
+      <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
   );
 }

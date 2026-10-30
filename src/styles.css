@@ -119,7 +119,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .columns > * { min-width: 0; }
 /* Columns scroll rather than squeeze: without this, a tall column shrinks its sections (like an empty
    Today box) and their content spills past their borders. The project list is meant to flex and scroll. */
-.column > :not(.project-list) { flex-shrink: 0; }
+.column > :not(.project-list, .task-list) { flex-shrink: 0; }
 .column-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
 .card {
@@ -168,15 +168,9 @@ summary { cursor: pointer; }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: flex; justify-content: center; align-items: flex-start; padding: 40px; }
 .modal { background: var(--bg); border-radius: 12px; padding: 20px; width: min(1000px, 100%); max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-.settings-grid { display: flex; gap: 24px; align-items: end; }
-.settings-grid label { display: flex; flex-direction: column; gap: 4px; }
-.settings-grid label.row { flex-direction: row; }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 11px; color: var(--muted); }
 td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--border); }
-.projects-table td:first-child { white-space: nowrap; }
-.log-table tr.error td { color: var(--red); }
-.log-error { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; margin-bottom: 16px; }
 .pressure-blob { width: 100%; height: 285px; }
@@ -218,6 +212,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .modal-backdrop { z-index: 10; }
 /* The briefing and header stay put; only the project cards scroll. */
 .projects-column { overflow: hidden; padding-bottom: 0; }
+/* Likewise in Tasks: the inbox, header and add box stay put; the task groups scroll under them. */
+.tasks-column { overflow: hidden; padding-bottom: 0; }
+.task-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
 .project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
@@ -682,11 +679,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
 .step-circle.done { color: var(--green); }
-.step-circle.waiting { color: var(--amber); }
+.step-circle.waiting { color: var(--amber); animation: step-turn 2.4s linear infinite; }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
 @keyframes step-turn { to { transform: rotate(360deg); } }
 .plan-outline-steps li.step-done > .small { color: var(--muted); }
-.step-waiting { display: block; color: var(--amber); font-size: 11px; }
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
 
@@ -921,7 +917,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 @keyframes glow-b { 0% { transform: translate(0, 0) scale(1.1); } 50% { transform: translate(-16%, -8%) scale(0.9); } 100% { transform: translate(8%, -14%) scale(1.2); } }
 @keyframes glow-c { 0% { transform: translate(0, 0) scale(0.95); } 50% { transform: translate(10%, -16%) scale(1.2); } 100% { transform: translate(-14%, 6%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .orb-glow span { animation: none; } }
-.about-you textarea { width: 100%; margin-top: 4px; }
 
 .project-channel-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .project-channel-list .chip .link-button { margin-left: 4px; padding: 0; }
@@ -962,26 +957,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .handoff-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .handoff-label { font-weight: 600; }
 .handoff-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The latest exchange with the session: your message on the right, Claude's on the left. */
-.chat { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
-.chat-msg { max-width: 92%; line-height: 1.5; overflow-wrap: anywhere; }
-.chat-msg.you { white-space: pre-wrap; }
-.chat-msg.you {
-  align-self: flex-end; padding: 5px 10px; border-radius: 12px 12px 4px 12px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--text);
-}
-.chat-msg.claude {
-  align-self: flex-start; padding: 7px 11px; border-radius: 12px 12px 12px 4px;
-  background: var(--grey-bg); color: var(--text); font-size: 12.5px;
-}
-.chat-msg.claude .more-link { margin-top: 2px; }
-.chat-text { display: flex; flex-direction: column; gap: 7px; }
+/* Claude's words, as paragraphs with list items bulleted. */
 .chat-para { display: flex; flex-direction: column; gap: 2px; }
 .chat-line { display: block; }
 .chat-item { position: relative; padding-left: 12px; }
 .chat-item::before { content: "•"; position: absolute; left: 2px; color: var(--muted); }
-/* Folded: the first lines, fading out rather than cut mid-word. */
-.chat-text.clamped { max-height: 10.5em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); }
 
 /* The reply composer: one rounded field with its send button inside, growing as you type. */
 .composer-wrap { flex-basis: 100%; display: flex; flex-direction: column; gap: 3px; }
@@ -1008,7 +988,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .composer-send:not(:disabled):active { transform: scale(0.92); }
 .composer-hint { align-self: flex-end; font-size: 10px; color: var(--muted); opacity: 0; transition: opacity 120ms ease; }
 .composer-wrap:focus-within .composer-hint { opacity: 1; }
-.plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
+.plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .input-needed, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
 
 /* The arrow at the end of a task's header row, after its badges, that opens and closes the card */
 .task-toggle { display: inline-flex; align-items: center; align-self: center; flex-shrink: 0; padding: 2px; margin-left: -2px; border: none; background: none; cursor: pointer; color: var(--muted); }
@@ -1075,3 +1055,124 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .tracking-note code { font-size: 11px; }
 /* In a task investigation the buttons sit on their own row, from the left. */
 .task-check .check-buttons { margin-left: 0; width: 100%; align-items: center; }
+
+/* Under a session's steps when it needs you: what's needed, and the way into the chat. */
+.input-needed {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 6px 6px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+}
+.input-needed-label { font-size: 12px; color: var(--text); }
+
+/* The session chat: laid out like a Claude conversation. Your messages sit in bubbles on the
+   right, Claude's read as plain text, and the reply box stays pinned at the bottom. */
+.chat-modal {
+  width: min(680px, 100%); height: min(760px, calc(100vh - 80px)); padding: 0; gap: 0; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
+}
+.chat-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 10px 20px; }
+.chat-modal-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-ask {
+  margin: 0 20px 4px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.chat-ask-step { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.chat-ask-step .step-circle { margin-top: 0; }
+.chat-ask-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
+.chat-turn { font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.chat-turn.you {
+  align-self: flex-end; max-width: 80%; padding: 8px 14px; border-radius: 18px;
+  background: var(--grey-bg); white-space: pre-wrap;
+}
+.chat-turn.claude { align-self: stretch; color: var(--text); display: flex; flex-direction: column; gap: 10px; }
+.chat-working { align-self: flex-start; }
+.chat-modal-foot { padding: 10px 20px 16px; }
+.chat-modal-foot .composer { border-radius: 18px; padding: 8px 8px 8px 14px; }
+.chat-modal-foot .composer textarea { font-size: 13.5px; }
+.chat-modal-foot .composer-send { width: 28px; height: 28px; }
+
+/* Settings: a centered modal of grouped rows, like macOS settings. Each group is one bordered
+   card; rows split by hairlines, the name and a line on what it does on the left, the control
+   on the right. */
+.settings-modal {
+  width: min(620px, 100%); height: min(820px, calc(100vh - 80px)); padding: 0; gap: 0; overflow: hidden;
+  border: 1px solid var(--border); box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
+}
+.settings-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px 22px; }
+.settings-head h2 { font-size: 15px; }
+.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+.settings-section { display: flex; flex-direction: column; gap: 6px; }
+.settings-section h4 { margin: 0; padding-left: 2px; }
+.settings-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.settings-toggle { border: none; background: none; padding: 0; justify-content: flex-start; color: inherit; cursor: pointer; }
+.settings-toggle .timestamp { margin-left: auto; }
+.settings-toggle .filter-chevron { transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.settings-toggle .filter-chevron.up { transform: rotate(180deg); }
+.settings-group { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.settings-group > * + *, .settings-group .reveal-inner > * + * { border-top: 1px solid var(--border); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; min-height: 44px; }
+.setting-row.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
+.setting-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.setting-label { font-size: 13px; }
+.setting-hint { font-size: 11px; color: var(--muted); }
+.setting-control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+.setting-row textarea { font-size: 12px; border-radius: 8px; resize: none; }
+.settings-modal textarea:focus, .settings-modal .time-input:focus {
+  outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.time-input { height: 24px; padding: 0 8px; border-radius: 999px; font-size: 12px; }
+
+/* Two or three choices side by side; the picked one sits raised on the track. */
+.segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: 999px; background: var(--grey-bg); }
+.segmented button {
+  height: 20px; padding: 0 10px; border: none; border-radius: 999px; background: transparent;
+  font-size: 11px; color: var(--muted); transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06); }
+.segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* On/off: a small sliding toggle, accent when on. */
+.switch {
+  appearance: none; -webkit-appearance: none; position: relative; flex-shrink: 0;
+  width: 26px; height: 16px; margin: 0; padding: 0; border: none; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 18%, transparent); cursor: pointer; transition: background 0.2s;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(10px); }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A project: name, Repos and its show switch on one line, its channels under it. */
+.settings-project { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.settings-project.hidden .settings-project-name, .settings-project.hidden .settings-project-channels { opacity: 0.5; }
+.settings-project-head { display: flex; align-items: center; gap: 10px; }
+.settings-project-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.settings-project-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-project-channels { display: flex; flex-wrap: wrap; gap: 4px; }
+.settings-project-channels .chip { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.chip-remove { display: inline-flex; padding: 1px; border: none; background: none; color: var(--muted); border-radius: 50%; }
+.chip-remove:hover { color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent); }
+.settings-project-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; padding-top: 6px; }
+.settings-project .reveal-inner > * + * { border-top: none; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field-label { font-size: 11px; color: var(--muted); }
+.field textarea { border-radius: 8px; resize: none; }
+.settings-project-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* The refresh log: a status dot, what ran, its cost and when. */
+.log-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 14px; }
+.log-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--green); transform: translateY(-1px); }
+.log-dot.error { background: var(--red); }
+.log-dot.running { background: var(--accent); }
+.log-job { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.log-error { color: var(--red); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-time { min-width: 56px; text-align: right; }

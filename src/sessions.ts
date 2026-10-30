@@ -40,11 +40,26 @@ export interface StepProgress {
   note?: string;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** The conversation as you'd read it: the opening prompt left out, Claude's report lines and hand-offs removed. */
+export function readableMessages(raw: ChatMessage[]): ChatMessage[] {
+  return raw
+    .filter((m, i) => !(i === 0 && m.role === "user" && m.text.startsWith("Orb task:")))
+    .map((m) => (m.role === "assistant" ? { ...m, text: readableReply(m.text) } : { ...m, text: m.text.trim() }))
+    .filter((m) => m.text);
+}
+
 export interface SessionProgress {
   /** Progress by step number (1-based), latest report per step. */
   steps: Record<number, StepProgress>;
   /** Messages the session handed to Orb, oldest first. */
   sends: PendingSend[];
+  /** The conversation since the opening prompt: your messages and Claude's, without its report lines. */
+  messages?: ChatMessage[];
   /** Your latest message to the session, unless it's still the opening prompt. */
   lastUser?: string | null;
   /** What Claude has said since, without its "[orb]" report lines and hand-off blocks. */
@@ -179,20 +194,22 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
           await db.updateSessionLink(taskId, { path: found.path, sessionId: found.sessionId });
           onLinked?.();
         }
-        const { lines, sends, lastUser, lastReply, modifiedMs } = await invoke<{
+        const { lines, sends, messages: raw, modifiedMs } = await invoke<{
           lines: string[];
           sends: { header: string; body: string }[];
-          lastUser: string | null;
-          lastReply: string | null;
+          messages: ChatMessage[];
           modifiedMs: number;
         }>("read_session_progress", { path });
+        const messages = readableMessages(raw);
+        const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
+        const after = messages.slice(lastUserAt + 1).filter((m) => m.role === "assistant");
         if (!cancelled)
           setProgress({
             steps: parseProgress(lines),
             sends: parseSends(sends),
-            // The opening prompt isn't a reply of yours.
-            lastUser: lastUser && !lastUser.startsWith("Orb task:") ? lastUser : null,
-            lastReply: lastReply ? readableReply(lastReply) || null : null,
+            messages,
+            lastUser: lastUserAt >= 0 ? messages[lastUserAt].text : null,
+            lastReply: after.length ? after.map((m) => m.text).join("\n\n") : null,
             updatedAt: modifiedMs,
             found: true,
           });

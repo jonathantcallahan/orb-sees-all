@@ -10,7 +10,7 @@ import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, ty
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ComposeModal, ExternalLink, Reveal, Spinner } from "./common";
-import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -449,9 +449,6 @@ function PlanOutline({
               <span className="small">
                 {step.title}
                 {step.by === "you" && step.progress?.state !== "done" && <span className="step-by you">Human input needed</span>}
-                {step.progress?.state === "waiting" && (
-                  <span className="step-waiting">Waiting on you{step.progress.note ? `: ${step.progress.note}` : ""}</span>
-                )}
               </span>
             </li>
           ))}
@@ -587,29 +584,11 @@ function ClaudeText({ text }: { text: string }) {
   );
 }
 
-/** Claude's latest message on the card: the whole of it, folded to a few lines when it's long. */
-function ClaudeMessage({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const long = text.length > 700 || text.split("\n").length > 12;
-  return (
-    <div className="chat-msg claude">
-      <div className={`chat-text${long && !open ? " clamped" : ""}`}>
-        <ClaudeText text={text} />
-      </div>
-      {long && (
-        <button className="link-button small more-link" onClick={() => setOpen(!open)}>
-          {open ? "Less" : "More"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /**
  * Where you write back to the session: grows with what you type; Enter sends, Shift+Enter starts a
  * new line (and text being composed with an input method is never sent early).
  */
-function Composer({ onSend }: { onSend: (text: string) => void }) {
+function Composer({ onSend, autoFocus = false }: { onSend: (text: string) => void; autoFocus?: boolean }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = () => {
@@ -636,6 +615,7 @@ function Composer({ onSend }: { onSend: (text: string) => void }) {
         <textarea
           ref={ref}
           rows={1}
+          autoFocus={autoFocus}
           value={text}
           placeholder="Reply to Claude…"
           aria-label="Reply to Claude"
@@ -658,58 +638,137 @@ function Composer({ onSend }: { onSend: (text: string) => void }) {
   );
 }
 
+/** What the session is waiting on you for: the step it stopped at and what it asked. */
+interface SessionAsk {
+  /** 1-based step number, or null when the only thing waiting is a message to send. */
+  step: number | null;
+  title: string;
+  note?: string;
+}
+
 /**
- * The background session, from the task card: the latest exchange (your reply, and Claude's answer
- * or what it's doing right now), messages it handed over to send, a box to answer it when it's
- * waiting on you, and a retry if a turn failed.
+ * The conversation with a task's session, in a centered modal laid out like a Claude chat: what
+ * it's waiting on at the top, the conversation (your messages in bubbles, Claude's as text), any
+ * messages it handed over to send, and the reply box at the bottom. The card closes it once the
+ * step it opened for is resolved. Esc or the backdrop closes it too.
+ */
+function SessionChat({
+  taskId,
+  title,
+  ask,
+  messages,
+  working,
+  toSend,
+  canReply,
+  onClose,
+  onChange,
+}: {
+  taskId: string;
+  title: string;
+  ask: SessionAsk | null;
+  messages: ChatMessage[];
+  working: string | undefined;
+  toSend: PendingSend[];
+  canReply: boolean;
+  onClose: () => void;
+  onChange: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  // What you just sent shows at once, until the transcript catches up with it.
+  const [sent, setSent] = useState<string | null>(null);
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.text;
+  useEffect(() => {
+    if (sent && lastUser === sent) setSent(null);
+  }, [lastUser]);
+  const send = (message: string) => {
+    setSent(message);
+    continueTaskSession(taskId, message).then(onChange, onChange);
+    onChange();
+  };
+  const shown = sent ? [...messages, { role: "user" as const, text: sent }] : messages;
+  // Keep the newest message in view as the conversation grows.
+  const scroller = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [shown.length, working, toSend.length]);
+  const busy = !!working || !!sent;
+
+  return createPortal(
+    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
+      <div className="modal chat-modal" role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
+        <header className="chat-modal-head">
+          <span className="chat-modal-title">{title}</span>
+          <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
+            <CloseIcon />
+          </button>
+        </header>
+        {ask && (
+          <div className="chat-ask">
+            <span className="chat-ask-step">
+              <StepCircle state="waiting" />
+              {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
+            </span>
+            {ask.note && <p className="chat-ask-note">{ask.note}</p>}
+          </div>
+        )}
+        <div className="chat-log" ref={scroller}>
+          {shown.map((m, i) =>
+            m.role === "user" ? (
+              <div key={i} className="chat-turn you">
+                {m.text}
+              </div>
+            ) : (
+              <div key={i} className="chat-turn claude">
+                <ClaudeText text={m.text} />
+              </div>
+            ),
+          )}
+          {busy && (
+            <span className="muted small session-working chat-working">
+              <Spinner /> Claude is working{working ? `: ${working}` : ""}…
+            </span>
+          )}
+          {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
+        </div>
+        {canReply && !busy && (
+          <footer className="chat-modal-foot">
+            <Composer onSend={send} autoFocus />
+          </footer>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * The background session, from the task card: what it's doing while a turn runs, a row with Open
+ * chat when it needs you (to answer it, or to review a message it wrote), and a retry if a turn failed.
  */
 function SessionPanel({
   taskId,
   link,
   working,
-  waiting,
-  toSend,
-  progress,
+  needsInput,
+  onOpenChat,
   onChange,
 }: {
   taskId: string;
   link: SessionLink;
   /** What the session is doing right now, while a turn runs. */
   working: string | undefined;
-  waiting: boolean;
-  toSend: PendingSend[];
-  progress: SessionProgress | null;
+  needsInput: boolean;
+  onOpenChat: () => void;
   onChange: () => void;
 }) {
-  // What you just sent shows at once, until the transcript catches up with it.
-  const [sent, setSent] = useState<string | null>(null);
-  useEffect(() => {
-    if (sent && progress?.lastUser?.trim() === sent) setSent(null);
-  }, [progress?.lastUser]);
-  const send = (message: string) => {
-    setSent(message);
-    continueTaskSession(taskId, message).then(onChange, onChange);
-    onChange();
-  };
-  const yours = sent ?? progress?.lastUser ?? null;
-  // Claude's reply belongs to your message only once the transcript has it; until then it's working.
-  const reply = !sent ? (progress?.lastReply ?? null) : null;
-  const showChat = !!yours || (!!reply && waiting);
   return (
     <>
-      {showChat && (
-        <div className="chat">
-          {yours && <div className="chat-msg you">{yours}</div>}
-          {working || sent ? (
-            <span className="muted small session-working">
-              <Spinner /> Claude is working{working ? `: ${working}` : ""}…
-            </span>
-          ) : (
-            reply && <ClaudeMessage text={reply} />
-          )}
-        </div>
-      )}
-      {!showChat && working && (
+      {working && (
         <span className="muted small session-working">
           <Spinner /> Claude is working: {working}…
         </span>
@@ -717,15 +776,25 @@ function SessionPanel({
       {link.lastError && !working && (
         <div className="small session-error">
           <span className="error">Claude stopped: {link.lastError}</span>
-          <button className="link-button small" onClick={() => send("Please carry on where you left off.")}>
+          <button
+            className="link-button small"
+            onClick={() => {
+              continueTaskSession(taskId, "Please carry on where you left off.").then(onChange, onChange);
+              onChange();
+            }}
+          >
             Try again
           </button>
         </div>
       )}
-      {!working &&
-        !sent &&
-        toSend.map((s) => <HandoffRow key={s.key} taskId={taskId} send={s} onChange={onChange} />)}
-      {waiting && !working && !sent && link.sessionId && <Composer onSend={send} />}
+      {needsInput && !working && (
+        <div className="input-needed">
+          <span className="input-needed-label">Human input needed</span>
+          <button className="cta-primary" onClick={onOpenChat}>
+            Open chat
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -982,8 +1051,25 @@ export function TaskCard({
     onChange();
   };
   const sessionWorking = useJobStatus(`session:${task.id}`);
-  const waitingStep = outlineSteps.find((st) => st.progress?.state === "waiting");
+  const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
+  const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
   const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];
+  const needsInput = !!sessionLink?.sessionId && (!!waitingStep || toSend.length > 0);
+  /** The step the chat was opened for (0 when only a message to send was waiting), or null when it's closed. */
+  const [chatFor, setChatFor] = useState<number | null>(null);
+  const openChat = () => setChatFor(waitingIndex >= 0 ? waitingIndex + 1 : 0);
+  // The chat closes once its step is resolved: Claude has moved on from it, or it's been marked done.
+  const chatStepState = chatFor ? outlineSteps[chatFor - 1]?.progress?.state : undefined;
+  useEffect(() => {
+    if (chatFor === null) return;
+    if (chatFor > 0 ? chatStepState === "done" || chatStepState === "started" : toSend.length === 0 && !sessionWorking) setChatFor(null);
+  }, [chatFor, chatStepState, toSend.length, sessionWorking]);
+  const chatAsk: SessionAsk | null =
+    chatFor === null
+      ? null
+      : chatFor > 0
+        ? { step: chatFor, title: outlineSteps[chatFor - 1]?.title ?? "", note: outlineSteps[chatFor - 1]?.progress?.note }
+        : { step: null, title: "Review and send the message Claude wrote" };
   // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
   // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
   const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
@@ -1020,13 +1106,25 @@ export function TaskCard({
             taskId={task.id}
             link={sessionLink}
             working={sessionWorking}
-            waiting={!!waitingStep}
-            toSend={toSend}
-            progress={progress}
+            needsInput={needsInput}
+            onOpenChat={openChat}
             onChange={onChange}
           />
         )}
-        {sessionLink && !sessionWorking && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {sessionLink && !sessionWorking && !needsInput && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {chatFor !== null && sessionLink && (
+          <SessionChat
+            taskId={task.id}
+            title={task.title}
+            ask={chatAsk}
+            messages={progress?.messages ?? []}
+            working={sessionWorking}
+            toSend={toSend}
+            canReply={!!sessionLink.sessionId}
+            onClose={() => setChatFor(null)}
+            onChange={onChange}
+          />
+        )}
       </div>
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */

@@ -337,7 +337,7 @@ export function TaskColumn({
 
   return (
     <TaskDragProvider onDrop={moveTask}>
-    <DropZone zone="rest" className="column">
+    <DropZone zone="rest" className="column tasks-column">
       <Inbox replies={adhoc.replies} states={taskStates} drafts={drafts} running={running} onChange={onChange} />
       <header className="column-header">
         <div className="title-line">
@@ -364,6 +364,8 @@ export function TaskColumn({
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" />
       </form>
 
+      {/* The inbox, header and add box stay put; only the tasks below them scroll. */}
+      <div className="task-list">
       {filterProject ? (
         <>
           <div className="filter-chip">
@@ -397,6 +399,7 @@ export function TaskColumn({
           />
         </>
       )}
+      </div>
     </DropZone>
     </TaskDragProvider>
   );

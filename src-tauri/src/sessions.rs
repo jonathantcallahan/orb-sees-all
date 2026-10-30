@@ -25,11 +25,17 @@ pub struct SessionProgress {
     pub lines: Vec<String>,
     /// Messages Claude handed to Orb to send, oldest first.
     pub sends: Vec<SessionSend>,
-    /// The user's latest message in the session (the opening prompt, until they reply).
-    pub last_user: Option<String>,
-    /// What Claude has written since that message, its text blocks joined.
-    pub last_reply: Option<String>,
+    /// The conversation as typed: the user's messages and Claude's text, each turn of Claude's text
+    /// blocks joined into one message. Tool calls and results are left out.
+    pub messages: Vec<ChatMessage>,
     pub modified_ms: u64,
+}
+
+#[derive(Serialize)]
+pub struct ChatMessage {
+    /// "user" or "assistant".
+    pub role: &'static str,
+    pub text: String,
 }
 
 /// A message handed to Orb: the "[orb] send …" line, and the text up to "[orb] end".
@@ -104,19 +110,17 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
     let reader = BufReader::new(File::open(&file_path).map_err(|e| e.to_string())?);
     let mut lines = Vec::new();
     let mut sends = Vec::new();
-    let mut last_user: Option<String> = None;
-    let mut reply: Vec<String> = Vec::new();
+    let mut messages: Vec<ChatMessage> = Vec::new();
     for line in reader.lines().map_while(Result::ok) {
         let is_user = line.contains("\"type\":\"user\"");
         if !is_user && !line.contains("\"type\":\"assistant\"") {
             continue;
         }
         let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        // A message the user typed (not a tool result, which also comes as "user"): Claude's reply starts over after it.
+        // A message the user typed (not a tool result, which also comes as "user").
         if is_user {
             if let Some(text) = entry.pointer("/message/content").and_then(|c| c.as_str()) {
-                last_user = Some(text.to_string());
-                reply.clear();
+                messages.push(ChatMessage { role: "user", text: text.to_string() });
             }
             continue;
         }
@@ -126,7 +130,14 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                 continue;
             }
             let text = block.get("text").and_then(|t| t.as_str()).unwrap_or_default();
-            reply.push(text.to_string());
+            // Claude's text between two of the user's messages reads as one message.
+            match messages.last_mut() {
+                Some(last) if last.role == "assistant" => {
+                    last.text.push_str("\n\n");
+                    last.text.push_str(text);
+                }
+                _ => messages.push(ChatMessage { role: "assistant", text: text.to_string() }),
+            }
             // Only Claude's own messages report progress; the opening prompt quotes the format too.
             if !text.contains("[orb]") {
                 continue;
@@ -153,8 +164,7 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
             }
         }
     }
-    let last_reply = if reply.is_empty() { None } else { Some(reply.join("\n\n")) };
-    Ok(SessionProgress { lines, sends, last_user, last_reply, modified_ms: modified_ms(&file_path) })
+    Ok(SessionProgress { lines, sends, messages, modified_ms: modified_ms(&file_path) })
 }
 
 #[cfg(test)]
@@ -182,8 +192,10 @@ mod tests {
                 progress.lines,
                 vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x"]
             );
-            assert_eq!(progress.last_user.as_deref(), Some("Orb task: t-42\n\nWrite `[orb] step N done` when finished."));
-            assert!(progress.last_reply.as_deref().unwrap().starts_with("Reading it now."));
+            assert_eq!(progress.messages[0].role, "user");
+            assert_eq!(progress.messages[0].text, "Orb task: t-42\n\nWrite `[orb] step N done` when finished.");
+            assert_eq!(progress.messages.len(), 2);
+            assert!(progress.messages[1].text.starts_with("Reading it now."));
             assert_eq!(
                 progress.sends,
                 vec![SessionSend {
