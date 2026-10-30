@@ -240,6 +240,17 @@ export interface SessionTurn {
  * there's no reply to parse: the session reports through its transcript ("[orb] …" lines), which
  * Orb reads, and it stays a real Claude Code session the user can open in Claude Desktop.
  */
+/**
+ * Where a background session's words end up, given on every turn (so sessions already under way
+ * pick it up too): Orb shows Claude's latest message in a small chat on the task card, as plain text.
+ */
+export const SESSION_DISPLAY = [
+  "Nobody reads this conversation here. My day planner, Orb, shows your latest message in a small chat on the task's card, next to my reply box, as plain text.",
+  "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't use markdown: no headings, bullet or numbered lists, tables, bold, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
+  "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
+  "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
+].join(" ");
+
 export async function runSessionTurn(
   opts: { prompt: string; tools: string[]; model?: string; effort?: "low" | "medium" | "high"; maxTurns?: number; resume?: string; onStatus?: (s: string) => void },
   run: StreamingCliRunner = runCliStreaming,
@@ -258,6 +269,8 @@ export async function runSessionTurn(
     ...(opts.effort ? ["--effort", opts.effort] : []),
     "--max-turns",
     String(opts.maxTurns ?? 80),
+    "--append-system-prompt",
+    SESSION_DISPLAY,
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
