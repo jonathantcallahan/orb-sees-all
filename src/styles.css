@@ -566,7 +566,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Blocking / Active tabs: none open at first */
 /* Blocking / Active: plain labels until one is open; then it becomes a tab joined to a ruled panel. */
-.work-tabs { display: flex; align-items: flex-end; gap: 2px; margin: 8px 0 0 -8px; }
+/* The rules run edge to edge across the card (its padding is 14px); text stays aligned with the card body. */
+.work-tabs { display: flex; align-items: flex-end; gap: 2px; margin: 8px -14px 0; padding: 0 14px 0 6px; }
 .work-tabs.has-open { border-bottom: 1px solid var(--border); }
 .work-tab {
   display: inline-flex;
@@ -582,7 +583,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .work-tab:hover, .work-tab.open { color: var(--text); }
 .work-tab.open { border-color: var(--border); border-bottom-color: var(--surface); background: var(--surface); }
-.work-items.tab-panel { margin-top: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.work-items.tab-panel { margin: 0 -14px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
 /* High-level plan inside the assessment: numbered circles, then Approve & start */
