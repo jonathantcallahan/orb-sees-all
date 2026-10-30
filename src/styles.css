@@ -858,3 +858,19 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .setup-connector { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; color: var(--text); }
 .setup-about { width: 100%; align-self: stretch; }
 .setup-status { flex: 1; }
+
+/* Once a session is under way, a step's circle marks it done by hand (for work the session didn't see). */
+.step-circle-button { display: inline-flex; flex-shrink: 0; margin-top: 3px; padding: 0; border: none; background: none; cursor: pointer; color: inherit; }
+.step-circle-button .step-circle { margin-top: 0; }
+.step-circle-button:hover .step-circle { color: var(--green); }
+
+/* The background session on a task card: what it's doing, messages to send, and the reply box */
+.session-working { display: flex; align-items: center; gap: 6px; }
+.session-error { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.handoff { align-self: stretch; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); }
+.handoff-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.handoff-label { font-weight: 600; }
+.handoff-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-reply { align-self: stretch; display: flex; gap: 8px; align-items: flex-end; }
+.session-reply textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; font-size: 12px; }
+.plan-actions > .handoff, .plan-actions > .session-reply, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }

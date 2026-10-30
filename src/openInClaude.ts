@@ -67,15 +67,21 @@ export function sessionMarker(taskId: string): string {
   return `Orb task: ${taskId}`;
 }
 
-/** Asks the session to report progress in lines Orb can parse. */
+/** Asks the session to report progress, and hand Slack messages to Orb, in lines Orb can parse. */
 function progressInstructions(): string[] {
   return [
     "",
     "Report progress so my planner can follow along. On its own line, write:",
     "- `[orb] step N started` when you begin one of the numbered steps above,",
-    "- `[orb] step N done` when you finish it,",
+    "- `[orb] step N done` when you finish it, always before you start the next step,",
     "- `[orb] step N waiting: <what you need from me>` when you stop to ask me for something.",
     "N is the step's number in the list above.",
+    "",
+    "Don't post to Slack yourself. When a Slack message is ready, hand it to my planner, which shows it to me to review and send. Write it as its own block:",
+    "[orb] send step N to <#channel-name, or the permalink of the thread to reply in>",
+    "<the message, exactly as it should be posted>",
+    "[orb] end",
+    "then `[orb] step N waiting: review and send the message` and stop. I'll tell you once it's sent, with its link.",
   ];
 }
 
@@ -96,14 +102,15 @@ export interface StartStep {
 }
 
 /**
- * The prompt behind "Approve & start": the whole plan in order, with the user's
- * steps marked. Claude does only its own steps, and stops to ask for
- * the result of any earlier step of the user's that it depends on.
+ * The prompt behind "Approve & start". The session runs in the background (Orb starts it with
+ * `claude -p`), so it works through the plan unattended and stops only when it needs the user,
+ * who answers in Orb; Orb continues the session with the answer. Steps marked [Me] are the
+ * user's: Claude stops to ask for their result when it needs it.
  */
 export function startPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
   const lines = [
     ...(task.id ? [sessionMarker(task.id), ""] : []),
-    "I've approved your suggested approach for this task from my day planner. Please start on it.",
+    "I've approved your suggested approach for this task from my day planner. Please carry it out.",
     "",
     ...taskLines(task),
   ];
@@ -112,9 +119,11 @@ export function startPrompt(task: SessionTask, suggestion: string, steps: StartS
   if (task.id) lines.push(...progressInstructions());
   lines.push(
     "",
-    "Do your steps in order. Don't do the steps marked [Me].",
-    "When one of your steps depends on an earlier step of mine, prepare everything you can without it, then stop and ask me for that step's result before going on. If you can't tell whether I've done a step of mine yet, ask.",
-    "Show me the results of each of your steps to review. You can post in Slack and follow up with people there, but show me each message and where it's going, and wait for my OK before posting. Don't send email, file tickets or change anything else outside this session, and don't make decisions for me; ask me instead.",
+    "You're running in the background: I'm not watching this conversation, and my planner tells me when you need me. So keep going on your own through your steps in order, and stop only when you need something from me.",
+    "Don't do the steps marked [Me]. When one of your steps depends on an earlier step of mine, prepare everything you can without it, then ask me for that step's result (as a waiting report) and stop.",
+    "When you stop for me, put everything I need to answer in the waiting report and the message just before it: the question, the options, and any draft I'm approving, since I'll read it in my planner rather than here. Ask one clear thing at a time.",
+    "You can read Slack, email, Google Drive, Jira and the calendar. Don't send email, file tickets or change anything outside this session, and don't make decisions for me; ask me instead. Slack messages go to my planner as described above.",
+    "When all your steps are done, write a short summary of what you did and what's left for me.",
   );
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;

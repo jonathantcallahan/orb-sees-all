@@ -142,11 +142,13 @@ export function TaskColumn({
       priorityOverrides[t.id],
     );
   const filters = <TaskFilters filter={filter} onChange={setFilter} showSource={!filterProject} />;
+  /** What Orb can do on the task, from its assessment (null until assessed). */
+  const automationOf = (t: CardTask) => (t.source === "manual" ? assessments.get(t.id) : t.assessment)?.automation ?? null;
   const sourceOf = (t: CardTask): TaskSource => (t.source === "manual" ? "own" : t.source === "project" ? "project" : "request");
   /** Applies the filters; in a single project's view, where everything comes from that project, the source filter doesn't apply. */
   const keep = <T extends CardTask>(list: T[], f: TaskFilter = filter) =>
     isFiltering(f)
-      ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended, source: sourceOf(t) }, f))
+      ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended, source: sourceOf(t), automation: automationOf(t), due: t.due }, f))
       : list;
   /** One list from every source: most urgent first, then in each source's own order. */
   const byPriority = <T extends CardTask>(list: T[]) => {

@@ -226,3 +226,49 @@ export async function runClaude<T>(opts: ClaudeOptions<T>, run: StreamingCliRunn
   }
   throw new Error("unreachable");
 }
+
+export interface SessionTurn {
+  sessionId: string | null;
+  costUsd: number;
+  /** Claude stopped on an error (out of turns, a refused tool, not signed in) rather than finishing its turn. */
+  error: string | null;
+}
+
+/**
+ * Runs one turn of a working session in the background: a new session from `prompt`, or, with
+ * `resume`, the next turn of an existing one with `prompt` as the user's message. Unlike runClaude
+ * there's no reply to parse: the session reports through its transcript ("[orb] …" lines), which
+ * Orb reads, and it stays a real Claude Code session the user can open in Claude Desktop.
+ */
+export async function runSessionTurn(
+  opts: { prompt: string; tools: string[]; model?: string; effort?: "low" | "medium" | "high"; maxTurns?: number; resume?: string; onStatus?: (s: string) => void },
+  run: StreamingCliRunner = runCliStreaming,
+): Promise<SessionTurn> {
+  const args = [
+    ...(opts.resume ? ["--resume", opts.resume] : []),
+    "-p",
+    opts.prompt,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--settings",
+    USE_CLAUDE_AI_LOGIN,
+    "--model",
+    opts.model ?? "opus",
+    ...(opts.effort ? ["--effort", opts.effort] : []),
+    "--max-turns",
+    String(opts.maxTurns ?? 80),
+    ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
+    "--disallowedTools",
+    ...DISALLOWED,
+  ];
+  const onStatus = opts.onStatus;
+  const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
+  const envelope = findEnvelope(out.stdout);
+  if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
+  return {
+    sessionId: envelope.session_id ?? null,
+    costUsd: envelope.total_cost_usd ?? 0,
+    error: envelope.is_error ? envelope.result || "Claude stopped with an error" : null,
+  };
+}

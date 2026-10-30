@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import envelope from "./__fixtures__/project-envelope.json";
-import { describeTool, extractJson, findEnvelope, runClaude } from "./claude";
+import { describeTool, extractJson, findEnvelope, runClaude, runSessionTurn } from "./claude";
 import type { StreamingCliRunner as CliRunner } from "./cli";
 import { ProjectSnapshot } from "./schema";
 
@@ -141,5 +141,31 @@ describe("task double check", () => {
     for (const check of ["Captured correctly", "Still necessary", "Duplicate", "Priority", "Missing context"]) expect(p).toContain(check);
     expect(p).toContain("Send Q4 figures to Ben");
     expect(p).toMatch(/Never send, post/);
+  });
+});
+
+describe("runSessionTurn", () => {
+  it("resumes the session for a later turn and returns its id and cost", async () => {
+    const run = vi.fn<CliRunner>().mockResolvedValue(reply("[orb] step 2 waiting: which channel?", { session_id: "abc" }));
+    const turn = await runSessionTurn({ prompt: "Post it in #plugins", tools: ["mcp__x__read"], resume: "abc" }, run);
+    const args = run.mock.calls[0][1];
+    expect(args.slice(0, 4)).toEqual(["--resume", "abc", "-p", "Post it in #plugins"]);
+    expect(args).toContain("--disallowedTools");
+    expect(args).not.toContain("--effort");
+    expect(turn).toEqual({ sessionId: "abc", costUsd: 0.5, error: null });
+  });
+
+  it("reports a turn that stopped on an error", async () => {
+    const run = vi.fn<CliRunner>().mockResolvedValue(reply("Reached max turns", { is_error: true }));
+    expect((await runSessionTurn({ prompt: "p", tools: [] }, run)).error).toBe("Reached max turns");
+  });
+});
+
+describe("runSessionTurn effort", () => {
+  it("passes the model and effort through", async () => {
+    const run = vi.fn<CliRunner>().mockResolvedValue(reply("done"));
+    await runSessionTurn({ prompt: "p", tools: [], model: "claude-opus-5-5", effort: "medium" }, run);
+    const args = run.mock.calls[0][1];
+    expect(args.join(" ")).toContain("--model claude-opus-5-5 --effort medium");
   });
 });

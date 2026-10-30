@@ -342,6 +342,17 @@ MESSAGE>>>
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
 }
 
+export function sendToChannelPrompt(to: string, text: string): string {
+  return `Post the message below to the Slack channel ${to}. ${to.startsWith("#") ? `First find that channel's ID: slack_search_channels for its name (channel_types "public_channel,private_channel"), or slack_list_user_channels with name_prefix set to the name without "#". Use the channel whose name matches exactly; if none does, don't post, and report the error.` : `${to} is the channel ID.`} Then call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
+
+Message (between the markers):
+<<<MESSAGE
+${text}
+MESSAGE>>>
+
+After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+}
+
 export function sendReplyPrompt(channelId: string, threadTs: string, text: string): string {
   return `Post the reply below in a Slack thread by calling slack_send_message exactly once, with channel_id "${channelId}", thread_ts "${threadTs}", and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else.
 

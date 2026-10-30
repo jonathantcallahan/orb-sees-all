@@ -1,4 +1,4 @@
-import type { Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
+import type { Automation, Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "done";
 
@@ -266,6 +266,17 @@ export type PriorityFilter = EffectivePriority | "unrated";
 /** Where a task came from: a project channel, a Slack or email request, or the user's own list. */
 export type TaskSource = "project" | "request" | "own";
 
+/** When a task is due: overdue, within two days (as the orb counts it), later, or no date. */
+export type DueFilter = "overdue" | "soon" | "later" | "none";
+
+export function dueBucket(due: string | null | undefined, now = new Date()): DueFilter {
+  if (!due) return "none";
+  return dueState(due, now) ?? "later";
+}
+
+/** How much Orb can do on a task (its assessment's automation), or not assessed yet. */
+export type AssistanceFilter = Automation | "unassessed";
+
 export interface TaskFilter {
   /** Empty means any source. */
   sources: TaskSource[];
@@ -273,23 +284,30 @@ export interface TaskFilter {
   statuses: TaskStatus[];
   /** Empty means any priority. */
   priorities: PriorityFilter[];
+  /** Empty means any: whether Orb can do it, help with it, or it's the user's. */
+  assistance: AssistanceFilter[];
+  /** Empty means any due date. */
+  dues: DueFilter[];
   recommendedOnly: boolean;
 }
 
-export const NO_FILTER: TaskFilter = { sources: [], statuses: [], priorities: [], recommendedOnly: false };
+export const NO_FILTER: TaskFilter = { sources: [], statuses: [], priorities: [], assistance: [], dues: [], recommendedOnly: false };
 
 export function isFiltering(f: TaskFilter): boolean {
-  return f.sources.length > 0 || f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
+  return f.sources.length > 0 || f.statuses.length > 0 || f.priorities.length > 0 || f.assistance.length > 0 || f.dues.length > 0 || f.recommendedOnly;
 }
 
 /** Whether a task passes every filter that's set. */
 export function matchesFilter(
-  t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean; source?: TaskSource },
+  t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean; source?: TaskSource; automation?: Automation | null; due?: string | null },
   f: TaskFilter,
+  now = new Date(),
 ): boolean {
   if (f.sources.length && (!t.source || !f.sources.includes(t.source))) return false;
   if (f.statuses.length && !f.statuses.includes(t.status)) return false;
   if (f.priorities.length && !f.priorities.includes(t.priority ?? "unrated")) return false;
+  if (f.assistance.length && !f.assistance.includes(t.automation ?? "unassessed")) return false;
+  if (f.dues.length && !f.dues.includes(dueBucket(t.due, now))) return false;
   if (f.recommendedOnly && !t.recommended) return false;
   return true;
 }

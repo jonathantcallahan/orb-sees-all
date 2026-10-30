@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, describePressure, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
+import { applyTaskState, compareProjects, describePressure, DEFAULT_TASK_STATE, formatMinutes, isFiltering, matchesFilter, type DueFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -509,19 +509,21 @@ describe("open in Claude", () => {
     expect(sessionPrompt({ title: "x", description: "y".repeat(20000) }, plan).length).toBeLessThanOrEqual(13500);
   });
 
-  it("asks Claude to do only the steps it said it can do alone, then stop", () => {
-    const p = startPrompt(task, "Claude can draft the ticket.", [
+  it("asks Claude to work through its own steps unattended, stopping only for the user", () => {
+    const p = startPrompt({ ...task, id: "t-1" }, "Claude can draft the ticket.", [
       { title: "Get the export from Eric", by: "you" },
       { title: "Draft the ticket text", by: "claude" },
       { title: "Check the numbers", by: null },
       { title: "File the ticket", by: "you" },
     ]);
-    expect(p).toMatch(/^I've approved your suggested approach/);
+    expect(p).toMatch(/^Orb task: t-1\n\nI've approved your suggested approach/);
     expect(p).toContain("Your suggestion: Claude can draft the ticket.");
     expect(p).toContain("1. [Me] Get the export from Eric\n2. Draft the ticket text\n3. Check the numbers\n4. [Me] File the ticket");
     expect(p).toMatch(/Don't do the steps marked \[Me\]/);
-    expect(p).toMatch(/stop and ask me for that step's result/);
-    expect(p).toMatch(/wait for my OK before posting/);
+    expect(p).toMatch(/ask me for that step's result \(as a waiting report\) and stop/);
+    expect(p).toMatch(/running in the background/);
+    expect(p).toMatch(/Don't post to Slack yourself/);
+    expect(p).toContain("[orb] send step N to");
     expect(p).toMatch(/Don't send email, file tickets/);
   });
 
@@ -580,5 +582,31 @@ describe("blocker status check", () => {
     const withReminder = checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null, reminder: { at: "2026-10-29T10:00:00Z", link: "https://example.slack.com/archives/C1/p1" } });
     expect(withReminder).toContain("posted a reminder about it on 2026-10-29T10:00:00Z (https://example.slack.com/archives/C1/p1)");
     expect(checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null })).not.toContain("reminder");
+  });
+});
+
+describe("Orb assistance filter", () => {
+  it("keeps tasks by what Orb can do, with unassessed tasks as their own option", () => {
+    const f = { ...NO_FILTER, assistance: ["claude" as const, "assisted" as const] };
+    const base = { status: "todo" as const, priority: null };
+    expect(matchesFilter({ ...base, automation: "claude" }, f)).toBe(true);
+    expect(matchesFilter({ ...base, automation: "assisted" }, f)).toBe(true);
+    expect(matchesFilter({ ...base, automation: "human" }, f)).toBe(false);
+    expect(matchesFilter({ ...base, automation: null }, f)).toBe(false);
+    expect(matchesFilter({ ...base }, { ...NO_FILTER, assistance: ["unassessed"] })).toBe(true);
+    expect(isFiltering({ ...NO_FILTER, assistance: ["human"] })).toBe(true);
+  });
+});
+
+describe("due filter", () => {
+  it("sorts tasks into overdue, due soon, later and no date, as the orb counts them", () => {
+    const now = new Date(2026, 9, 30, 12);
+    const f = (dues: DueFilter[]) => ({ ...NO_FILTER, dues });
+    const base = { status: "todo" as const, priority: null };
+    expect(matchesFilter({ ...base, due: "2026-10-29" }, f(["overdue"]), now)).toBe(true);
+    expect(matchesFilter({ ...base, due: "2026-10-31" }, f(["soon"]), now)).toBe(true);
+    expect(matchesFilter({ ...base, due: "2026-11-20" }, f(["later"]), now)).toBe(true);
+    expect(matchesFilter({ ...base, due: null }, f(["none"]), now)).toBe(true);
+    expect(matchesFilter({ ...base, due: "2026-11-20" }, f(["overdue", "soon"]), now)).toBe(false);
   });
 });

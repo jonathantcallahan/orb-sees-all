@@ -23,7 +23,16 @@ pub struct SessionFile {
 pub struct SessionProgress {
     /// Lines Claude wrote that start with "[orb]", oldest first.
     pub lines: Vec<String>,
+    /// Messages Claude handed to Orb to send, oldest first.
+    pub sends: Vec<SessionSend>,
     pub modified_ms: u64,
+}
+
+/// A message handed to Orb: the "[orb] send …" line, and the text up to "[orb] end".
+#[derive(Serialize, Debug, PartialEq)]
+pub struct SessionSend {
+    pub header: String,
+    pub body: String,
 }
 
 fn projects_dir() -> Result<PathBuf, String> {
@@ -90,6 +99,7 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
     }
     let reader = BufReader::new(File::open(&file_path).map_err(|e| e.to_string())?);
     let mut lines = Vec::new();
+    let mut sends = Vec::new();
     for line in reader.lines().map_while(Result::ok) {
         // Only Claude's own messages; the opening prompt quotes the format too.
         if !line.contains("[orb]") || !line.contains("\"type\":\"assistant\"") {
@@ -102,15 +112,29 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                 continue;
             }
             let text = block.get("text").and_then(|t| t.as_str()).unwrap_or_default();
+            // A hand-off runs from its "[orb] send" line to "[orb] end"; its body keeps its lines as written.
+            let mut open: Option<(String, Vec<&str>)> = None;
             for text_line in text.lines() {
                 let trimmed = text_line.trim().trim_matches('`').trim_start_matches("- ").trim();
+                if let Some((header, body)) = open.as_mut() {
+                    if trimmed.eq_ignore_ascii_case("[orb] end") {
+                        sends.push(SessionSend { header: header.clone(), body: body.join("\n") });
+                        open = None;
+                    } else {
+                        body.push(text_line);
+                    }
+                    continue;
+                }
                 if trimmed.starts_with("[orb]") {
                     lines.push(trimmed.to_string());
+                    if trimmed.to_ascii_lowercase().starts_with("[orb] send") {
+                        open = Some((trimmed.to_string(), Vec::new()));
+                    }
                 }
             }
         }
     }
-    Ok(SessionProgress { lines, modified_ms: modified_ms(&file_path) })
+    Ok(SessionProgress { lines, sends, modified_ms: modified_ms(&file_path) })
 }
 
 #[cfg(test)]
@@ -125,7 +149,8 @@ mod tests {
         let user = r#"{"type":"user","message":{"role":"user","content":"Orb task: t-42\n\nWrite `[orb] step N done` when finished."}}"#;
         let reply = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading it now.\n[orb] step 1 started\n`[orb] step 1 done`"}]}}"#;
         let waiting = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[orb] step 2 waiting: need the export"}]}}"#;
-        std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{waiting}\n")).unwrap();
+        let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end"}]}}"#;
+        std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{waiting}\n{send}\n")).unwrap();
         std::fs::write(project.join("other.jsonl"), r#"{"type":"user","message":{"content":"Orb task: t-7"}}"#).unwrap();
         std::env::set_var("HOME", &home);
 
@@ -133,7 +158,17 @@ mod tests {
             let found = find_session("Orb task: t-42".into(), 0).await.unwrap().expect("found");
             assert_eq!(found.session_id, "abc");
             let progress = read_session_progress(found.path).await.unwrap();
-            assert_eq!(progress.lines, vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export"]);
+            assert_eq!(
+                progress.lines,
+                vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x"]
+            );
+            assert_eq!(
+                progress.sends,
+                vec![SessionSend {
+                    header: "[orb] send step 3 to #tmp-x".into(),
+                    body: "Heads up, the filter is live.\n• Use `publisherId=`".into()
+                }]
+            );
             assert!(find_session("Orb task: t-99".into(), 0).await.unwrap().is_none());
             // Paths outside the transcripts folder are refused.
             assert!(read_session_progress("/etc/hosts".into()).await.is_err());

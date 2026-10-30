@@ -271,6 +271,12 @@ export const getSessionLinks = () => getRows<SessionLink>("session_links");
 
 export const saveSessionLink = (taskId: string, link: SessionLink) => putRow("session_links", taskId, link);
 
+/** Changes part of a task's session link, keeping the rest as it is now (not as the caller last saw it). */
+export async function updateSessionLink(taskId: string, patch: Partial<SessionLink>) {
+  const current = (await getSessionLinks())[taskId];
+  if (current) await saveSessionLink(taskId, { ...current, ...patch });
+}
+
 /** Double checks of tasks, keyed by task id. */
 export const getTaskChecks = () => getRows<StoredTaskCheck>("task_checks");
 

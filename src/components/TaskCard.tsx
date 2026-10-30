@@ -4,13 +4,13 @@ import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
-import { assessPendingTasks, checkTask, planTask } from "../jobs";
+import { assessPendingTasks, checkTask, continueTaskSession, planTask, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ExternalLink, Spinner } from "./common";
-import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { CloseIcon, ComposeModal, ExternalLink, Spinner } from "./common";
+import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { CLAUDE_ICON } from "../linkIcons";
 import { collectLinks } from "../links";
@@ -400,7 +400,18 @@ interface OutlineStep {
   progress?: StepProgress;
 }
 
-function PlanOutline({ steps, action, planning = false }: { steps: OutlineStep[]; action?: ReactNode; planning?: boolean }) {
+function PlanOutline({
+  steps,
+  action,
+  planning = false,
+  onMarkDone,
+}: {
+  steps: OutlineStep[];
+  action?: ReactNode;
+  planning?: boolean;
+  /** Marks a step done by hand (once a session is under way): for work the session didn't see, like a message sent from Slack. */
+  onMarkDone?: (index: number) => void;
+}) {
   if (steps.length === 0 && !action) return null;
   return (
     <div className="plan-outline">
@@ -419,10 +430,16 @@ function PlanOutline({ steps, action, planning = false }: { steps: OutlineStep[]
         <ol className="plan-outline-steps">
           {steps.map((step, i) => (
             <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
-              <StepCircle state={step.progress?.state} />
+              {onMarkDone && step.progress?.state !== "done" ? (
+                <button className="step-circle-button" onClick={() => onMarkDone(i)} aria-label={`Mark "${step.title}" done`}>
+                  <StepCircle state={step.progress?.state} />
+                </button>
+              ) : (
+                <StepCircle state={step.progress?.state} />
+              )}
               <span className="small">
                 {step.title}
-                {step.by === "you" && <span className="step-by you">Human input needed</span>}
+                {step.by === "you" && step.progress?.state !== "done" && <span className="step-by you">Human input needed</span>}
                 {step.progress?.state === "waiting" && (
                   <span className="step-waiting">Waiting on you{step.progress.note ? `: ${step.progress.note}` : ""}</span>
                 )}
@@ -442,6 +459,7 @@ function AssessmentView({
   actions,
   planning,
   onAddDetails,
+  onMarkDone,
 }: {
   assessment: Assessment;
   /** Plan steps tagged by who does them, shown inside the assessment. */
@@ -451,6 +469,7 @@ function AssessmentView({
   /** A plan is being written. */
   planning: boolean;
   onAddDetails?: () => void;
+  onMarkDone?: (index: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -475,10 +494,131 @@ function AssessmentView({
         {open && (
           <>
             <span className="small suggestion">{assessment.suggestion}</span>
-            <PlanOutline steps={steps} action={actions} planning={planning} />
+            <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} />
           </>
         )}
       </div>
+    </>
+  );
+}
+
+/** A message the session handed over, ready to review and send from Orb. */
+function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingSend; onChange: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(send.text);
+  const [error, setError] = useState<string | null>(null);
+  const sending = useJobStatus(`handoff:${taskId}`);
+  const where = send.to.startsWith("http") ? "the thread" : send.to;
+  return (
+    <div className="handoff small">
+      <div className="handoff-head">
+        <span className="handoff-label">Ready to send to {where}</span>
+        <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
+          {sending ? "Sending…" : "Review & send"}
+        </button>
+      </div>
+      <div className="muted handoff-preview">{send.text.split("\n")[0]}</div>
+      {open && (
+        <ComposeModal
+          heading={`Send to ${where}`}
+          note={`Posts in ${where} as you.`}
+          text={text}
+          status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
+          failed={!!error && !sending}
+          busy={!!sending}
+          onChange={setText}
+          onCancel={() => !sending && setOpen(false)}
+          onSend={async () => {
+            if (!text.trim()) return;
+            try {
+              setError(null);
+              await sendHandoff(taskId, send, text.trim());
+              setOpen(false);
+              onChange();
+            } catch (e) {
+              setError((e as Error).message);
+            }
+          }}
+          actions={
+            send.to.startsWith("http") ? (
+              <ExternalLink href={send.to} className="link-button small more-link">
+                Open thread
+              </ExternalLink>
+            ) : undefined
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The background session, from the task card: what it's doing while it works, messages it handed
+ * over to send, a box to answer it when it's waiting on the user, and a retry if a turn failed.
+ */
+function SessionPanel({
+  taskId,
+  link,
+  working,
+  waiting,
+  toSend,
+  onChange,
+}: {
+  taskId: string;
+  link: SessionLink;
+  /** What the session is doing right now, while a turn runs. */
+  working: string | undefined;
+  waiting: boolean;
+  toSend: PendingSend[];
+  onChange: () => void;
+}) {
+  const [reply, setReply] = useState("");
+  const send = async (message: string) => {
+    setReply("");
+    continueTaskSession(taskId, message).then(onChange, onChange);
+    onChange();
+  };
+  if (working)
+    return (
+      <span className="muted small session-working">
+        <Spinner /> Claude is working: {working}…
+      </span>
+    );
+  return (
+    <>
+      {link.lastError && (
+        <div className="small session-error">
+          <span className="error">Claude stopped: {link.lastError}</span>
+          <button className="link-button small" onClick={() => send("Please carry on where you left off.")}>
+            Try again
+          </button>
+        </div>
+      )}
+      {toSend.map((s) => (
+        <HandoffRow key={s.key} taskId={taskId} send={s} onChange={onChange} />
+      ))}
+      {waiting && link.sessionId && (
+        <form
+          className="session-reply"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (reply.trim()) send(reply.trim());
+          }}
+        >
+          <textarea
+            rows={2}
+            value={reply}
+            placeholder="Answer Claude…"
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && reply.trim()) send(reply.trim());
+            }}
+          />
+          <button className="cta-ghost" type="submit" disabled={!reply.trim()}>
+            Reply
+          </button>
+        </form>
+      )}
     </>
   );
 }
@@ -622,9 +762,11 @@ export function TaskCard({
   const [showPlan, setShowPlan] = useState(false);
   const planStatus = useJobStatus(`plan:${task.id}`);
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
-  const progress = useSessionProgress(task.id, sessionLink);
+  const progress = useSessionProgress(task.id, sessionLink, onChange);
   /** A Claude session has picked this task up; the card follows it from now on. */
   const linked = !!sessionLink?.sessionId;
+  /** Started, and Orb is still looking for the session (it gives up after a while, so the task can be started again). */
+  const awaitingSession = !!sessionLink && !linked && Date.now() - sessionLink.startedAt < GIVE_UP_MS;
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
@@ -656,21 +798,32 @@ export function TaskCard({
     plan
       ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
       : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
-  ).map((st, i) => ({ ...st, progress: progress?.steps[i + 1] }));
+  ).map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1) }));
+  // Once a session is under way, any step not yet done can be marked done by hand.
+  const markDone = sessionLink
+    ? async (i: number) => {
+        await markStepDone(task.id, i + 1);
+        onChange();
+      }
+    : undefined;
   // Approve & start sends the whole sequence; Claude does every step that isn't the user's.
   const hasClaudeSteps = outlineSteps.some((st) => st.by !== "you");
+  // Approve & start runs the session in the background; the user answers it here, and opens it in
+  // Claude only to step in or change course.
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
-    await linkSession(task.id);
-    onChange();
     const prompt = startPrompt(
       { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
       assessment.suggestion,
       outlineSteps,
     );
-    openUrl(claudeSessionUrl(prompt, task.repoFolder));
+    startTaskSession(task.id, prompt).then(onChange, onChange);
+    onChange();
   };
+  const sessionWorking = useJobStatus(`session:${task.id}`);
+  const waitingStep = outlineSteps.find((st) => st.progress?.state === "waiting");
+  const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];
   // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
   // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
   const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
@@ -682,7 +835,7 @@ export function TaskCard({
             Plan steps
           </button>
         )}
-        {hasClaudeSteps && assessment && !linked && (
+        {hasClaudeSteps && assessment && !linked && !awaitingSession && (
           <button
             className={canPlan ? "cta-ghost" : "cta-primary"}
             onClick={approveAndStart}
@@ -701,7 +854,17 @@ export function TaskCard({
             <Spinner /> {planStatus ?? "Researching a plan"}…
           </span>
         )}
-        {sessionLink && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {sessionLink && (
+          <SessionPanel
+            taskId={task.id}
+            link={sessionLink}
+            working={sessionWorking}
+            waiting={!!waitingStep}
+            toSend={toSend}
+            onChange={onChange}
+          />
+        )}
+        {sessionLink && !sessionWorking && <SessionStatus progress={progress} steps={outlineSteps} />}
       </div>
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */
@@ -930,6 +1093,7 @@ export function TaskCard({
           onAddDetails={!editing ? () => setEditing(true) : undefined}
           actions={planActions}
           planning={planning}
+          onMarkDone={markDone}
         />
       ) : (
         <>
@@ -939,7 +1103,7 @@ export function TaskCard({
             </div>
           )}
           {/* No assessment to nest it in yet. */}
-          <PlanOutline steps={outlineSteps} action={planActions} planning={planning} />
+          <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} />
         </>
       )}
 
@@ -981,7 +1145,7 @@ export function TaskCard({
           onClose={() => setShowPlan(false)}
           actions={
             <>
-              {hasClaudeSteps && assessment && !linked && (
+              {hasClaudeSteps && assessment && !linked && !awaitingSession && (
                 <button className="cta-primary" onClick={() => { setShowPlan(false); approveAndStart(); }}>
                   Approve & start
                 </button>

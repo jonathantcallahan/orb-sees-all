@@ -1,7 +1,9 @@
 import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
-import { runClaude, TOOLS } from "../claude";
+import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
+import { sendToChannelPrompt } from "../prompts";
+import { linkSession, type PendingSend } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectRefresh, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
@@ -410,6 +412,83 @@ export function sendSlackReply(replyId: string, link: string, text: string): Pro
       });
       if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
       await db.setTaskState(replyId, { status: "done" });
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/**
+ * What a working session can use: it reads everything Orb can read and writes nothing. Slack
+ * messages it drafts come back to Orb, which posts them once the user approves (sendHandoff).
+ */
+/** Working sessions run on Opus 5.5 at medium effort: careful enough for multi-step work, without the cost of max effort on every turn. */
+const SESSION_MODEL = { model: "claude-opus-5-5", effort: "medium" } as const;
+
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow];
+
+/**
+ * Runs the next turn of a task's working session in the background: the first turn from the start
+ * prompt, later ones with the user's reply. The session works until it's done or needs the user,
+ * reporting through its transcript; the user never has to open Claude unless they want to.
+ */
+function runTaskSession(taskId: string, prompt: string): Promise<void> {
+  return track(`session:${taskId}`, (status) =>
+    logged("session", taskId, async () => {
+      const link = (await db.getSessionLinks())[taskId];
+      await db.updateSessionLink(taskId, { lastError: null });
+      try {
+        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status });
+        if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
+        if (turn.error) throw new Error(turn.error);
+        return { value: undefined, costUsd: turn.costUsd };
+      } catch (e) {
+        await db.updateSessionLink(taskId, { lastError: (e as Error).message });
+        throw e;
+      }
+    }),
+  );
+}
+
+/** Starts a working session for a task (Approve & start). */
+export async function startTaskSession(taskId: string, prompt: string): Promise<void> {
+  await linkSession(taskId);
+  bump();
+  return runTaskSession(taskId, prompt);
+}
+
+/** Continues a task's working session with the user's answer to what it asked. */
+export async function continueTaskSession(taskId: string, message: string): Promise<void> {
+  // One turn at a time: a turn still running would swallow this one (the queue dedupes by key), so wait it out.
+  const key = `session:${taskId}`;
+  while (queue.has(key)) await queue.run(key, async () => {}).catch(() => {});
+  return runTaskSession(taskId, message);
+}
+
+/**
+ * Posts a Slack message a working session handed over, as the user wrote or approved it, then
+ * records it as sent (finishing its step) and tells the session so it carries on.
+ */
+export function sendHandoff(taskId: string, send: PendingSend, text: string): Promise<void> {
+  return track(`handoff:${taskId}`, (status) =>
+    logged("send", taskId, async () => {
+      const thread = slackThread(send.to);
+      const { data, costUsd } = await runClaude({
+        onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
+        prompt: thread ? sendReplyPrompt(thread.channelId, thread.threadTs, text) : sendToChannelPrompt(send.to, text),
+        schema: SentMessage,
+        // A channel by name needs looking up first.
+        tools: thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
+        model: "sonnet",
+        maxTurns: 6,
+      });
+      if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
+      const link = (await db.getSessionLinks())[taskId];
+      await db.updateSessionLink(taskId, {
+        sentKeys: [...(link?.sentKeys ?? []), send.key],
+        ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
+      });
+      const edited = text !== send.text ? ` I edited it first; this is what went out:\n\n${text}` : "";
+      continueTaskSession(taskId, `I sent the message to ${send.to}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`).catch(() => {});
       return { value: undefined, costUsd };
     }),
   );

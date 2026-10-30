@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
-import { NO_FILTER, NO_PROJECT_FILTER, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskSource, type TaskStatus } from "../tasks";
+import { NO_FILTER, NO_PROJECT_FILTER, type AssistanceFilter, type DueFilter, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskSource, type TaskStatus } from "../tasks";
 
 const SOURCES: [TaskSource, string][] = [
   ["project", "Projects"],
@@ -22,6 +22,21 @@ const PRIORITIES: [PriorityFilter, string][] = [
   ["medium", "Medium"],
   ["low", "Low"],
   ["unrated", "Unrated"],
+];
+
+/** Labelled as on the task cards. */
+const ASSISTANCE: [AssistanceFilter, string][] = [
+  ["claude", "Orb can do it"],
+  ["assisted", "Orb can help"],
+  ["human", "You do it"],
+  ["unassessed", "Not assessed"],
+];
+
+const DUES: [DueFilter, string][] = [
+  ["overdue", "Overdue"],
+  ["soon", "Due soon"],
+  ["later", "Due later"],
+  ["none", "No due date"],
 ];
 
 /** A filter kept in localStorage so it survives restarts. */
@@ -149,7 +164,7 @@ export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; on
   );
 }
 
-/** Source, status, priority and Recommended filters for All tasks. */
+/** Source, status, priority, due date, Orb assistance and Recommended filters for All tasks. */
 export function TaskFilters({ filter, onChange, showSource = true }: { filter: TaskFilter; onChange: (f: TaskFilter) => void; showSource?: boolean }) {
   return (
     <div className="task-filters">
@@ -158,6 +173,8 @@ export function TaskFilters({ filter, onChange, showSource = true }: { filter: T
       )}
       <MultiFilter label="Filter by status" anyLabel="Any status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
       <MultiFilter label="Filter by priority" anyLabel="Any priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
+      <MultiFilter label="Filter by due date" anyLabel="Any due date" values={filter.dues} options={DUES} onChange={(dues) => onChange({ ...filter, dues })} />
+      <MultiFilter label="Filter by what Orb can do" anyLabel="Orb" values={filter.assistance} options={ASSISTANCE} onChange={(assistance) => onChange({ ...filter, assistance })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>
   );
