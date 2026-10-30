@@ -100,6 +100,8 @@ export interface Pressure {
   criticalTasks: number;
   /** Weighted open work: see pressure(). */
   load: number;
+  /** Everything counted in the load: open tasks by priority, and how many are due soon or overdue. */
+  tally?: PressureTally;
   /** 0 (calm) to 1 (on fire). */
   level: number;
 }
@@ -132,12 +134,28 @@ const DUE_SOON_DAYS = 2;
  */
 export const LOAD_SCALE = 35;
 
-function dueWeight(due: string | null | undefined, now: Date): number {
-  if (!due) return 0;
+export interface PressureTally {
+  blocking: number;
+  critical: number;
+  high: number;
+  medium: number;
+  /** Low and unrated tasks, which weigh the same. */
+  low: number;
+  dueSoon: number;
+  overdue: number;
+}
+
+function dueState(due: string | null | undefined, now: Date): "overdue" | "soon" | null {
+  if (!due) return null;
   const ms = new Date(`${due}T23:59:59`).getTime() - now.getTime();
-  if (Number.isNaN(ms)) return 0;
-  if (ms < 0) return OVERDUE_WEIGHT;
-  return ms < DUE_SOON_DAYS * 86_400_000 ? DUE_SOON_WEIGHT : 0;
+  if (Number.isNaN(ms)) return null;
+  if (ms < 0) return "overdue";
+  return ms < DUE_SOON_DAYS * 86_400_000 ? "soon" : null;
+}
+
+function dueWeight(due: string | null | undefined, now: Date): number {
+  const state = dueState(due, now);
+  return state === "overdue" ? OVERDUE_WEIGHT : state === "soon" ? DUE_SOON_WEIGHT : 0;
 }
 
 /**
@@ -154,6 +172,15 @@ export function pressure(tasks: PressureTask[], states: Map<string, TaskState>, 
     criticalTasks: open.filter((t) => t.priority === "blocking" || t.priority === "critical").length,
     load,
     level: 1 - Math.exp(-load / LOAD_SCALE),
+    tally: {
+      blocking: open.filter((t) => t.priority === "blocking").length,
+      critical: open.filter((t) => t.priority === "critical").length,
+      high: open.filter((t) => t.priority === "high").length,
+      medium: open.filter((t) => t.priority === "medium").length,
+      low: open.filter((t) => !t.priority || t.priority === "low").length,
+      dueSoon: open.filter((t) => dueState(t.due, now) === "soon").length,
+      overdue: open.filter((t) => dueState(t.due, now) === "overdue").length,
+    },
   };
 }
 

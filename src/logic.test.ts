@@ -171,6 +171,22 @@ describe("pressure", () => {
     expect(p.level).toBeCloseTo(1 - Math.exp(-10.9 / LOAD_SCALE));
   });
 
+  it("tallies everything that feeds the score", () => {
+    const p = pressure(
+      [
+        task("a", "blocking"),
+        task("b", "critical", { due: "2026-10-30" }),
+        task("c", "high", { due: "2026-10-27" }),
+        task("d", "medium"),
+        task("e", null),
+        task("f", "low"),
+      ],
+      none,
+      now,
+    );
+    expect(p.tally).toEqual({ blocking: 1, critical: 1, high: 1, medium: 1, low: 2, dueSoon: 1, overdue: 1 });
+  });
+
   it("barely notices a long medium and low backlog", () => {
     const backlog = Array.from({ length: 40 }, (_, i) => task(`m${i}`, i % 2 ? "medium" : "low"));
     expect(orbMood(pressure(backlog, none, now))).toBe("serene");
