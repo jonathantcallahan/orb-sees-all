@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { setOrbAgitated } from "../orbEvents";
 import { type Pressure, type PressureTally } from "../tasks";
 
 /** Width each task adds to its bar, and the most a bar grows before its segments scale down to fit. */
@@ -33,11 +34,28 @@ type Hover = { text: string; anchor: DOMRect } | null;
  * One rounded bar of colored segments, a task's width each; a small gray dot when it's empty.
  * Each segment names itself on hover, e.g. "High · 19".
  */
-function Bar({ segments, empty, onHover }: { segments: Segment[]; empty: string; onHover: (h: Hover) => void }) {
+function Bar({
+  segments,
+  empty,
+  onHover,
+  agitates = false,
+}: {
+  segments: Segment[];
+  empty: string;
+  onHover: (h: Hover) => void;
+  /** Hovering a segment of this bar agitates the orb (the overdue bar). */
+  agitates?: boolean;
+}) {
   const total = segments.reduce((sum, s) => sum + s.count, 0);
-  const hover = (text: string) => ({
-    onMouseEnter: (e: React.MouseEvent) => onHover({ text, anchor: e.currentTarget.getBoundingClientRect() }),
-    onMouseLeave: () => onHover(null),
+  const hover = (text: string, agitate = false) => ({
+    onMouseEnter: (e: React.MouseEvent) => {
+      onHover({ text, anchor: e.currentTarget.getBoundingClientRect() });
+      if (agitate) setOrbAgitated(true);
+    },
+    onMouseLeave: () => {
+      onHover(null);
+      if (agitate) setOrbAgitated(false);
+    },
   });
   if (!total) return <span className="pressure-bar-empty" aria-label={empty} {...hover(empty)} />;
   // At least as wide as it is tall, so a bar with one task is a circle and longer ones have round ends.
@@ -48,7 +66,7 @@ function Bar({ segments, empty, onHover }: { segments: Segment[]; empty: string;
         .filter((s) => s.count)
         .map((s) => {
           const text = `${s.label[0].toUpperCase()}${s.label.slice(1)} · ${s.count}`;
-          return <span key={s.key} className={`pressure-seg ${s.key}`} style={{ flexGrow: s.count }} aria-label={text} {...hover(text)} />;
+          return <span key={s.key} className={`pressure-seg ${s.key}`} style={{ flexGrow: s.count }} aria-label={text} {...hover(text, agitates)} />;
         })}
     </span>
   );
@@ -67,7 +85,7 @@ export function PressureBars({ pressure }: { pressure: Pressure }) {
     <>
       <div className="pressure-bars">
         <Bar segments={PRIORITY_SEGMENTS(t)} empty="No open tasks" onHover={setHovered} />
-        <Bar segments={OVERDUE(t)} empty="Nothing overdue" onHover={setHovered} />
+        <Bar segments={OVERDUE(t)} empty="Nothing overdue" onHover={setHovered} agitates />
         <Bar segments={DUE_SOON(t)} empty="Nothing due soon" onHover={setHovered} />
       </div>
       {hovered &&

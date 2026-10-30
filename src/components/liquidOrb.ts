@@ -6,7 +6,7 @@
  */
 import * as THREE from "three";
 import { NOISE } from "./orbNoise";
-import { RIPPLE, type OrbUniforms } from "./orbRipple";
+import { FERRO, RIPPLE, type OrbUniforms } from "./orbEffects";
 
 const VERTEX = /* glsl */ `
 uniform float uTime;
@@ -14,8 +14,10 @@ uniform float uStress;
 varying vec3 vObj;
 varying vec3 vViewPos;
 varying float vDisp;
+varying float vSpike;
 ${NOISE}
 ${RIPPLE}
+${FERRO}
 // Liquid motion: twist the surface around the vertical axis by a slowly varying angle, then
 // warp it, so dents swirl and flow like a disturbed liquid surface instead of bobbing in place.
 float liquid(vec3 p, float t) {
@@ -29,10 +31,13 @@ float liquid(vec3 p, float t) {
 }
 void main() {
   float t = uTime * mix(0.35, 1.1, uStress);
-  float d = liquid(normal, t) * mix(0.08, 0.15, uStress) + 0.12 * ripple(normal);
+  float spike = ferro(normal);
+  float d = liquid(normal, t) * mix(0.08, 0.15, uStress) + 0.12 * ripple(normal) + 0.7 * spike;
   vec3 pos = position + normal * d;
-  vObj = pos;
-  vDisp = d;
+  // Film color comes from the undisplaced surface, so spikes share the color around their base.
+  vObj = position + normal * (d - 0.7 * spike);
+  vDisp = d - 0.7 * spike;
+  vSpike = spike;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = view.xyz;
   gl_Position = projectionMatrix * view;
@@ -45,6 +50,7 @@ uniform float uStress;
 varying vec3 vObj;
 varying vec3 vViewPos;
 varying float vDisp;
+varying float vSpike;
 ${NOISE}
 // A looping pastel ramp, cyan to lavender to pink to gold and back, like soap-film color.
 vec3 pastel(float f) {
@@ -81,14 +87,17 @@ void main() {
   vec3 color = irid * (0.42 + 0.68 * sky) + (key + soft) * vec3(1.0) + fres * vec3(0.75, 0.9, 1.0) * 0.35;
 
   // A little see-through in the middle, glassier at the rim. Premultiplied alpha.
-  float alpha = 0.86 + 0.14 * fres;
+  // Spikes are solid and a shade deeper, so they read against a light page.
+  float spikeAmt = smoothstep(0.0, 0.25, vSpike);
+  color *= mix(1.0, 0.85, spikeAmt);
+  float alpha = mix(0.86 + 0.14 * fres, 1.0, spikeAmt);
   gl_FragColor = vec4(color * alpha, alpha);
 }
 `;
 
 /** Builds the Iridescent orb's mesh. Uniforms uTime and uStress are shared with the caller's loop. */
 export function buildLiquidOrb(uniforms: OrbUniforms) {
-  const geometry = new THREE.IcosahedronGeometry(1, 80);
+  const geometry = new THREE.IcosahedronGeometry(1, 128);
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,

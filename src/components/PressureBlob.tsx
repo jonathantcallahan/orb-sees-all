@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { orbMood, type Pressure } from "../tasks";
 import { PressureBars } from "./PressureBars";
 import { NOISE } from "./orbNoise";
-import { NO_RIPPLE, RIPPLE, type OrbUniforms } from "./orbRipple";
-import { TASK_DONE_EVENT } from "../orbEvents";
+import { FERRO, NO_RIPPLE, RIPPLE, type OrbUniforms } from "./orbEffects";
+import { ORB_AGITATE_EVENT, TASK_DONE_EVENT } from "../orbEvents";
 import { buildGlassOrb } from "./glassOrb";
 import { buildLiquidOrb } from "./liquidOrb";
 
@@ -15,8 +15,10 @@ uniform float uStress;
 varying vec3 vPos;
 varying vec3 vViewPos;
 varying float vDisp;
+varying float vSpike;
 ${NOISE}
 ${RIPPLE}
+${FERRO}
 // One wave train: a sine along direction d, its phase bent by noise so crests wander, and its
 // height scaled by a slow noise envelope (seeded) so it swells in some places and fades in others.
 float wave(vec3 n, vec3 d, float freq, float phase, float seed) {
@@ -47,9 +49,13 @@ void main() {
   float sharp = uStress * uStress;
   float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, sharp) + flow * 1.3));
   float spikes = pow(ridge, mix(2.0, 6.0, sharp));
-  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp + 0.14 * ripple(normal);
+  float spike = ferro(normal);
+  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp + 0.14 * ripple(normal) + 0.75 * spike;
   vec3 pos = position + normal * disp;
-  vPos = pos;
+  // Colored by where the point sits on the undisplaced surface, so a ferrofluid spike takes the
+  // color of the surface it grows from.
+  vPos = position + normal * (disp - 0.75 * spike);
+  vSpike = spike;
   vDisp = disp;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = view.xyz;
@@ -63,6 +69,7 @@ uniform float uStress;
 varying vec3 vPos;
 varying vec3 vViewPos;
 varying float vDisp;
+varying float vSpike;
 ${NOISE}
 void main() {
   // Two layers of noise, one warping the other, give the swirling bands.
@@ -88,7 +95,11 @@ void main() {
   // When calm the orb turns ethereal: a soft blue-white halo, a faint thin-film
   // shimmer that shifts with the viewing angle, and a translucent core. All of
   // it fades out as stress rises.
-  float calm = 1.0 - smoothstep(0.0, 0.5, uStress);
+  // Ferrofluid spikes are solid and a shade deeper than the surface: no halo or translucency on
+  // them (their sides face sideways, so they'd read as all rim), so they hold up on a light page.
+  float spikeAmt = smoothstep(0.0, 0.25, vSpike);
+  lit *= mix(1.0, 0.82, spikeAmt);
+  float calm = (1.0 - smoothstep(0.0, 0.5, uStress)) * (1.0 - spikeAmt);
   vec3 shimmer = 0.5 + 0.5 * cos(6.2831 * (rim * 1.5 + swirl * 0.3 + vec3(0.55, 0.65, 0.8)));
   lit = mix(lit, mix(lit, shimmer, 0.18 * rim), calm);
   lit += calm * rim * vec3(0.55, 0.75, 1.0) * 0.55;
@@ -118,7 +129,7 @@ function buildClassicOrb(uniforms: OrbUniforms) {
     blendSrc: THREE.OneFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
   });
-  const geometry = new THREE.IcosahedronGeometry(1, 64);
+  const geometry = new THREE.IcosahedronGeometry(1, 128);
   const group = new THREE.Group();
   group.add(new THREE.Mesh(geometry, material));
   return {
@@ -157,6 +168,9 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       uStress: { value: target.current },
       uRippleAge: { value: NO_RIPPLE },
       uRippleOrigin: { value: new THREE.Vector3(0, 0, 1) },
+      uSpike: { value: 0 },
+      uSpikeDir: { value: new THREE.Vector3(0, 0, 1) },
+      uClock: { value: 0 },
     };
     const orb =
       look === "glass"
@@ -173,12 +187,16 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
     facing.add(blob);
     scene.add(facing);
     const toward = { x: 0, y: 0 };
+    // Where the cursor is relative to the orb's center, in orb-box units, wherever it is: the spikes aim at it.
+    const cursor = { x: 0, y: 1 };
     const onPointer = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
       const size = Math.max(r.width, r.height) / 2;
       // -1 to 1 across the orb's box, from its center.
       const dx = (e.clientX - (r.left + r.width / 2)) / size;
       const dy = (e.clientY - (r.top + r.height / 2)) / size;
+      cursor.x = dx;
+      cursor.y = dy;
       // Full attention inside the box, fading out by twice its size.
       const near = Math.max(0, Math.min(1, 2 - Math.hypot(dx, dy)));
       toward.x = Math.max(-1, Math.min(1, dx)) * near;
@@ -197,6 +215,14 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       uniforms.uRippleAge.value = 0;
     };
     window.addEventListener(TASK_DONE_EVENT, onTaskDone);
+    // Hovering an overdue task: ferrofluid spikes grow toward the cursor and the orb chitters.
+    let agitated = false;
+    const onAgitate = (e: Event) => {
+      agitated = (e as CustomEvent<boolean>).detail;
+    };
+    window.addEventListener(ORB_AGITATE_EVENT, onAgitate);
+    const aim = new THREE.Vector3();
+    const toOrb = new THREE.Quaternion();
     document.addEventListener("pointerleave", onLeave);
     // The molten Glass orb turns more slowly, so its oozing reads as weight rather than spin.
     const spinScale = look === "classic" ? 1 : 0.6;
@@ -221,6 +247,19 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       uniforms.uStress.value = stress;
       uniforms.uTime.value += dt * motion;
       if (uniforms.uRippleAge.value < NO_RIPPLE) uniforms.uRippleAge.value += dt;
+      uniforms.uClock.value += dt;
+      // Spikes surge in quickly and sink back a little slower.
+      const spike = uniforms.uSpike.value;
+      uniforms.uSpike.value = spike + ((agitated ? 1 : 0) - spike) * Math.min(dt * (agitated ? 5 : 2.5), 1);
+      if (uniforms.uSpike.value > 0.001) {
+        // Aim at the cursor: its direction from the orb's center in view space, then into the orb's own space.
+        aim.set(cursor.x, -cursor.y, 0.6).normalize();
+        blob.getWorldQuaternion(toOrb).invert();
+        uniforms.uSpikeDir.value.copy(aim.applyQuaternion(toOrb));
+      }
+      // A faint tremor while agitated.
+      const shake = 0.012 * uniforms.uSpike.value * motion;
+      facing.position.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0);
       const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress) * motion * spinScale;
       blob.rotation.y += dt * spin;
       blob.rotation.x += dt * spin * 0.35;
@@ -237,6 +276,7 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener(TASK_DONE_EVENT, onTaskDone);
+      window.removeEventListener(ORB_AGITATE_EVENT, onAgitate);
       document.removeEventListener("pointerleave", onLeave);
       observer.disconnect();
       orb.dispose();

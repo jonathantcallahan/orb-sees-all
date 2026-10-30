@@ -15,7 +15,7 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { NOISE } from "./orbNoise";
-import { RIPPLE, type OrbUniforms } from "./orbRipple";
+import { FERRO, RIPPLE, type OrbUniforms } from "./orbEffects";
 
 /** Large, smooth lobes from domain-warped low-frequency noise: the molten shape. */
 const BLOB = /* glsl */ `
@@ -59,12 +59,15 @@ varying vec3 vObj;
 varying vec3 vViewPos;
 ${NOISE}
 ${RIPPLE}
+${FERRO}
 ${BLOB}
 void main() {
   float t = uTime * mix(0.32, 1.0, uStress);
   // Smaller lobes than the shell's, so the core stays well inside it and the glass's outline reads.
-  vec3 pos = position + normal * (blob(normal, t) * mix(0.22, 0.3, uStress) + 0.1 * ripple(normal));
-  vObj = pos;
+  float spike = ferro(normal);
+  vec3 pos = position + normal * (blob(normal, t) * mix(0.22, 0.3, uStress) + 0.1 * ripple(normal) + 0.35 * spike);
+  // Colored by the undisplaced surface, so spikes match the metal around their base.
+  vObj = pos - normal * 0.35 * spike;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = view.xyz;
   gl_Position = projectionMatrix * view;
@@ -112,12 +115,13 @@ uniform float uRadius;
 uniform float uSeed;
 ${NOISE}
 ${RIPPLE}
+${FERRO}
 ${BLOB}
 float shellRadius(vec3 n, float t) {
   float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
   float drift = snoise(n * 0.75 + vec3(uSeed) + t * 0.22);
   float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
-  return uRadius + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n);
+  return uRadius + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.6 * ferro(n);
 }
 vec3 shellPoint(vec3 n, float t) {
   n = normalize(n);
@@ -131,8 +135,8 @@ vec3 shellN = normalize(normal);
 vec3 shellA = normalize(cross(shellN, abs(shellN.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
 vec3 shellB = cross(shellN, shellA);
 vec3 shellPos = shellPoint(shellN, shellT);
-vec3 shellDu = shellPoint(shellN + shellA * 0.01, shellT) - shellPos;
-vec3 shellDv = shellPoint(shellN + shellB * 0.01, shellT) - shellPos;
+vec3 shellDu = shellPoint(shellN + shellA * 0.004, shellT) - shellPos;
+vec3 shellDv = shellPoint(shellN + shellB * 0.004, shellT) - shellPos;
 vec3 objectNormal = normalize(cross(shellDu, shellDv));
 if (dot(objectNormal, shellN) < 0.0) objectNormal = -objectNormal;
 #ifdef USE_TANGENT
@@ -215,7 +219,7 @@ export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRender
   disposables.push(coreGeometry, coreMaterial);
 
   // One glass shell over the core. Transmission renders after opaque objects, so it sees the core.
-  const shellGeometry = new THREE.IcosahedronGeometry(1, 72);
+  const shellGeometry = new THREE.IcosahedronGeometry(1, 128);
   const shell = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, transmission: 1, ...SHELLS[variant] });
   shell.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
@@ -223,6 +227,9 @@ export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRender
       uStress: uniforms.uStress,
       uRippleAge: uniforms.uRippleAge,
       uRippleOrigin: uniforms.uRippleOrigin,
+      uSpike: uniforms.uSpike,
+      uSpikeDir: uniforms.uSpikeDir,
+      uClock: uniforms.uClock,
       uRadius: { value: 1.1 },
       uSeed: { value: 1.7 },
     });

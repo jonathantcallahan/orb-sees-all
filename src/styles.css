@@ -675,7 +675,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure-bar-empty { width: 6px; height: 6px; margin: 5px 0; border-radius: 50%; background: color-mix(in srgb, var(--muted) 40%, var(--bg)); }
 /* Solid grays, darkest for the most urgent, stepping lighter toward low priority. */
 .pressure-seg.blocking { --seg: color-mix(in srgb, var(--text) 85%, var(--bg)); }
-.pressure-seg.critical, .pressure-seg.overdue { --seg: color-mix(in srgb, var(--text) 65%, var(--bg)); }
+.pressure-seg.critical { --seg: color-mix(in srgb, var(--text) 65%, var(--bg)); }
+/* Overdue is the one that should catch the eye. */
+.pressure-seg.overdue { --seg: var(--red); }
 .pressure-seg.high, .pressure-seg.due-soon { --seg: color-mix(in srgb, var(--text) 45%, var(--bg)); }
 .pressure-seg.medium { --seg: color-mix(in srgb, var(--text) 28%, var(--bg)); }
 .pressure-seg.low { --seg: color-mix(in srgb, var(--text) 16%, var(--bg)); }
