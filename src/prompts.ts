@@ -247,6 +247,11 @@ export function reminderText(owners: { name: string }[], what: string, link: str
   return `${mentions} quick nudge on this one: *${what}*. Is there anything I can do to help unblock it?${link ? `\n${link}` : ""}`;
 }
 
+export function updateRequestText(owners: { name: string }[], what: string, link: string | null | undefined): string {
+  const mentions = owners.map((o) => `@${o.name}`).join(" ");
+  return `${mentions} quick check-in on *${what}*: how is it going, and is there anything you need from me?${link ? `\n${link}` : ""}`;
+}
+
 /** Turns the composer's @Name mentions into Slack mentions (<@U123>) before posting. */
 export function toSlackMentions(text: string, owners: { name: string; slack_user_id?: string | null }[]): string {
   return owners.reduce((t, o) => (o.slack_user_id ? t.split(`@${o.name}`).join(`<@${o.slack_user_id}>`) : t), text);

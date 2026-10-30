@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
-import { reminderText, toSlackMentions } from "../prompts";
+import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { COLORED_ICONS } from "../linkIcons";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
-import { ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
+import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   blocked: "Blocked",
@@ -125,11 +125,14 @@ function RemindAction({
   channelId,
   reminder,
   onSent,
+  ask = "reminder",
 }: {
   item: Blocker;
   channelId: string;
   reminder: Reminder | undefined;
   onSent: () => void;
+  /** A nudge on a blocker, or a check-in on active work. Both post to the channel, tagging the owners. */
+  ask?: "reminder" | "update";
 }) {
   const others = item.owners.filter((o) => !o.is_me && o.slack_user_id);
   const [text, setText] = useState<string | null>(null);
@@ -154,14 +157,14 @@ function RemindAction({
         className="link-button small"
         onClick={() => {
           setError(null);
-          setText(reminderText(others, item.what, item.link));
+          setText((ask === "update" ? updateRequestText : reminderText)(others, item.what, item.link));
         }}
       >
-        {reminder ? "Send another reminder" : "Send reminder"}
+        {ask === "update" ? (reminder ? "Ask again" : "Ask for update") : reminder ? "Send another reminder" : "Send reminder"}
       </button>
       {text !== null && (
         <ComposeModal
-          heading={`Remind ${others.map((o) => o.name).join(", ")}`}
+          heading={`${ask === "update" ? "Ask for an update from" : "Remind"} ${others.map((o) => o.name).join(", ")}`}
           note="Posts to the project's Slack channel, tagging them."
           text={text}
           status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
@@ -181,7 +184,7 @@ function RemindAction({
 function TabClose() {
   return (
     <span className="tab-close" aria-label="Close" title="Close">
-      ×
+      <CloseIcon />
     </span>
   );
 }
@@ -200,7 +203,7 @@ function WorkItem({
 }: {
   item: Blocker;
   kind: "blocker" | "active";
-  /** For blockers: the channel to post a reminder in, and any reminder already sent. */
+  /** The channel to post a reminder (blockers) or update request (active work) in, and any already sent. */
   remind?: { channelId: string; reminder: Reminder | undefined; onSent: () => void };
   /** For blockers: run a double check, and its latest result. */
   check?: {
@@ -222,7 +225,7 @@ function WorkItem({
         {item.since && <span className="age">{age(item.since)}</span>}
         {remind?.reminder && (
           <ExternalLink href={remind.reminder.link} className="timestamp reminded" title={new Date(remind.reminder.at).toLocaleString()}>
-            Reminded {ago(remind.reminder.at)}
+            {kind === "active" ? "Asked" : "Reminded"} {ago(remind.reminder.at)}
           </ExternalLink>
         )}
         {(check || remind) && (
@@ -238,7 +241,7 @@ function WorkItem({
                 }}
               />
             )}
-            {remind && <RemindAction item={item} {...remind} />}
+            {remind && <RemindAction item={item} ask={kind === "active" ? "update" : "reminder"} {...remind} />}
           </span>
         )}
       </div>
@@ -374,7 +377,12 @@ export function ProjectCard({
           {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">
               {s.active.map((a) => (
-                <WorkItem key={a.id} item={a} kind="active" />
+                <WorkItem
+                  key={a.id}
+                  item={a}
+                  kind="active"
+                  remind={{ channelId: project.channel_id, reminder: reminders[a.id], onSent: onChange }}
+                />
               ))}
             </ul>
           )}

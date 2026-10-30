@@ -5,7 +5,7 @@ import type { ManualAssessment, Priority } from "../schema";
 import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
-import { RefreshButton, Updated } from "./common";
+import { CloseIcon, RefreshButton, Updated } from "./common";
 import { setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { Inbox } from "./Inbox";
@@ -277,7 +277,7 @@ export function TaskColumn({
               Tasks for <strong>{projectName(filterProject)}</strong>
             </span>
             <button className="icon-button" onClick={onClearFilter} title="Show all tasks" aria-label="Show all tasks">
-              ×
+              <CloseIcon />
             </button>
           </div>
           {todayGroup}

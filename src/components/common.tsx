@@ -100,7 +100,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
               onChange();
             }}
           >
-            ×
+            <CloseIcon />
           </button>
         </li>
       ))}
@@ -197,5 +197,14 @@ export function ComposeModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** A close mark drawn as two strokes, so it centers exactly (the × character sits low in most fonts). */
+export function CloseIcon({ size = 10 }: { size?: number }) {
+  return (
+    <svg className="close-icon" width={size} height={size} viewBox="0 0 10 10" aria-hidden>
+      <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
   );
 }

@@ -8,7 +8,7 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
-import { ExternalLink, Spinner } from "./common";
+import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -60,7 +60,7 @@ function PlanModal({ title, stored, actions, onClose }: { title: string; stored:
         <header className="column-header">
           <h2>{title}</h2>
           <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
-            ×
+            <CloseIcon />
           </button>
         </header>
         <p className="plan-approach">{plan.approach}</p>

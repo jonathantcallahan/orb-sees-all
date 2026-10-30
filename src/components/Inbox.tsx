@@ -6,7 +6,7 @@ import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen } from "../scheduler";
-import { ComposeModal, ExternalLink, Spinner } from "./common";
+import { CloseIcon, ComposeModal, ExternalLink, Spinner } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
 
@@ -141,7 +141,7 @@ export function Inbox({
                   onChange();
                 }}
               >
-                ×
+                <CloseIcon />
               </button>
             </div>
             {draft && !drafting && <Draft reply={r} text={draft.text} onRegenerate={draftIt} onSent={onChange} />}
