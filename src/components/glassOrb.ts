@@ -22,15 +22,24 @@ float blob(vec3 p, float t) {
  * show the core's colors through its curves.
  */
 const CORE_COLOR = /* glsl */ `
+// The cool ramp the core moves along with mood: cyan, blue, violet, cool magenta.
+vec3 coolRamp(float x) {
+  vec3 cyan = vec3(0.22, 0.8, 1.0);
+  vec3 blue = vec3(0.12, 0.3, 0.92);
+  vec3 violet = vec3(0.46, 0.32, 0.88);
+  vec3 magenta = vec3(0.86, 0.26, 0.7);
+  x = clamp(x, 0.0, 1.0) * 3.0;
+  if (x < 1.0) return mix(cyan, blue, x);
+  if (x < 2.0) return mix(blue, violet, x - 1.0);
+  return mix(violet, magenta, x - 2.0);
+}
 vec3 coreColor(vec3 p, float time, float stress) {
   float g = dot(normalize(p), normalize(vec3(0.55, 0.75, 0.2))) * 0.5 + 0.5;
   g += 0.16 * snoise(p * 1.4 + time * 0.12);
-  // Cool tones throughout: cyan and blue, then violet, then a cool magenta. Calm keeps the
-  // magenta to a small accent; stress spreads it.
-  float edge = mix(0.86, 0.42, stress);
-  vec3 color = mix(vec3(0.22, 0.8, 1.0), vec3(0.12, 0.3, 0.92), smoothstep(0.15, 0.5, g));
-  color = mix(color, vec3(0.46, 0.32, 0.88), smoothstep(edge - 0.22, edge, g));
-  return mix(color, vec3(0.86, 0.26, 0.7), smoothstep(edge, edge + 0.22, g));
+  // Each mood shows a narrow slice of the ramp (about a third of a color step either side),
+  // and stress moves the slice: cyan-blue when calm, blue-violet when restless, violet-magenta
+  // when overloaded.
+  return coolRamp(mix(0.12, 0.88, stress) + (g - 0.5) * 0.36);
 }
 `;
 
