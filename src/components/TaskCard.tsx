@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { claudeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
+import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, ProjectPriority } from "../schema";
@@ -526,6 +526,8 @@ export function TaskCard({
   const planStatus = useJobStatus(`plan:${task.id}`);
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
   const progress = useSessionProgress(task.id, sessionLink);
+  /** A Claude session has picked this task up; the card follows it from now on. */
+  const linked = !!sessionLink?.sessionId;
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
@@ -536,6 +538,10 @@ export function TaskCard({
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
   const openInClaude = async () => {
+    if (linked) {
+      openUrl(resumeSessionUrl(sessionLink!.sessionId!));
+      return;
+    }
     if (!plan) return;
     const prompt = sessionPrompt(
       { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
@@ -569,7 +575,7 @@ export function TaskCard({
   const planActions =
     outlineSteps.length > 0 || planning || (assessment && description) ? (
       <div className="plan-actions">
-        {hasClaudeSteps && assessment && (
+        {hasClaudeSteps && assessment && !linked && (
           <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours">
             Approve & start
           </button>
@@ -582,7 +588,7 @@ export function TaskCard({
           </>
         )}
         {/* No steps yet (older assessments didn't list them): plan from here, as on every assessment. */}
-        {outlineSteps.length === 0 && !planning && (
+        {outlineSteps.length === 0 && !planning && !linked && (
           <button className="cta-ghost" onClick={() => runPlan()} title="Have Claude plan the steps, marking which it can do">
             Plan steps
           </button>
@@ -596,18 +602,21 @@ export function TaskCard({
       </div>
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */
+  /** Saves an edited description. Before work starts, Claude assesses and plans again from it; once a session is linked, the plan stays as the session has it. */
   const saveDescription = async (next: string | null) => {
     setEditing(false);
     if (manual) {
       await updateManualTask(task.id, { title: task.title, description: next });
-      // The old assessment was based on the old text; have Claude look again.
-      await clearAssessment(task.id);
-      assessPendingTasks().catch(() => {});
+      if (!linked) {
+        // The old assessment was based on the old text; have Claude look again.
+        await clearAssessment(task.id);
+        assessPendingTasks().catch(() => {});
+      }
     } else {
       await saveDescriptionOverride(task.id, next);
     }
     onChange();
-    if (next) runPlan(next);
+    if (next && !linked) runPlan(next);
   };
   const source =
     task.source === "manual"
@@ -778,6 +787,10 @@ export function TaskCard({
           <span className="muted small">
             <span className="spin">↻</span> {planStatus ?? "Researching a plan"}…
           </span>
+        ) : linked ? (
+          <button className="link-button small" onClick={openInClaude} title="Open the Claude Code session working on this task">
+            Open in Claude
+          </button>
         ) : plan ? (
           <>
             <button className="link-button small" onClick={openInClaude} title="Open a new Claude Code session with this task and its plan filled in">
@@ -793,7 +806,7 @@ export function TaskCard({
             Add a description to plan with Claude
           </button>
         )}
-        {checkStatus ? (
+        {linked ? null : checkStatus ? (
           <span className="muted small checking" title={checkStatus}>
             <span className="spin">✦</span> {checkStatus}…
           </span>
@@ -815,7 +828,7 @@ export function TaskCard({
           onClose={() => setShowPlan(false)}
           actions={
             <>
-              {hasClaudeSteps && assessment && (
+              {hasClaudeSteps && assessment && !linked && (
                 <button className="cta-primary" onClick={() => { setShowPlan(false); approveAndStart(); }}>
                   Approve & start
                 </button>

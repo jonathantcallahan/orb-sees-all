@@ -4,7 +4,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("./db", () => ({}));
 
 const { parseProgress } = await import("./sessions");
-const { startPrompt, sessionMarker } = await import("./openInClaude");
+const { startPrompt, sessionMarker, resumeSessionUrl } = await import("./openInClaude");
 
 describe("session progress", () => {
   it("keeps each step's latest report", () => {
@@ -35,5 +35,9 @@ describe("session progress", () => {
     const p = startPrompt({ title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read CPS-1", by: "claude" }]);
     expect(p).not.toContain("Orb task:");
     expect(p).not.toContain("[orb]");
+  });
+
+  it("reopens a linked session by id", () => {
+    expect(resumeSessionUrl("1f2e-3d4c")).toBe("claude://resume?session=1f2e-3d4c");
   });
 });

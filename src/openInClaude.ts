@@ -105,3 +105,12 @@ export function claudeSessionUrl(prompt: string, folder?: string | null): string
   // URLSearchParams encodes spaces as "+"; use %20 so the prompt reads back exactly.
   return `claude://code/new?${params.toString().replace(/\+/g, "%20")}`;
 }
+
+/**
+ * A link that reopens an existing Claude Code session in Claude Desktop, by the
+ * session id in its transcript's file name. Desktop may open it as a new tab
+ * continuing the same conversation.
+ */
+export function resumeSessionUrl(sessionId: string): string {
+  return `claude://resume?session=${encodeURIComponent(sessionId)}`;
+}

@@ -54,6 +54,8 @@ const POLL_MS = 10_000;
 
 /** Links `taskId` to the session it opens next. Called just before opening it. */
 export async function linkSession(taskId: string) {
+  // Once a session has picked the task up, the link is permanent.
+  if ((await db.getSessionLinks())[taskId]?.sessionId) return;
   // A little slack for clocks and the time the deep link takes to open.
   await db.saveSessionLink(taskId, { startedAt: Date.now() - 30_000 });
 }
