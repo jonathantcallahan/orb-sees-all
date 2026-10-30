@@ -125,7 +125,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 
 .project .reason { margin: 8px 0 0; }
 
-.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--grey-bg); }
+.pill { font-size: 11px; padding: 1px 7px; border-radius: 6px; white-space: nowrap; background: var(--grey-bg); }
 .pill.blocked { color: var(--red); background: var(--red-bg); }
 .pill.at_risk { color: var(--amber); background: var(--amber-bg); }
 .pill.on_track { color: var(--green); background: var(--green-bg); }
