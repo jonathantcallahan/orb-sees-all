@@ -380,14 +380,14 @@ describe("task filters", () => {
   });
 
   it("requires every filter that's set", () => {
-    const f: TaskFilter = { statuses: ["in_progress"], priorities: ["critical"], recommendedOnly: false };
+    const f: TaskFilter = { ...NO_FILTER, statuses: ["in_progress"], priorities: ["critical"], recommendedOnly: false };
     expect(matchesFilter(t("in_progress", "critical"), f)).toBe(true);
     expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
     expect(matchesFilter(t("waiting", "critical"), f)).toBe(false);
   });
 
   it("matches any of several picks within a filter", () => {
-    const f: TaskFilter = { statuses: ["todo", "waiting"], priorities: ["critical", "high"], recommendedOnly: false };
+    const f: TaskFilter = { ...NO_FILTER, statuses: ["todo", "waiting"], priorities: ["critical", "high"], recommendedOnly: false };
     expect(matchesFilter(t("waiting", "high"), f)).toBe(true);
     expect(matchesFilter(t("todo", "critical"), f)).toBe(true);
     expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
@@ -397,6 +397,12 @@ describe("task filters", () => {
   it("filters on blocking like any other priority", () => {
     expect(matchesFilter({ status: "todo", priority: "blocking" }, { ...NO_FILTER, priorities: ["blocking"] })).toBe(true);
     expect(matchesFilter({ status: "todo", priority: "critical" }, { ...NO_FILTER, priorities: ["blocking"] })).toBe(false);
+  });
+
+  it("filters by where a task came from", () => {
+    const f: TaskFilter = { ...NO_FILTER, sources: ["project", "own"] };
+    expect(matchesFilter({ ...t("todo", "low"), source: "project" }, f)).toBe(true);
+    expect(matchesFilter({ ...t("todo", "low"), source: "request" }, f)).toBe(false);
   });
 
   it("treats unassessed tasks as unrated, and can require recommended", () => {

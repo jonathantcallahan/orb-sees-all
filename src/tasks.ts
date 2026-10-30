@@ -163,6 +163,9 @@ export function orbMood(p: Pressure): OrbMood {
 /** Claude's priority levels plus "blocking", which outranks critical and is set by the app, never by Claude. */
 export type EffectivePriority = Priority | "blocking";
 
+/** Sort order for priorities, most urgent first; unrated last. */
+export const PRIORITY_RANK: Record<EffectivePriority, number> = { blocking: 0, critical: 1, high: 2, medium: 3, low: 4 };
+
 /**
  * A task's effective priority: a task that's one of the user's own blockers is
  * "blocking"; anything else in a P0 project is critical; otherwise Claude's
@@ -186,7 +189,12 @@ export function taskPriority(
 
 export type PriorityFilter = EffectivePriority | "unrated";
 
+/** Where a task came from: a project channel, a Slack or email request, or the user's own list. */
+export type TaskSource = "project" | "request" | "own";
+
 export interface TaskFilter {
+  /** Empty means any source. */
+  sources: TaskSource[];
   /** Empty means any status. */
   statuses: TaskStatus[];
   /** Empty means any priority. */
@@ -194,17 +202,18 @@ export interface TaskFilter {
   recommendedOnly: boolean;
 }
 
-export const NO_FILTER: TaskFilter = { statuses: [], priorities: [], recommendedOnly: false };
+export const NO_FILTER: TaskFilter = { sources: [], statuses: [], priorities: [], recommendedOnly: false };
 
 export function isFiltering(f: TaskFilter): boolean {
-  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
+  return f.sources.length > 0 || f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
 }
 
 /** Whether a task passes every filter that's set. */
 export function matchesFilter(
-  t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean },
+  t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean; source?: TaskSource },
   f: TaskFilter,
 ): boolean {
+  if (f.sources.length && (!t.source || !f.sources.includes(t.source))) return false;
   if (f.statuses.length && !f.statuses.includes(t.status)) return false;
   if (f.priorities.length && !f.priorities.includes(t.priority ?? "unrated")) return false;
   if (f.recommendedOnly && !t.recommended) return false;

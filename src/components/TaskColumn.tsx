@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment, Priority } from "../schema";
-import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState } from "../tasks";
+import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { CloseIcon, RefreshButton, Updated } from "./common";
@@ -127,9 +127,21 @@ export function TaskColumn({
       t.blocking,
       priorityOverrides[t.id],
     );
-  const filters = <TaskFilters filter={filter} onChange={setFilter} />;
-  const keep = <T extends CardTask>(list: T[]) =>
-    filtering ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended }, filter)) : list;
+  const filters = <TaskFilters filter={filter} onChange={setFilter} showSource={!filterProject} />;
+  const sourceOf = (t: CardTask): TaskSource => (t.source === "manual" ? "own" : t.source === "project" ? "project" : "request");
+  /** Applies the filters; in a single project's view, where everything comes from that project, the source filter doesn't apply. */
+  const keep = <T extends CardTask>(list: T[], f: TaskFilter = filter) =>
+    isFiltering(f)
+      ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended, source: sourceOf(t) }, f))
+      : list;
+  /** One list from every source: most urgent first, then in each source's own order. */
+  const byPriority = <T extends CardTask>(list: T[]) => {
+    const rank = (t: T) => {
+      const p = priorityOf(t);
+      return p ? PRIORITY_RANK[p] : 5;
+    };
+    return list.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map(({ t }) => t);
+  };
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const today = localDate(new Date());
 
@@ -282,24 +294,25 @@ export function TaskColumn({
           </div>
           {todayGroup}
           <Group
-            title="Project"
-            tasks={projectTasks.rest}
+            title="All tasks"
+            tasks={keep(byPriority([...projectTasks.rest, ...mine.rest]), { ...filter, sources: [] })}
             empty={filterProject.snapshot ? "Nothing on you for this project." : "Refresh this project to find your tasks."}
+            filtered={isFiltering({ ...filter, sources: [] })}
+            controls={filters}
             {...shared}
           />
-          {mine.rest.length > 0 && <Group title="All tasks" tasks={keep(mine.rest)} empty="" filtered={filtering} controls={filters} {...shared} />}
         </>
       ) : (
         <>
           {todayGroup}
-          <Group title="All tasks" tasks={keep(mine.rest)} empty="No tasks of your own." filtered={filtering} controls={filters} {...shared} />
           <Group
-            title="Projects"
-            tasks={projectTasks.rest}
-            empty="No project tasks on you. Refresh projects to find them."
+            title="All tasks"
+            tasks={keep(byPriority([...projectTasks.rest, ...mine.rest, ...inbox.rest]))}
+            empty="No tasks yet. Add one above, or refresh to find them in your projects, Slack and email."
+            filtered={filtering}
+            controls={filters}
             {...shared}
           />
-          <Group title="Requests" tasks={inbox.rest} empty="No requests from Slack or email." {...shared} />
         </>
       )}
     </section>

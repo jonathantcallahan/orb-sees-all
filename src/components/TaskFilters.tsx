@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
-import { NO_FILTER, NO_PROJECT_FILTER, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskStatus } from "../tasks";
+import { NO_FILTER, NO_PROJECT_FILTER, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskSource, type TaskStatus } from "../tasks";
+
+const SOURCES: [TaskSource, string][] = [
+  ["project", "Projects"],
+  ["request", "Requests"],
+  ["own", "Ungrouped"],
+];
 
 const STATUSES: [TaskStatus, string][] = [
   ["todo", "To do"],
@@ -143,10 +149,13 @@ export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; on
   );
 }
 
-/** Status, priority and Recommended filters for All tasks. */
-export function TaskFilters({ filter, onChange }: { filter: TaskFilter; onChange: (f: TaskFilter) => void }) {
+/** Source, status, priority and Recommended filters for All tasks. */
+export function TaskFilters({ filter, onChange, showSource = true }: { filter: TaskFilter; onChange: (f: TaskFilter) => void; showSource?: boolean }) {
   return (
     <div className="task-filters">
+      {showSource && (
+        <MultiFilter label="Filter by source" anyLabel="Any source" values={filter.sources} options={SOURCES} onChange={(sources) => onChange({ ...filter, sources })} />
+      )}
       <MultiFilter label="Filter by status" anyLabel="Any status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
       <MultiFilter label="Filter by priority" anyLabel="Any priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
