@@ -66,14 +66,17 @@ void main() {
   // Noise bends each one's phase and a slow noise field varies their height, so
   // the surface rolls like a choppy sea rather than wobbling uniformly.
   vec3 n = normal;
+  // Broad, gentle swells: low frequencies, light phase noise, unhurried.
   float swell =
-      0.5 * sin(dot(n, vec3(0.80, 0.30, 0.52)) * 5.0 + flow * 2.0 + 2.0 * snoise(n * 1.3 + flow * 0.5))
-    + 0.3 * sin(dot(n, vec3(-0.40, 0.88, 0.25)) * 7.0 - flow * 1.6 + 2.0 * snoise(n * 1.7 - flow * 0.4))
-    + 0.2 * sin(dot(n, vec3(0.20, -0.50, 0.84)) * 9.0 + flow * 2.6 + 2.0 * snoise(n * 2.3 + flow * 0.3));
-  swell *= 0.55 + 0.45 * snoise(n * 0.9 + flow * 0.2);
-  float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, uStress) + flow * 1.3));
-  float spikes = pow(ridge, mix(2.0, 6.0, uStress));
-  float disp = mix(0.13 * swell, 0.12 * swell + 0.55 * spikes, uStress);
+      0.5 * sin(dot(n, vec3(0.80, 0.30, 0.52)) * 4.0 + flow * 1.5 + 1.2 * snoise(n * 1.3 + flow * 0.4))
+    + 0.3 * sin(dot(n, vec3(-0.40, 0.88, 0.25)) * 5.5 - flow * 1.2 + 1.2 * snoise(n * 1.7 - flow * 0.3))
+    + 0.2 * sin(dot(n, vec3(0.20, -0.50, 0.84)) * 7.0 + flow * 1.9 + 1.2 * snoise(n * 2.3 + flow * 0.25));
+  swell *= 0.6 + 0.4 * snoise(n * 0.9 + flow * 0.15);
+  // Spikes grow with the square of stress: faint until the orb is genuinely overloaded.
+  float sharp = uStress * uStress;
+  float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, sharp) + flow * 1.3));
+  float spikes = pow(ridge, mix(2.0, 6.0, sharp));
+  float disp = mix(0.08, 0.07, uStress) * swell + 0.55 * spikes * sharp;
   vec3 pos = position + normal * disp;
   vPos = pos;
   vDisp = disp;
