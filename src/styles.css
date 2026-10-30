@@ -340,7 +340,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Shared by everything that opens and closes in place (task cards, Reveal). */
 :root { --open-ease: cubic-bezier(0.16, 1, 0.3, 1); --close-ease: cubic-bezier(0.4, 0, 1, 1); }
 .task-card.collapsed { cursor: pointer; }
-.task-card.collapsed.done { opacity: 0.6; transition: opacity 0.2s ease; }
+/* Collapsed cards sit a little tighter. The padding eases with the body's height, so the title row
+   glides to its new place instead of jumping. */
+.task-card { transition: padding 280ms var(--open-ease); }
+.task-card.collapsed { padding-top: 8px; padding-bottom: 8px; transition: padding 190ms var(--close-ease); }
+.task-card.collapsed.done { opacity: 0.6; transition: opacity 0.2s ease, padding 190ms var(--close-ease); }
 .task-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 280ms var(--open-ease); }
 .task-card.collapsed .task-body { grid-template-rows: 0fr; transition: grid-template-rows 190ms var(--close-ease); }
 .task-body-inner {
@@ -361,7 +365,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-toggle:active { transform: scale(0.88); }
 /* Reduced motion: no sliding or growing, just a quick fade. */
 @media (prefers-reduced-motion: reduce) {
-  .task-body, .task-card.collapsed .task-body, .task-toggle .disclosure, .task-card.collapsed .task-toggle .disclosure { transition: none; }
+  .task-body, .task-card.collapsed .task-body, .task-toggle .disclosure, .task-card.collapsed .task-toggle .disclosure, .task-card, .task-card.collapsed { transition: none; }
   .task-body-inner, .task-card.collapsed .task-body-inner { transform: none; transition: opacity 120ms linear; }
 }
 .badge.priority.medium { color: var(--muted); }

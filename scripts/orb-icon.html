@@ -35,9 +35,11 @@
         uClock: { value: 14 },
         uWorking: { value: 0 },
       };
-      const orb = buildGlassOrb(uniforms, renderer, "clear");
+      // ?v=glass renders Roth (frosted) instead of Demian (clear).
+      const orb = buildGlassOrb(uniforms, renderer, q.get("v") === "glass" ? "frosted" : "clear");
       if (orb.environment) scene.environment = orb.environment;
-      orb.group.rotation.set(0.35, 0.6, 0);
+      // ?rx= and ?ry= turn the orb, to pick the side it shows.
+      orb.group.rotation.set(Number(q.get("rx") ?? 0.35), Number(q.get("ry") ?? 0.6), 0);
       scene.add(orb.group);
       // A couple of frames so the transmission pass has something to refract.
       renderer.render(scene, camera);

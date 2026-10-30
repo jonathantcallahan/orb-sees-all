@@ -4,14 +4,14 @@ import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
-import { assessPendingTasks, checkTask, continueTaskSession, planTask, sendHandoff, startTaskSession } from "../jobs";
+import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ExternalLink, Reveal, Spinner } from "./common";
 import { SlackSendModal } from "./SlackPreview";
-import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -1085,6 +1085,16 @@ export function TaskCard({
     onChange();
   };
   const sessionWorking = useJobStatus(`session:${task.id}`);
+  // Steps that have drifted from the conversation (a later one moving while an earlier one isn't
+  // done) are re-checked against it once the session is idle, once per change in the transcript.
+  const recheckStatus = useJobStatus(`recheck:${task.id}`);
+  const recheckSteps = () => progress && recheckSessionSteps(task.id, task.title, outlineSteps, progress).then(onChange, onChange);
+  const transcriptKey = progress ? `${progress.reports ?? 0}:${progress.messages?.length ?? 0}` : null;
+  useEffect(() => {
+    if (!sessionLink?.sessionId || !progress?.found || sessionWorking || recheckStatus) return;
+    if (transcriptKey === sessionLink.recheckedKey) return;
+    if (looksOutOfSync(outlineSteps.map((st) => st.progress))) recheckSteps();
+  }, [transcriptKey, sessionWorking]);
   // A step blocked on someone else blocks the task; once it moves, the task is back in progress.
   const anyBlocked = outlineSteps.some((st) => st.progress?.state === "blocked");
   const wasBlocked = useRef(anyBlocked);
@@ -1155,7 +1165,20 @@ export function TaskCard({
             onChange={onChange}
           />
         )}
-        {sessionLink && !sessionWorking && !needsInput && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {sessionLink && !sessionWorking && !needsInput && !recheckStatus && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {recheckStatus ? (
+          <span className="muted small session-working">
+            <Spinner /> Re-checking the steps against the conversation…
+          </span>
+        ) : (
+          sessionLink?.sessionId &&
+          progress?.found &&
+          !sessionWorking && (
+            <button className="link-button small more-link" onClick={recheckSteps} title="Have Orb check each step against the conversation">
+              Re-check steps
+            </button>
+          )
+        )}
         {chatFor !== null && sessionLink && (
           <SessionChat
             taskId={task.id}

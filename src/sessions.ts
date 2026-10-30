@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
 
@@ -22,6 +22,14 @@ export interface SessionLink {
   doneTitles?: string[];
   /** Keys of handed-off messages Orb has already sent (see PendingSend). */
   sentKeys?: string[];
+  /**
+   * Orb's latest re-check of the steps against the conversation (see recheckSessionSteps): the plan
+   * and states it settled on, and how many report lines the transcript had then. Reports written
+   * after it apply on top of it.
+   */
+  recheck?: StepRecheckResult;
+  /** The transcript state ("reports:messages") last re-checked, so the same drift isn't re-checked twice. */
+  recheckedKey?: string;
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */
   lastError?: string | null;
 }
@@ -61,6 +69,13 @@ export function readableMessages(raw: ChatMessage[]): ChatMessage[] {
     .filter((m) => m.text);
 }
 
+export interface StepRecheckResult {
+  plan: PlanStep[];
+  states: Record<number, StepProgress>;
+  /** Report lines in the transcript when it was made. */
+  reports: number;
+}
+
 /** A step of the plan as the session last revised it. */
 export interface PlanStep {
   title: string;
@@ -80,6 +95,8 @@ export interface SessionProgress {
   lastUser?: string | null;
   /** What Claude has said since, without its "[orb]" report lines and hand-off blocks. */
   lastReply?: string | null;
+  /** How many "[orb]" report lines the transcript has; with the message count, it says whether anything changed. */
+  reports?: number;
   /** When the transcript last changed (ms). */
   updatedAt: number | null;
   found: boolean;
@@ -117,6 +134,33 @@ export function currentPlan(lines: string[], blocks: { header: string; body: str
  * the steps in order and sometimes skip a "done" report, so once a later step is reported, any
  * earlier step still marked started counts as done. (A step waiting on the user stays waiting.)
  */
+/**
+ * The plan and each step's state now: from Orb's latest re-check when there is one, with the
+ * session's reports since then on top, unless the session has restated the plan since.
+ */
+export function stepsNow(
+  lines: string[],
+  blocks: { header: string; body: string }[],
+  recheck?: StepRecheckResult,
+): { plan: PlanStep[] | null; steps: Record<number, StepProgress> } {
+  if (recheck && lines.length >= recheck.reports) {
+    const newer = lines.slice(recheck.reports);
+    if (!newer.some((l) => PLAN.test(l))) return { plan: recheck.plan, steps: { ...recheck.states, ...parseProgress(newer) } };
+  }
+  const revised = currentPlan(lines, blocks);
+  return { plan: revised.plan, steps: parseProgress(revised.lines) };
+}
+
+/**
+ * Whether the steps look out of step with the session: one not yet done (or skipped) while a later
+ * one has started or finished. Steps are done in order, so that means a report went missing or a
+ * decision in the conversation changed the plan.
+ */
+export function looksOutOfSync(states: (StepProgress | undefined)[]): boolean {
+  const settled = (s?: StepProgress) => s?.state === "done" || s?.state === "skipped";
+  return states.some((s, j) => (s?.state === "started" || s?.state === "done") && states.slice(0, j).some((earlier) => !settled(earlier)));
+}
+
 export function parseProgress(lines: string[]): Record<number, StepProgress> {
   const steps: Record<number, StepProgress> = {};
   for (const line of lines) {
@@ -217,6 +261,9 @@ export async function markStepDone(taskId: string, title: string) {
  */
 export function useSessionProgress(taskId: string, link: SessionLink | undefined, onLinked?: () => void): SessionProgress | null {
   const [progress, setProgress] = useState<SessionProgress | null>(null);
+  // Read on each poll, so a new re-check applies without restarting the polling.
+  const recheck = useRef(link?.recheck);
+  recheck.current = link?.recheck;
   useEffect(() => {
     if (!link) {
       setProgress(null);
@@ -246,11 +293,12 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
         const messages = readableMessages(raw);
         const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
         const after = messages.slice(lastUserAt + 1).filter((m) => m.role === "assistant");
-        const revised = currentPlan(lines, sends);
+        const now = stepsNow(lines, sends, recheck.current);
         if (!cancelled)
           setProgress({
-            plan: revised.plan,
-            steps: parseProgress(revised.lines),
+            plan: now.plan,
+            steps: now.steps,
+            reports: lines.length,
             sends: parseSends(sends),
             messages,
             lastUser: lastUserAt >= 0 ? messages[lastUserAt].text : null,
@@ -268,6 +316,6 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
       cancelled = true;
       clearInterval(timer);
     };
-  }, [taskId, link?.startedAt, link?.path]);
+  }, [taskId, link?.startedAt, link?.path, link?.recheck?.reports, link?.recheck?.plan.length]);
   return progress;
 }

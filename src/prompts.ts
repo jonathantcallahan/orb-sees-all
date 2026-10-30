@@ -432,3 +432,51 @@ evidence: the threads, emails, tickets and docs you relied on, with links. ${LIN
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"verdict": "looks_right"|"already_done"|"not_needed"|"captured_wrong"|"duplicate"|"unclear", "summary": string, "findings": [{"check": string, "finding": string, "ok": boolean}], "corrected_description": string|null, "duplicate_of": string|null, "evidence": [{"title": string, "link": string}]}`;
 }
+
+export interface RecheckStepsInput {
+  task: string;
+  steps: { title: string; by: "claude" | "you" | null; state: string | null; note?: string | null }[];
+  /** The conversation since the opening prompt, oldest first. */
+  conversation: { role: "user" | "assistant"; text: string }[];
+}
+
+/**
+ * Asks Claude to bring a working session's step list back in line with its conversation: which
+ * steps are done, skipped, blocked or waiting, and whether the plan itself changed. No tools: the
+ * conversation is all it needs.
+ */
+export function recheckStepsPrompt(input: RecheckStepsInput): string {
+  const steps = input.steps
+    .map((s, i) => `${i + 1}. ${s.by === "you" ? "[Me] " : ""}${s.title} (shown as: ${s.state ?? "not started"}${s.note ? `, ${s.note}` : ""})`)
+    .join("\n");
+  // The latest exchanges matter most; keep the prompt to a reasonable size.
+  let budget = 40_000;
+  const turns: string[] = [];
+  for (const m of [...input.conversation].reverse()) {
+    const text = m.text.length > 4000 ? `${m.text.slice(0, 4000)}…` : m.text;
+    budget -= text.length;
+    if (budget < 0) break;
+    turns.unshift(`${m.role === "user" ? "Me" : "Claude"}: ${text}`);
+  }
+  return `A Claude session is working through a task for me, and my planner shows its steps with their progress. The list has drifted from what actually happened in our conversation. Bring it back in line.
+
+Task: ${input.task}
+
+The steps as my planner shows them ([Me] marks mine):
+${steps}
+
+Our conversation, oldest first:
+${turns.join("\n\n")}
+
+Work out where each step really stands from the conversation:
+- done: finished, including when a message or decision in the conversation took care of it, or it was done out of order.
+- skipped: no longer needed, because a decision changed the approach or someone else took it on. Say why in note.
+- started: being worked on now.
+- waiting: Claude needs something from me to go on. Say what in note.
+- blocked: can't move until someone else acts (an answer, an approval). Say who or what in note.
+- todo: not started yet.
+
+If the plan itself changed in the conversation (a step reassigned, reworded, dropped or added), return the steps as they now stand: keep finished and skipped steps, reword or add steps to match, mark mine with by "you" and Claude's with by "claude". Otherwise keep the titles exactly as listed. Keep the order the work happens in.
+
+Reply with ONLY a JSON object: {"steps": [{"title": string, "by": "claude" | "you", "state": "todo" | "started" | "done" | "waiting" | "blocked" | "skipped", "note": string | null}]}`;
+}

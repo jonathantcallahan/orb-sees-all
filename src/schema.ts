@@ -264,6 +264,20 @@ export const TaskCheck = z.object({
 });
 export type TaskCheck = z.infer<typeof TaskCheck>;
 
+/** Orb's re-check of a working session's steps against its conversation. */
+export const StepRecheck = z.object({
+  steps: z.array(
+    z.object({
+      title: z.string(),
+      by: z.enum(["claude", "you"]),
+      state: z.enum(["todo", "started", "done", "waiting", "blocked", "skipped"]),
+      /** For waiting: what's needed from the user. Blocked: who or what it's waiting on. Skipped: why. */
+      note: z.string().nullish(),
+    }),
+  ),
+});
+export type StepRecheck = z.infer<typeof StepRecheck>;
+
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
 export const DailyReading = z.object({

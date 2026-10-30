@@ -2,11 +2,11 @@ import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackTh
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { epicCheckPrompt, sendToChannelPrompt } from "../prompts";
-import { linkSession, type PendingSend } from "../sessions";
+import { epicCheckPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
+import { linkSession, type PendingSend, type PlanStep, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, ReplyDraft, SentMessage, StepRecheck, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -443,7 +443,15 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
       const link = (await db.getSessionLinks())[taskId];
       await db.updateSessionLink(taskId, { lastError: null });
       try {
-        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status });
+        // After a re-check, the session sees the list Orb shows, so its step numbers match it.
+        const steps = link?.recheck?.plan
+          .map((st, i) => {
+            const s = link.recheck!.states[i + 1];
+            return `${i + 1}. ${st.by === "you" ? "[Me] " : ""}${st.title} (${s ? s.state : "not started"})`;
+          })
+          .join("\n");
+        const context = steps ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}` : undefined;
+        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context });
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
         if (turn.error) throw new Error(turn.error);
         return { value: undefined, costUsd: turn.costUsd };
@@ -451,6 +459,46 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         await db.updateSessionLink(taskId, { lastError: (e as Error).message });
         throw e;
       }
+    }),
+  );
+}
+
+/**
+ * Re-checks a working session's steps against its conversation when they've drifted (a report went
+ * missing, or a decision changed the plan), and keeps the result: the card shows it, with the
+ * session's later reports on top, and the session is shown the same list on its next turn so its
+ * step numbers line up.
+ */
+export function recheckSessionSteps(
+  taskId: string,
+  task: string,
+  steps: { title: string; by: "claude" | "you" | null; progress?: StepProgress }[],
+  progress: SessionProgress,
+): Promise<void> {
+  const key = `${progress.reports ?? 0}:${progress.messages?.length ?? 0}`;
+  return track(`recheck:${taskId}`, (status) =>
+    logged("recheck", taskId, async () => {
+      // Recorded first, so a failed re-check isn't retried until the conversation moves on.
+      await db.updateSessionLink(taskId, { recheckedKey: key });
+      status("Re-checking the steps");
+      const { data, costUsd } = await runClaude({
+        prompt: recheckStepsPrompt({
+          task,
+          steps: steps.map((st) => ({ title: st.title, by: st.by, state: st.progress?.state ?? null, note: st.progress?.note })),
+          conversation: progress.messages ?? [],
+        }),
+        schema: StepRecheck,
+        tools: [],
+        model: "sonnet",
+        maxTurns: 2,
+      });
+      const plan: PlanStep[] = data.steps.map((st) => ({ title: st.title, by: st.by }));
+      const states: Record<number, StepProgress> = {};
+      data.steps.forEach((st, i) => {
+        if (st.state !== "todo") states[i + 1] = st.note ? { state: st.state, note: st.note } : { state: st.state };
+      });
+      if (plan.length) await db.updateSessionLink(taskId, { recheck: { plan, states, reports: progress.reports ?? 0 } });
+      return { value: undefined, costUsd };
     }),
   );
 }

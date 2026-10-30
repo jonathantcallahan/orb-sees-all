@@ -133,3 +133,20 @@ describe("blocked steps", () => {
     });
   });
 });
+
+describe("re-checked steps", () => {
+  it("spots a later step moving while an earlier one isn't done", async () => {
+    const { looksOutOfSync } = await import("./sessions");
+    expect(looksOutOfSync([{ state: "done" }, { state: "waiting" }, { state: "started" }])).toBe(true);
+    expect(looksOutOfSync([{ state: "done" }, { state: "skipped" }, { state: "started" }, undefined])).toBe(false);
+  });
+
+  it("applies the session's later reports on top of a re-check", async () => {
+    const { stepsNow } = await import("./sessions");
+    const recheck = { plan: [{ title: "A", by: "claude" as const }, { title: "B", by: "you" as const }], states: { 1: { state: "done" as const } }, reports: 2 };
+    expect(stepsNow(["[orb] step 1 started", "[orb] step 4 started", "[orb] step 2 done"], [], recheck)).toEqual({
+      plan: recheck.plan,
+      steps: { 1: { state: "done" }, 2: { state: "done" } },
+    });
+  });
+});

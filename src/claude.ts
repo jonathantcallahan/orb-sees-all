@@ -257,7 +257,17 @@ export const SESSION_DISPLAY = [
 ].join(" ");
 
 export async function runSessionTurn(
-  opts: { prompt: string; tools: string[]; model?: string; effort?: "low" | "medium" | "high"; maxTurns?: number; resume?: string; onStatus?: (s: string) => void },
+  opts: {
+    prompt: string;
+    tools: string[];
+    model?: string;
+    effort?: "low" | "medium" | "high";
+    maxTurns?: number;
+    resume?: string;
+    /** More for the system prompt this turn, after SESSION_DISPLAY (e.g. the steps as Orb shows them). */
+    context?: string;
+    onStatus?: (s: string) => void;
+  },
   run: StreamingCliRunner = runCliStreaming,
 ): Promise<SessionTurn> {
   const args = [
@@ -275,7 +285,7 @@ export async function runSessionTurn(
     "--max-turns",
     String(opts.maxTurns ?? 80),
     "--append-system-prompt",
-    SESSION_DISPLAY,
+    opts.context ? `${SESSION_DISPLAY}\n\n${opts.context}` : SESSION_DISPLAY,
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
