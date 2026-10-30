@@ -498,6 +498,8 @@ export function refreshAll(): Promise<void> {
 }
 
 export async function maybeRunMorning(now = new Date()) {
+  // Not until first-run setup is done: without Claude Code and the connectors every job would fail.
+  if (!(await db.getSetting("setup_done"))) return;
   const due = shouldRunMorning(
     now,
     {

@@ -88,6 +88,7 @@ function ProjectRow({ project, others, onSaved }: { project: db.Project; others:
 }
 
 export function Settings({
+  onOpenSetup,
   projects,
   theme,
   onThemeChange,
@@ -96,6 +97,8 @@ export function Settings({
   onClose,
   onSaved,
 }: {
+  /** Opens the setup checklist, to check Claude Code and the connectors again. */
+  onOpenSetup: () => void;
   projects: db.Project[];
   theme: Theme;
   onThemeChange: (t: Theme) => void;
@@ -130,7 +133,12 @@ export function Settings({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="column-header">
           <h2>Settings</h2>
-          <button onClick={onClose}>Done</button>
+          <div className="row">
+            <button className="cta-ghost" onClick={onOpenSetup} title="Check Claude Code and your connectors">
+              Check setup
+            </button>
+            <button onClick={onClose}>Done</button>
+          </div>
         </header>
 
         <section className="settings-grid">

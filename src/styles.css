@@ -818,3 +818,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* A new release is ready: the one header button that asks for attention */
 .update-button { border-color: var(--green); color: var(--green); }
+
+/* First-run setup: a checklist of what the app needs, each with how to fix it */
+.setup-modal { width: min(600px, 100%); }
+.setup-intro { margin: -4px 0 0; }
+.setup-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.setup-step { display: flex; gap: 10px; align-items: flex-start; }
+.setup-step > div { flex: 1; min-width: 0; }
+.setup-step-title { font-weight: 600; }
+.setup-step-body { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; color: var(--muted); }
+.setup-step-body code, .setup-command code { font-size: 12px; background: var(--grey-bg); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+.setup-mark { display: inline-flex; justify-content: center; width: 16px; flex-shrink: 0; font-weight: 700; }
+.setup-mark.ok { color: var(--green); }
+.setup-mark.bad { color: var(--red); }
+.setup-mark.warn { color: var(--amber); }
+.setup-mark.todo { color: var(--muted); font-weight: 400; }
+.setup-step .spinner { width: 16px; flex-shrink: 0; }
+.setup-command { display: flex; gap: 10px; align-items: baseline; }
+.setup-connectors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; align-self: stretch; }
+.setup-connector { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; color: var(--text); }
+.setup-about { width: 100%; align-self: stretch; }
+.setup-status { flex: 1; }

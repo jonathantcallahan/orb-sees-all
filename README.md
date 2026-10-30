@@ -50,6 +50,17 @@ If that reports no tools, run `claude` interactively, use `/login` to sign in wi
 
 ## 3. First run
 
+On first launch, a setup checklist opens. It checks four things:
+
+- Claude Code is installed;
+- it's signed in with your claude.ai account;
+- each connector is connected;
+- the GitHub CLI is installed (optional).
+
+Anything missing comes with how to fix it, such as a command to copy or a link to the claude.ai connectors page. After a fix, click **Check again**. When everything required is green, add a line about yourself and click **Find my projects** to start the first refresh. You can open the checklist again any time from **Settings → Check setup**.
+
+Later, to change things:
+
 1. Open **Settings** (the button in the header):
    - **About you:** one line on your role, e.g. "an engineering manager on the payments team". Claude uses it to decide what matters to you.
    - **Model:** Opus is the most accurate; Sonnet is cheaper and faster.

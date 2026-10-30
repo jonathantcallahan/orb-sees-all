@@ -5,11 +5,12 @@ import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
+import { SetupScreen } from "./components/SetupScreen";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
-import { getSetting, markInterruptedJobs } from "./db";
+import { getSetting, markInterruptedJobs, setSetting } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
@@ -71,6 +72,15 @@ export default function App() {
   const { data, reload } = useAppData();
   const running = useRunningJobs();
   const [showSettings, setShowSettings] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  // First run: walk through setup until it's done. Anyone already using the app (it knows their
+  // Slack user) counts as set up.
+  useEffect(() => {
+    Promise.all([getSetting("setup_done"), getSetting("slack_user_id")]).then(([done, user]) => {
+      if (done || user) setSetting("setup_done", "1").catch(() => {});
+      else setShowSetup(true);
+    }, () => {});
+  }, []);
   const [filterProject, setFilterProject] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
   const [orbLook, setOrbLook] = useOrbLook();
@@ -235,7 +245,17 @@ export default function App() {
 
       <Mist level={load.level} look={orbLook} />
 
-      {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => setShowSettings(false)} onSaved={reload} />}
+      {showSetup && (
+        <SetupScreen
+          onClose={() => setShowSetup(false)}
+          onDone={() => {
+            setShowSetup(false);
+            reload();
+            refreshAll().catch(() => {});
+          }}
+        />
+      )}
+      {showSettings && <Settings onOpenSetup={() => { setShowSettings(false); setShowSetup(true); }} projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>
   );
 }
