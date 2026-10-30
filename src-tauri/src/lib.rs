@@ -334,9 +334,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Orb Sees All");
 
-    app.run(|app, event| {
-        if let RunEvent::Reopen { .. } = event {
-            show_main(app);
+    app.run(|_app, _event| {
+        // Clicking the Dock icon while the window is hidden brings it back (macOS only).
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = _event {
+            show_main(_app);
         }
     });
 }
