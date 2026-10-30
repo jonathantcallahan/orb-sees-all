@@ -113,20 +113,24 @@ export interface PressureTask {
   projectId?: string | null;
 }
 
-/** How much each open task weighs, by priority. Unrated tasks count like low ones. */
-const TASK_WEIGHT: Record<EffectivePriority, number> = { blocking: 3, critical: 2, high: 1, medium: 0.5, low: 0.25 };
-const UNRATED_WEIGHT = 0.25;
+/**
+ * How much each open task weighs, by priority. The orb answers mainly to blocking and high-priority
+ * work: medium and low tasks barely register, so a long backlog alone doesn't make it angry.
+ * Unrated tasks count like low ones.
+ */
+const TASK_WEIGHT: Record<EffectivePriority, number> = { blocking: 6, critical: 2.5, high: 0.75, medium: 0.1, low: 0.05 };
+const UNRATED_WEIGHT = 0.05;
 /** Extra weight for a task due within two days, and for one already overdue. */
-const DUE_SOON_WEIGHT = 1;
-const OVERDUE_WEIGHT = 2;
+const DUE_SOON_WEIGHT = 0.5;
+const OVERDUE_WEIGHT = 1;
 const DUE_SOON_DAYS = 2;
 /**
  * Load at which stress reaches 63% (1 - 1/e). Stress = 1 - e^(-load/scale): it
  * rises quickly at first, then flattens, so each finished task always lowers it
- * a little and it never pins at the top. About twelve critical tasks and some
- * extras make the orb furious.
+ * a little and it never pins at the top. Furious takes real trouble, like a few
+ * blockers of yours on top of a stack of critical work.
  */
-const LOAD_SCALE = 20;
+export const LOAD_SCALE = 35;
 
 function dueWeight(due: string | null | undefined, now: Date): number {
   if (!due) return 0;

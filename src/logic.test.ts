@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -153,21 +153,27 @@ describe("pressure", () => {
     expect(pressure([], none, now)).toMatchObject({ load: 0, level: 0 });
   });
 
-  it("weighs tasks by priority and how soon they're due", () => {
+  it("weighs blocking and high-priority work most, and due dates a little", () => {
     const p = pressure(
       [
-        task("a", "blocking", { projectId: "C1" }), // 3
-        task("b", "critical", { projectId: "C1" }), // 2
-        task("c", "high", { projectId: "C2", due: "2026-10-30" }), // 1 + 1 due soon
-        task("d", "medium", { due: "2026-10-28" }), // 0.5 + 2 overdue
-        task("e", null), // 0.25
+        task("a", "blocking", { projectId: "C1" }), // 6
+        task("b", "critical", { projectId: "C1" }), // 2.5
+        task("c", "high", { projectId: "C2", due: "2026-10-30" }), // 0.75 + 0.5 due soon
+        task("d", "medium", { due: "2026-10-28" }), // 0.1 + 1 overdue
+        task("e", null), // 0.05
       ],
       none,
       now,
     );
     // Only C1 has a blocker of yours; C2 just has a task.
-    expect(p).toMatchObject({ projectsOnMe: 1, criticalTasks: 2, load: 9.75 });
-    expect(p.level).toBeCloseTo(1 - Math.exp(-9.75 / 20));
+    expect(p).toMatchObject({ projectsOnMe: 1, criticalTasks: 2 });
+    expect(p.load).toBeCloseTo(10.9);
+    expect(p.level).toBeCloseTo(1 - Math.exp(-10.9 / LOAD_SCALE));
+  });
+
+  it("barely notices a long medium and low backlog", () => {
+    const backlog = Array.from({ length: 40 }, (_, i) => task(`m${i}`, i % 2 ? "medium" : "low"));
+    expect(orbMood(pressure(backlog, none, now))).toBe("serene");
   });
 
   it("ignores done and dismissed tasks", () => {
@@ -217,7 +223,7 @@ describe("formatMinutes", () => {
 });
 
 describe("orbMood", () => {
-  const m = (load: number) => orbMood({ load, level: 1 - Math.exp(-load / 20) });
+  const m = (load: number) => orbMood({ load, level: 1 - Math.exp(-load / LOAD_SCALE) });
 
   it("is pleased only when nothing is waiting", () => {
     expect(m(0)).toBe("pleased");
@@ -225,13 +231,15 @@ describe("orbMood", () => {
   });
 
   it("moves through each mood as the load grows", () => {
-    const moods = [0, 1, 4, 8, 13, 19, 28, 45].map(m);
+    const moods = [0, 2, 7, 14, 22, 33, 50, 80].map(m);
     expect(moods).toEqual(["pleased", "serene", "content", "attentive", "restless", "agitated", "irritated", "furious"]);
   });
 
-  it("takes a heavy load to be furious", () => {
-    // Ten critical tasks: busy, not furious.
-    expect(m(20)).toBe("agitated");
+  it("takes real trouble to be furious", () => {
+    // Ten critical tasks and twenty high ones: busy, not furious.
+    expect(m(10 * 2.5 + 20 * 0.75)).toBe("agitated");
+    // Four blockers on top of that is.
+    expect(m(10 * 2.5 + 20 * 0.75 + 4 * 6)).toBe("irritated");
   });
 });
 
