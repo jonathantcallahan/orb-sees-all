@@ -1,5 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
 import type { ViewTask } from "../tasks";
 
@@ -58,7 +59,7 @@ export function RefreshButton({
         </span>
       )}
       <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>
-        <span className={busy ? "spin" : undefined}>↻</span>
+        {busy ? <Spinner /> : "↻"}
       </button>
     </span>
   );
@@ -113,4 +114,88 @@ export function Updated({ at }: { at: string | null | undefined }) {
   const today = d.toDateString() === new Date().toDateString();
   const text = d.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   return <span className={`timestamp small${today ? "" : " stale"}`}>updated {text}</span>;
+}
+
+/** Claude Code's working indicator: a star that grows through these glyphs and back. */
+const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+
+export function Spinner() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 120);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="spinner" aria-hidden>
+      {SPINNER_FRAMES[frame]}
+    </span>
+  );
+}
+
+/** A message to post, editable in a centered modal before it goes out. Esc cancels; ⌘↩ sends. */
+export function ComposeModal({
+  heading,
+  note,
+  text,
+  status,
+  failed,
+  busy,
+  onChange,
+  onCancel,
+  onSend,
+}: {
+  heading: string;
+  /** Where it will go, shown until there's a status to report. */
+  note: string;
+  text: string;
+  status: string | null;
+  failed: boolean;
+  busy: boolean;
+  onChange: (text: string) => void;
+  onCancel: () => void;
+  onSend: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // Portaled to <body>; clicks still bubble through React, so stop them before they select the project.
+  return createPortal(
+    <div
+      className="modal-backdrop plan-modal-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCancel();
+      }}
+    >
+      <div className="modal plan-modal" role="dialog" aria-label={heading} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>{heading}</h2>
+        </header>
+        <textarea
+          autoFocus
+          className="description-editor"
+          rows={6}
+          value={text}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend();
+          }}
+        />
+        <footer className="plan-modal-actions edit-actions">
+          <span className={`small ${failed ? "error" : "muted"} remind-status`}>{status ?? note}</span>
+          <button className="cta-ghost" disabled={busy} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Send (⌘↩)">
+            Send
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
 }

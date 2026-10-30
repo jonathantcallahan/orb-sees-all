@@ -1,20 +1,42 @@
 import { useState } from "react";
 import { setTaskState } from "../db";
-import { draftReply } from "../jobs";
+import { draftReply, sendSlackReply } from "../jobs";
+import { slackThread } from "../projects";
 import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen } from "../scheduler";
-import { ExternalLink } from "./common";
+import { ComposeModal, ExternalLink, Spinner } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
 
-function Draft({ reply, text, onRegenerate }: { reply: QuickReply; text: string; onRegenerate: () => void }) {
+function Draft({ reply, text, onRegenerate, onSent }: { reply: QuickReply; text: string; onRegenerate: () => void; onSent: () => void }) {
   const [copied, setCopied] = useState(false);
+  // Slack replies go out from here, through the same review-and-send modal as blocker reminders.
+  const canSend = reply.source === "slack" && !!slackThread(reply.link);
+  const [composing, setComposing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const sending = useJobStatus(`reply:${reply.id}`);
+  const send = async () => {
+    if (!composing?.trim() || !reply.link) return;
+    try {
+      setError(null);
+      await sendSlackReply(reply.id, reply.link, composing.trim());
+      setComposing(null);
+      onSent();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   return (
     <div className="reply-draft">
       <p className="small">{text}</p>
       <div className="reply-draft-actions">
+        {canSend && (
+          <button className="link-button small" onClick={() => setComposing(text)}>
+            Send reply
+          </button>
+        )}
         <button
           className="link-button small"
           onClick={async () => {
@@ -32,6 +54,19 @@ function Draft({ reply, text, onRegenerate }: { reply: QuickReply; text: string;
           Regenerate
         </button>
       </div>
+      {composing !== null && (
+        <ComposeModal
+          heading={`Reply to ${reply.from}`}
+          note={`Replies in the ${reply.where ?? "Slack"} thread, as you.`}
+          text={composing}
+          status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
+          failed={!!error && !sending}
+          busy={!!sending}
+          onChange={setComposing}
+          onCancel={() => !sending && setComposing(null)}
+          onSend={send}
+        />
+      )}
     </div>
   );
 }
@@ -40,12 +75,12 @@ function DraftingStatus({ id }: { id: string }) {
   const status = useJobStatus(`draft:${id}`);
   return (
     <span className="muted small inbox-drafting" title={status}>
-      <span className="spin">✦</span> {status ?? "Drafting"}…
+      <Spinner /> {status ?? "Drafting"}…
     </span>
   );
 }
 
-/** Slack messages and emails waiting on the user, with Claude-drafted responses to copy. */
+/** Slack messages and emails waiting on the user, with Claude-drafted responses to copy, or for Slack, to send. */
 export function Inbox({
   replies,
   states,
@@ -109,7 +144,7 @@ export function Inbox({
                 ×
               </button>
             </div>
-            {draft && !drafting && <Draft reply={r} text={draft.text} onRegenerate={draftIt} />}
+            {draft && !drafting && <Draft reply={r} text={draft.text} onRegenerate={draftIt} onSent={onChange} />}
           </div>
         );
       })}

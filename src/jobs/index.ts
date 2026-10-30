@@ -1,6 +1,7 @@
+import { slackThread } from "../projects";
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
@@ -313,6 +314,28 @@ export function sendReminder(blockerId: string, channelId: string, text: string)
       });
       if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
       await db.saveReminder(blockerId, { at: new Date().toISOString(), link: data.link ?? null });
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/** Posts the user's reply in a Slack message's thread, then marks the message handled. */
+export function sendSlackReply(replyId: string, link: string, text: string): Promise<void> {
+  return track(`reply:${replyId}`, (status) =>
+    logged("reply", replyId, async () => {
+      const thread = slackThread(link);
+      if (!thread) throw new Error("Couldn't tell which Slack thread this is");
+      const { data, costUsd } = await runClaude({
+        onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
+        prompt: sendReplyPrompt(thread.channelId, thread.threadTs, text),
+        schema: SentMessage,
+        tools: TOOLS.slackSend,
+        // A mechanical post; the cheaper model is plenty.
+        model: "sonnet",
+        maxTurns: 3,
+      });
+      if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
+      await db.setTaskState(replyId, { status: "done" });
       return { value: undefined, costUsd };
     }),
   );

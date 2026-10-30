@@ -8,7 +8,7 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
-import { ExternalLink } from "./common";
+import { ExternalLink, Spinner } from "./common";
 import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -679,7 +679,7 @@ export function TaskCard({
         )}
         {planning && (
           <span className="muted small">
-            <span className="spin">↻</span> {planStatus ?? "Researching a plan"}…
+            <Spinner /> {planStatus ?? "Researching a plan"}…
           </span>
         )}
         {sessionLink && <SessionStatus progress={progress} steps={outlineSteps} />}
@@ -747,7 +747,7 @@ export function TaskCard({
   // Double check follows More / Edit / Show links, shown on hover (and while it runs). Last, so its hidden space sits at the end.
   const checkAction = linked ? null : checkStatus ? (
     <span className="muted small checking" title={checkStatus}>
-      <span className="spin">✦</span> {checkStatus}…
+      <Spinner /> {checkStatus}…
     </span>
   ) : (
     <button
@@ -883,7 +883,7 @@ export function TaskCard({
         <>
           {manual && assessing && (
             <div className="muted small">
-              <span className="spin">✦</span> Claude is reviewing this task…
+              <Spinner /> Claude is reviewing this task…
             </div>
           )}
           {/* No assessment to nest it in yet. */}

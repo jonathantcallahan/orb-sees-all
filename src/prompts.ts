@@ -263,6 +263,17 @@ MESSAGE>>>
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
 }
 
+export function sendReplyPrompt(channelId: string, threadTs: string, text: string): string {
+  return `Post the reply below in a Slack thread by calling slack_send_message exactly once, with channel_id "${channelId}", thread_ts "${threadTs}", and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else.
+
+Reply (between the markers):
+<<<MESSAGE
+${text}
+MESSAGE>>>
+
+After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+}
+
 export interface CheckBlockerInput {
   projectName: string;
   channelId: string;

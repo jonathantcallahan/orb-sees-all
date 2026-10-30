@@ -483,3 +483,23 @@ describe("slack channel links", () => {
     expect(slackChannelUrl("C123")).toBe("https://slack.com/app_redirect?channel=C123");
   });
 });
+
+describe("slack threads", () => {
+  it("finds the channel and thread a permalink points at", async () => {
+    const { slackThread } = await import("./projects");
+    expect(slackThread("https://unity.slack.com/archives/D0ABC/p1700000000000100")).toEqual({ channelId: "D0ABC", threadTs: "1700000000.000100" });
+    expect(slackThread("https://unity.slack.com/archives/C1/p1700000000000100?thread_ts=1699999999.000200&cid=C1")).toEqual({
+      channelId: "C1",
+      threadTs: "1699999999.000200",
+    });
+    expect(slackThread("https://mail.google.com/mail/u/0/#all/abc")).toBeNull();
+  });
+
+  it("asks for exactly one threaded post, verbatim", async () => {
+    const { sendReplyPrompt } = await import("./prompts");
+    const p = sendReplyPrompt("C1", "1700000000.000100", "Sounds good, shipping Friday.");
+    expect(p).toContain('thread_ts "1700000000.000100"');
+    expect(p).toContain("exactly once");
+    expect(p).toContain("Sounds good, shipping Friday.");
+  });
+});

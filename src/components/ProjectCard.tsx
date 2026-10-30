@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions } from "../prompts";
@@ -8,7 +7,7 @@ import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { COLORED_ICONS } from "../linkIcons";
 import { projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
-import { ExternalLink, RefreshButton, Updated } from "./common";
+import { ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   blocked: "Blocked",
@@ -78,7 +77,7 @@ function CheckAction({ checking, onCheck }: { checking: string | undefined; onCh
   if (checking) {
     return (
       <span className="muted small checking" title={checking}>
-        <span className="spin">✦</span> {checking}…
+        <Spinner /> {checking}…
       </span>
     );
   }
@@ -161,8 +160,9 @@ function RemindAction({
         {reminder ? "Send another reminder" : "Send reminder"}
       </button>
       {text !== null && (
-        <ReminderModal
-          to={others.map((o) => o.name).join(", ")}
+        <ComposeModal
+          heading={`Remind ${others.map((o) => o.name).join(", ")}`}
+          note="Posts to the project's Slack channel, tagging them."
           text={text}
           status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
           failed={!!error && !sending}
@@ -176,68 +176,13 @@ function RemindAction({
   );
 }
 
-/** The reminder text in a centered modal, editable before it's posted. Esc cancels; ⌘↩ sends. */
-function ReminderModal({
-  to,
-  text,
-  status,
-  failed,
-  busy,
-  onChange,
-  onCancel,
-  onSend,
-}: {
-  to: string;
-  text: string;
-  status: string | null;
-  failed: boolean;
-  busy: boolean;
-  onChange: (text: string) => void;
-  onCancel: () => void;
-  onSend: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
 
-  // Portaled to <body>; clicks still bubble through React, so stop them before they select the project.
-  return createPortal(
-    <div
-      className="modal-backdrop plan-modal-backdrop"
-      onClick={(e) => {
-        e.stopPropagation();
-        onCancel();
-      }}
-    >
-      <div className="modal plan-modal" role="dialog" aria-label={`Remind ${to}`} onClick={(e) => e.stopPropagation()}>
-        <header className="column-header">
-          <h2>Remind {to}</h2>
-        </header>
-        <textarea
-          autoFocus
-          className="description-editor"
-          rows={6}
-          value={text}
-          disabled={busy}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend();
-          }}
-        />
-        <footer className="plan-modal-actions edit-actions">
-          <span className={`small ${failed ? "error" : "muted"} remind-status`}>{status ?? "Posts to the project's Slack channel, tagging them."}</span>
-          <button className="cta-ghost" disabled={busy} onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Post to the project channel (⌘↩)">
-            Send
-          </button>
-        </footer>
-      </div>
-    </div>,
-    document.body,
+/** The × in an open tab. The tab itself toggles, so clicking it (or the ×) closes the tab. */
+function TabClose() {
+  return (
+    <span className="tab-close" aria-label="Close" title="Close">
+      ×
+    </span>
   );
 }
 
@@ -392,12 +337,14 @@ export function ProjectCard({
                 <button role="tab" aria-selected={tab === "blockers"} className={`work-tab${tab === "blockers" ? " open" : ""}`} onClick={() => toggle("blockers")}>
                   Blocking {blockers.length}
                   {blockers.some((b) => b.owners.some((o) => o.is_me)) && <MineDot />}
+                  {tab === "blockers" && <TabClose />}
                 </button>
               )}
               {(s.active?.length ?? 0) > 0 && (
                 <button role="tab" aria-selected={tab === "active"} className={`work-tab${tab === "active" ? " open" : ""}`} onClick={() => toggle("active")}>
                   Active {s.active.length}
                   {s.active.some((a) => a.owners.some((o) => o.is_me)) && <MineDot />}
+                  {tab === "active" && <TabClose />}
                 </button>
               )}
             </div>
