@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
 import type { Theme } from "../theme";
+import type { OrbLook } from "./PressureBlob";
 
 const lines = (text: string) =>
   text
@@ -48,12 +49,16 @@ export function Settings({
   projects,
   theme,
   onThemeChange,
+  orbLook,
+  onOrbLookChange,
   onClose,
   onSaved,
 }: {
   projects: db.Project[];
   theme: Theme;
   onThemeChange: (t: Theme) => void;
+  orbLook: OrbLook;
+  onOrbLookChange: (look: OrbLook) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -113,6 +118,14 @@ export function Settings({
               <option value="system">Match macOS</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label>
+            Orb look
+            <select value={orbLook} onChange={(e) => onOrbLookChange(e.target.value as OrbLook)}>
+              <option value="classic">Classic</option>
+              <option value="glass">Glass: molten metal in frosted glass</option>
+              <option value="iridescent">Iridescent: a liquid holographic bubble</option>
             </select>
           </label>
           <label>

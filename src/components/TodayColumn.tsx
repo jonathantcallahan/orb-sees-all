@@ -6,7 +6,7 @@ import { nameFromChannel } from "../projects";
 import type { CalendarDay, CalendarEvent } from "../schema";
 import { applyTaskState, type Pressure, type TaskState } from "../tasks";
 import { Checklist, RefreshButton, Updated } from "./common";
-import { PressureBlob } from "./PressureBlob";
+import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
@@ -143,12 +143,14 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
 
 export function TodayColumn({
   pressure,
+  orbLook,
   calendar,
   taskStates,
   busy,
   onChange,
 }: {
   pressure: Pressure;
+  orbLook: OrbLook;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   busy: boolean;
@@ -164,7 +166,7 @@ export function TodayColumn({
 
   return (
     <section className="column">
-      <PressureBlob pressure={pressure} />
+      <PressureBlob pressure={pressure} look={orbLook} />
       <header className="column-header">
         <div>
           <h2>Today</h2>

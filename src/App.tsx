@@ -13,6 +13,7 @@ import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
 import { isDark, useTheme } from "./theme";
+import { useOrbLook } from "./orbLook";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
@@ -68,6 +69,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [filterProject, setFilterProject] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
+  const [orbLook, setOrbLook] = useOrbLook();
   const allStatus = useJobStatus("all");
   const [projectFilter, setProjectFilter] = useProjectFilter();
   useScheduler();
@@ -156,7 +158,7 @@ export default function App() {
       </header>
 
       <main className="columns">
-        <TodayColumn pressure={load} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        <TodayColumn pressure={load} orbLook={orbLook} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
           <DailyReading
@@ -222,7 +224,7 @@ export default function App() {
 
       <Mist level={load.level} />
 
-      {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} onClose={() => setShowSettings(false)} onSaved={reload} />}
+      {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>
   );
 }
