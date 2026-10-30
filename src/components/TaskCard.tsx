@@ -670,8 +670,9 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
-  // Planning lives here, in the Orb section: before a plan, Plan steps leads; after, Approve & start.
-  const canPlan = !plan && !planning && !linked && !!description;
+  // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
+  // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
+  const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
   const planActions =
     outlineSteps.length > 0 || planning || canPlan || sessionLink ? (
       <div className="plan-actions">
