@@ -658,3 +658,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .multi-filter-option:hover { background: var(--grey-bg); }
 .multi-filter-option input { margin: 0; }
 .multi-filter-clear { align-self: flex-start; margin: 2px 6px 0; }
+
+/* Placeholder plan rows before a plan exists */
+.plan-outline-steps.skeleton li { align-items: center; }
+.plan-outline-steps.skeleton .step-circle { margin-top: 0; opacity: 0.5; }
+.skeleton-bar { display: block; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 22%, transparent); }
+.plan-outline-steps.skeleton.loading .skeleton-bar { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes skeleton-pulse { 50% { opacity: 0.45; } }

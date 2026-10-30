@@ -334,10 +334,21 @@ interface OutlineStep {
   progress?: StepProgress;
 }
 
-function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNode }) {
+function PlanOutline({ steps, action, planning = false }: { steps: OutlineStep[]; action?: ReactNode; planning?: boolean }) {
   if (steps.length === 0 && !action) return null;
   return (
     <div className="plan-outline">
+      {/* No steps yet: two placeholder rows where the plan will go; they pulse while it's being written. */}
+      {steps.length === 0 && (
+        <ol className={`plan-outline-steps skeleton${planning ? " loading" : ""}`} aria-hidden>
+          {[72, 54].map((width) => (
+            <li key={width}>
+              <StepCircle />
+              <span className="skeleton-bar" style={{ width: `${width}%` }} />
+            </li>
+          ))}
+        </ol>
+      )}
       {steps.length > 0 && (
         <ol className="plan-outline-steps">
           {steps.map((step, i) => (
@@ -363,6 +374,7 @@ function AssessmentView({
   assessment,
   steps,
   actions,
+  planning,
   onAddDetails,
 }: {
   assessment: Assessment;
@@ -370,6 +382,8 @@ function AssessmentView({
   steps: OutlineStep[];
   /** Approve & start and Show plan details, under the steps. */
   actions?: ReactNode;
+  /** A plan is being written. */
+  planning: boolean;
   onAddDetails?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -395,7 +409,7 @@ function AssessmentView({
         {open && (
           <>
             <span className="small">{assessment.suggestion}</span>
-            <PlanOutline steps={steps} action={actions} />
+            <PlanOutline steps={steps} action={actions} planning={planning} />
           </>
         )}
       </div>
@@ -754,6 +768,7 @@ export function TaskCard({
           steps={outlineSteps}
           onAddDetails={!editing ? () => setEditing(true) : undefined}
           actions={planActions}
+          planning={planning}
         />
       ) : (
         <>
@@ -763,7 +778,7 @@ export function TaskCard({
             </div>
           )}
           {/* No assessment to nest it in yet. */}
-          <PlanOutline steps={outlineSteps} action={planActions} />
+          <PlanOutline steps={outlineSteps} action={planActions} planning={planning} />
         </>
       )}
 
