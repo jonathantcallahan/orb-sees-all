@@ -147,7 +147,6 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .checklist input { margin-top: 3px; }
 .checklist .task-body { flex: 1; }
 .checklist li.done .task-title { text-decoration: line-through; color: var(--muted); }
-.checklist .due { color: var(--amber); }
 .checklist .dismiss { visibility: hidden; }
 .checklist li:hover .dismiss { visibility: visible; }
 

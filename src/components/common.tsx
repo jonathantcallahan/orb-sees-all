@@ -2,6 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
+import { formatWhen } from "../scheduler";
 import type { ViewTask } from "../tasks";
 
 export function ExternalLink({
@@ -87,7 +88,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
               <div className="muted small">
                 {t.detail}
                 {t.detail && t.due && " · "}
-                {t.due && <span className="due">due {t.due}</span>}
+                {t.due && <span className="due timestamp">due {formatWhen(t.due)}</span>}
               </div>
             )}
           </div>

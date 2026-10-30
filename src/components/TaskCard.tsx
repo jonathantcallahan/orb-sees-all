@@ -7,7 +7,7 @@ import { assessPendingTasks, checkTask, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
-import { localDate } from "../scheduler";
+import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
@@ -866,7 +866,7 @@ export function TaskCard({
           {task.project && <span className="task-project">{task.project.name}</span>}
           {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
           {task.requester && <span>{task.requester}</span>}
-          {task.due && <span className="due">due {task.due}</span>}
+          {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
         </div>
       )}
 
