@@ -165,7 +165,8 @@ describe("pressure", () => {
       none,
       now,
     );
-    expect(p).toMatchObject({ projectsOnMe: 2, criticalTasks: 2, load: 9.75 });
+    // Only C1 has a blocker of yours; C2 just has a task.
+    expect(p).toMatchObject({ projectsOnMe: 1, criticalTasks: 2, load: 9.75 });
     expect(p.level).toBeCloseTo(1 - Math.exp(-9.75 / 20));
   });
 

@@ -109,7 +109,7 @@ export interface PressureTask {
   id: string;
   priority: EffectivePriority | null;
   due?: string | null;
-  /** The project it belongs to, for the "N projects waiting on you" count. */
+  /** The project it belongs to, for the "N projects blocked on you" count. */
   projectId?: string | null;
 }
 
@@ -145,7 +145,8 @@ export function pressure(tasks: PressureTask[], states: Map<string, TaskState>, 
   const open = tasks.filter((t) => !states.get(t.id)?.done && !states.get(t.id)?.dismissed);
   const load = open.reduce((sum, t) => sum + (t.priority ? TASK_WEIGHT[t.priority] : UNRATED_WEIGHT) + dueWeight(t.due, now), 0);
   return {
-    projectsOnMe: new Set(open.map((t) => t.projectId).filter(Boolean)).size,
+    // Projects you're holding up: ones where an open task of yours is one of its blockers.
+    projectsOnMe: new Set(open.filter((t) => t.priority === "blocking").map((t) => t.projectId).filter(Boolean)).size,
     criticalTasks: open.filter((t) => t.priority === "blocking" || t.priority === "critical").length,
     load,
     level: 1 - Math.exp(-load / LOAD_SCALE),

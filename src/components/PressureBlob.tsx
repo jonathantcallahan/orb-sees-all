@@ -196,10 +196,12 @@ export function PressureBlob({ pressure }: { pressure: Pressure }) {
   }, []);
 
   const mood = orbMood(pressure);
-  const counts =
-    pressure.projectsOnMe || pressure.criticalTasks
-      ? `${pressure.projectsOnMe} project${pressure.projectsOnMe === 1 ? "" : "s"} waiting on you and ${pressure.criticalTasks} critical task${pressure.criticalTasks === 1 ? "" : "s"}`
-      : null;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const parts = [
+    pressure.projectsOnMe ? `${plural(pressure.projectsOnMe, "project")} blocked on you` : null,
+    pressure.criticalTasks ? plural(pressure.criticalTasks, "critical task") : null,
+  ].filter(Boolean);
+  const counts = parts.length ? parts.join(" and ") : null;
 
   return (
     <div className={`pressure mood-${mood}`} title={counts ?? "Nothing waiting on you"}>
