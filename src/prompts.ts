@@ -145,6 +145,7 @@ Fields:
   - resources: the key docs, tickets, epics, dashboards and repos, at most twelve. ${LINK_TITLE} kind is "doc", "ticket", "epic", "dashboard", "repo" or "other".
   - milestones: dated goals and launches, done and planned, at most eight in date order.
   - decisions: decisions that shape the project, at most ten, newest first, with when and a permalink.
+- epics: the Jira epics that belong to this project. Look for epic keys linked or mentioned in the project channels and its profile, then search Jira (jira_search, e.g. \`issuetype = Epic AND (summary ~ "<project name>" OR key in (...))\`) for epics about it, using its name and other names. For each: key, title, status (Jira's status name), done and total (count its child issues with jira_search \`parent = KEY\`, done meaning a Done-category status), link (its Jira browse URL), updated (ISO 8601). At most eight, most active first. Empty when the project has none.
 - related_channels: other Slack channels (not listed above) where this project is clearly being worked on, from the search, with channel_id, name (no "#") and a short reason. Only channels where the project is a main topic, not a passing mention. Empty when none.
 
 ${READ_ONLY}
@@ -158,7 +159,8 @@ ${JSON_ONLY} Shape:
  "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
  "last_activity": "YYYY-MM-DD"|null,
  "profile": {"goal": string, "aliases": [string], "people": [{"name": string, "slack_user_id": string|null, "role": string}], "resources": [{"title": string, "link": string, "kind": string}], "milestones": [{"what": string, "date": "YYYY-MM-DD"|null, "status": "done"|"planned"|"at_risk"|"missed"}], "decisions": [{"what": string, "date": "YYYY-MM-DD"|null, "link": string|null}]},
- "related_channels": [{"channel_id": string, "name": string, "reason": string}]}`;
+ "related_channels": [{"channel_id": string, "name": string, "reason": string}],
+ "epics": [{"key": string, "title": string, "status": string, "done": number, "total": number, "link": string, "updated": string|null}]}`;
 }
 
 export interface AdhocPromptInput {
@@ -340,6 +342,14 @@ ${text}
 MESSAGE>>>
 
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+}
+
+/** Rechecks one Jira epic for a project's tracking feed. */
+export function epicCheckPrompt(key: string): string {
+  return `Look up the Jira epic ${key}: jira_get_issue for its title, status and last update, and jira_search \`parent = ${key}\` (fields status) to count its child issues, done meaning a Done-category status.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"key": string, "title": string, "status": string, "done": number, "total": number, "link": string, "updated": string|null}. link is the issue's browse URL; updated is ISO 8601.`;
 }
 
 export function sendToChannelPrompt(to: string, text: string): string {

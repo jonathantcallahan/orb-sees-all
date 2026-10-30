@@ -179,7 +179,7 @@ export default function App() {
 
       <main className="columns">
         <OrbGlow look={orbLook} level={load.level} />
-        <TodayColumn pressure={load} orbLook={orbLook} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        <TodayColumn pressure={load} orbLook={orbLook} working={running.length > 0} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
           <DailyReading

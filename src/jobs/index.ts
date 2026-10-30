@@ -2,14 +2,15 @@ import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackTh
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { sendToChannelPrompt } from "../prompts";
+import { epicCheckPrompt, sendToChannelPrompt } from "../prompts";
 import { linkSession, type PendingSend } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectRefresh, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
+import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
 
 export const queue = new JobQueue(3);
 
@@ -195,15 +196,20 @@ export async function refreshProject(channelId: string): Promise<void> {
             now: startedAt,
           }),
           schema: ProjectRefresh,
-          tools: TOOLS.slackRead,
+          // Jira too, to find the project's epics.
+          tools: [...TOOLS.slackRead, ...TOOLS.jiraRead],
           model: await model(),
         });
-        const { profile, related_channels, ...snapshot } = data;
+        const { profile, related_channels, epics, ...snapshot } = data;
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
         await db.saveProjectSnapshot(channelId, snapshot, profile, startedAt.toISOString());
         // Channels the project turned up in join it, unless they're already linked somewhere or the user unlinked them.
         for (const c of newRelatedChannels(related_channels, await db.listProjectChannels())) await db.linkChannel(channelId, c, "discovered");
+        // Its tracking feed: the epics just found, and its repos' PRs and branches (read locally with gh).
+        status("Checking GitHub");
+        const links = [...profile.resources.map((r) => r.link), ...snapshot.recent_updates.map((u) => u.link), ...snapshot.my_tasks.map((t) => t.link)];
+        await db.saveProjectTracking(channelId, await collectTracking(projectRepos(project.gh_repos, links), epics));
         await recordRefinements(data.my_tasks, index);
         return { value: undefined, costUsd };
       } catch (e) {
@@ -489,6 +495,51 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
       });
       const edited = text !== send.text ? ` I edited it first; this is what went out:\n\n${text}` : "";
       continueTaskSession(taskId, `I sent the message to ${send.to}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`).catch(() => {});
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/** Rebuilds a project's tracking feed now: GitHub read again, epics as the last refresh found them. */
+export function refreshTracking(projectId: string): Promise<void> {
+  return track(`tracking:${projectId}`, async () => {
+    const [project, stored] = await Promise.all([db.getProject(projectId), db.getProjectTracking()]);
+    if (!project) return;
+    const prior = stored[projectId];
+    const links = [...(project.profile?.resources ?? []).map((r) => r.link), ...(project.snapshot?.recent_updates ?? []).map((u) => u.link)];
+    const repos = projectRepos(project.gh_repos, [...links, ...(prior?.repos ?? []).map((r) => `https://github.com/${r}`)]);
+    await db.saveProjectTracking(projectId, await collectTracking(repos, prior?.epics ?? []));
+    bump();
+  });
+}
+
+/** Looks at one item in a project's tracking feed again: a PR or branch with gh, an epic through Jira. */
+export function recheckTrackedItem(projectId: string, item: TrackedItem): Promise<void> {
+  return track(`tracking:${item.id}`, (status) =>
+    logged("tracking", item.id, async () => {
+      let fresh: TrackedItem | null = null;
+      let costUsd = 0;
+      let epic: ProjectEpic | null = null;
+      if (item.kind === "epic") {
+        const res = await runClaude({
+          onStatus: status,
+          prompt: epicCheckPrompt(item.id.slice("epic:".length)),
+          schema: ProjectEpic,
+          tools: TOOLS.jiraRead,
+          model: "sonnet",
+          maxTurns: 8,
+        });
+        epic = res.data;
+        fresh = epicItem(res.data);
+        costUsd = res.costUsd;
+      } else fresh = await recheckGithubItem(item);
+      const tracking = (await db.getProjectTracking())[projectId];
+      if (tracking) {
+        // A branch that's gone (merged and deleted) drops out of the feed.
+        const items = tracking.items.flatMap((x) => (x.id === item.id ? (fresh ? [fresh] : []) : [x])).sort(byRecency);
+        const epics = epic ? tracking.epics.map((e) => (e.key === epic!.key ? epic! : e)) : tracking.epics;
+        await db.saveProjectTracking(projectId, { ...tracking, items, epics });
+      }
       return { value: undefined, costUsd };
     }),
   );

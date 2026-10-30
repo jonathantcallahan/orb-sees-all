@@ -8,6 +8,7 @@ import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { COLORED_ICONS } from "../linkIcons";
 import { linkKind } from "../links";
 import { LinkChips } from "./LinkChips";
+import { TrackingFeed } from "./TrackingFeed";
 import { activeChannels, projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
@@ -159,6 +160,7 @@ function ProfileModal({ project, onClose }: { project: Project; onClose: () => v
         )}
         </dl>
         {!p && <p className="muted small">The next refresh builds the project's profile.</p>}
+        <TrackingFeed projectId={project.channel_id} />
       </div>
     </div>,
     document.body,

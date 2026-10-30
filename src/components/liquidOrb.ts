@@ -8,16 +8,12 @@ import * as THREE from "three";
 import { NOISE } from "./orbNoise";
 import { FERRO, RIPPLE, type OrbUniforms } from "./orbEffects";
 
-const VERTEX = /* glsl */ `
-uniform float uTime;
-uniform float uStress;
-varying vec3 vObj;
-varying vec3 vViewPos;
-varying float vDisp;
-varying float vSpike;
-${NOISE}
-${RIPPLE}
-${FERRO}
+/**
+ * The Iridescent orb's surface at a direction: liquidBase is its swirling dents and ripples (without
+ * ferrofluid spikes); orbSurface is the whole radius, for the particle layer. Needs NOISE, RIPPLE and
+ * FERRO before it.
+ */
+export const LIQUID_SURFACE = /* glsl */ `
 // Liquid motion: twist the surface around the vertical axis by a slowly varying angle, then
 // warp it, so dents swirl and flow like a disturbed liquid surface instead of bobbing in place.
 float liquid(vec3 p, float t) {
@@ -29,10 +25,30 @@ float liquid(vec3 p, float t) {
   vec3 w = vec3(snoise(q * 0.8 + t * 0.16), snoise(q * 0.8 + 5.2 - t * 0.14), snoise(q * 0.8 + 9.7 + t * 0.12));
   return 0.85 * snoise(q * 0.9 + w * 0.8) + 0.15 * snoise(q * 1.7 + w * 0.6 + t * 0.25);
 }
-void main() {
+float liquidBase(vec3 n) {
   float t = uTime * mix(0.35, 1.1, uStress);
+  return liquid(n, t) * mix(0.08, 0.15, uStress) + 0.12 * ripple(n);
+}
+float orbSurface(vec3 n) {
+  n = normalize(n);
+  return 1.0 + liquidBase(n) + 0.7 * ferro(n);
+}
+`;
+
+const VERTEX = /* glsl */ `
+uniform float uTime;
+uniform float uStress;
+varying vec3 vObj;
+varying vec3 vViewPos;
+varying float vDisp;
+varying float vSpike;
+${NOISE}
+${RIPPLE}
+${FERRO}
+${LIQUID_SURFACE}
+void main() {
   float spike = ferro(normal);
-  float d = liquid(normal, t) * mix(0.08, 0.15, uStress) + 0.12 * ripple(normal) + 0.7 * spike;
+  float d = liquidBase(normal) + 0.7 * spike;
   vec3 pos = position + normal * d;
   // Film color comes from the undisplaced surface, so spikes share the color around their base.
   vObj = position + normal * (d - 0.7 * spike);
@@ -111,6 +127,7 @@ export function buildLiquidOrb(uniforms: OrbUniforms) {
   group.add(new THREE.Mesh(geometry, material));
   return {
     group,
+    surface: LIQUID_SURFACE,
     dispose: () => {
       geometry.dispose();
       material.dispose();

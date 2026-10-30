@@ -630,3 +630,14 @@ describe("task order", () => {
     expect(reorder(["a", "b"], "x", "b")).toEqual(["a", "x", "b"]);
   });
 });
+
+describe("sinceWhen", () => {
+  it("is relative within a day, then a date", async () => {
+    const { sinceWhen } = await import("./tasks");
+    const now = new Date(2026, 9, 30, 12, 0);
+    expect(sinceWhen(new Date(2026, 9, 30, 11, 59, 50).toISOString(), now)).toBe("just now");
+    expect(sinceWhen(new Date(2026, 9, 30, 9, 0).toISOString(), now)).toBe("3h ago");
+    expect(sinceWhen(new Date(2026, 9, 28, 9, 0).toISOString(), now)).toBe(new Date(2026, 9, 28).toLocaleDateString([], { month: "short", day: "numeric" }));
+    expect(sinceWhen(null, now)).toBe("");
+  });
+});

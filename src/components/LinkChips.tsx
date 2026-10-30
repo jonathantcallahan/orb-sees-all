@@ -2,7 +2,7 @@ import type { LinkKind, TaskLink } from "../links";
 import { COLORED_ICONS, MONO_ICONS } from "../linkIcons";
 import { ExternalLink } from "./common";
 
-function LinkIcon({ kind }: { kind: LinkKind }) {
+export function LinkIcon({ kind }: { kind: LinkKind }) {
   const colored = COLORED_ICONS[kind];
   if (colored) return <img className="link-chip-icon" src={colored} width={14} height={14} alt="" />;
   const mono = MONO_ICONS[kind] ?? MONO_ICONS.web!;

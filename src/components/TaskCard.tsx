@@ -3,10 +3,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, clearTaskCheck, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, continueTaskSession, planTask, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
-import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
+import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ComposeModal, ExternalLink, Reveal, Spinner } from "./common";
@@ -376,6 +376,12 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
  * Approve & start) sits inside, under the steps.
  */
 /** A small dashed ring marking a plan step. */
+/** Applying a double check's correction: still going (what it's doing), or done (when). */
+type CorrectionState = { working: string } | { appliedAt: string };
+
+/** Which task cards you've opened (true) or closed (false) this session, by task id. */
+const openCards = new Map<string, boolean>();
+
 /** Whether the user asked for reduced motion; checked on each use, so a change in System Settings applies at once. */
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -553,9 +559,92 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   );
 }
 
+/** Claude's message with its **bold** kept and its line breaks as written. */
+function ClaudeText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+        part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <span key={i}>{part}</span>,
+      )}
+    </>
+  );
+}
+
+/** Claude's latest message on the card: the whole of it, folded to a few lines when it's long. */
+function ClaudeMessage({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 420 || text.split("\n").length > 7;
+  return (
+    <div className="chat-msg claude">
+      <div className={`chat-text${long && !open ? " clamped" : ""}`}>
+        <ClaudeText text={text} />
+      </div>
+      {long && (
+        <button className="link-button small more-link" onClick={() => setOpen(!open)}>
+          {open ? "Less" : "More"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
- * The background session, from the task card: what it's doing while it works, messages it handed
- * over to send, a box to answer it when it's waiting on the user, and a retry if a turn failed.
+ * Where you write back to the session: grows with what you type; Enter sends, Shift+Enter starts a
+ * new line (and text being composed with an input method is never sent early).
+ */
+function Composer({ onSend }: { onSend: (text: string) => void }) {
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  };
+  useLayoutEffect(fit, [text]);
+  const send = () => {
+    if (!text.trim()) return;
+    onSend(text.trim());
+    setText("");
+  };
+  return (
+    <div className="composer-wrap">
+      <form
+        className="composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send();
+        }}
+      >
+        <textarea
+          ref={ref}
+          rows={1}
+          value={text}
+          placeholder="Reply to Claude…"
+          aria-label="Reply to Claude"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <button className="composer-send" type="submit" disabled={!text.trim()} aria-label="Send reply">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </form>
+      <span className="composer-hint">↩ to send · ⇧↩ for a new line</span>
+    </div>
+  );
+}
+
+/**
+ * The background session, from the task card: the latest exchange (your reply, and Claude's answer
+ * or what it's doing right now), messages it handed over to send, a box to answer it when it's
+ * waiting on you, and a retry if a turn failed.
  */
 function SessionPanel({
   taskId,
@@ -563,6 +652,7 @@ function SessionPanel({
   working,
   waiting,
   toSend,
+  progress,
   onChange,
 }: {
   taskId: string;
@@ -571,23 +661,43 @@ function SessionPanel({
   working: string | undefined;
   waiting: boolean;
   toSend: PendingSend[];
+  progress: SessionProgress | null;
   onChange: () => void;
 }) {
-  const [reply, setReply] = useState("");
-  const send = async (message: string) => {
-    setReply("");
+  // What you just sent shows at once, until the transcript catches up with it.
+  const [sent, setSent] = useState<string | null>(null);
+  useEffect(() => {
+    if (sent && progress?.lastUser?.trim() === sent) setSent(null);
+  }, [progress?.lastUser]);
+  const send = (message: string) => {
+    setSent(message);
     continueTaskSession(taskId, message).then(onChange, onChange);
     onChange();
   };
-  if (working)
-    return (
-      <span className="muted small session-working">
-        <Spinner /> Claude is working: {working}…
-      </span>
-    );
+  const yours = sent ?? progress?.lastUser ?? null;
+  // Claude's reply belongs to your message only once the transcript has it; until then it's working.
+  const reply = !sent ? (progress?.lastReply ?? null) : null;
+  const showChat = !!yours || (!!reply && waiting);
   return (
     <>
-      {link.lastError && (
+      {showChat && (
+        <div className="chat">
+          {yours && <div className="chat-msg you">{yours}</div>}
+          {working || sent ? (
+            <span className="muted small session-working">
+              <Spinner /> Claude is working{working ? `: ${working}` : ""}…
+            </span>
+          ) : (
+            reply && <ClaudeMessage text={reply} />
+          )}
+        </div>
+      )}
+      {!showChat && working && (
+        <span className="muted small session-working">
+          <Spinner /> Claude is working: {working}…
+        </span>
+      )}
+      {link.lastError && !working && (
         <div className="small session-error">
           <span className="error">Claude stopped: {link.lastError}</span>
           <button className="link-button small" onClick={() => send("Please carry on where you left off.")}>
@@ -595,31 +705,10 @@ function SessionPanel({
           </button>
         </div>
       )}
-      {toSend.map((s) => (
-        <HandoffRow key={s.key} taskId={taskId} send={s} onChange={onChange} />
-      ))}
-      {waiting && link.sessionId && (
-        <form
-          className="session-reply"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (reply.trim()) send(reply.trim());
-          }}
-        >
-          <textarea
-            rows={2}
-            value={reply}
-            placeholder="Answer Claude…"
-            onChange={(e) => setReply(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && reply.trim()) send(reply.trim());
-            }}
-          />
-          <button className="cta-ghost" type="submit" disabled={!reply.trim()}>
-            Reply
-          </button>
-        </form>
-      )}
+      {!working &&
+        !sent &&
+        toSend.map((s) => <HandoffRow key={s.key} taskId={taskId} send={s} onChange={onChange} />)}
+      {waiting && !working && !sent && link.sessionId && <Composer onSend={send} />}
     </>
   );
 }
@@ -655,9 +744,11 @@ function TaskCheckResult({
   onDone,
   onDismiss,
   onMerge,
-  onApply,
-  onHide,
+  correction,
+  taskId,
 }: {
+  /** For remembering whether it's folded away. */
+  taskId: string;
   check: StoredTaskCheck;
   /** Title of the open task the check says this duplicates, when it's still open. */
   duplicateTitle?: string;
@@ -665,16 +756,49 @@ function TaskCheckResult({
   onDismiss: () => void;
   /** Folds this task into the one it duplicates. */
   onMerge?: () => void;
-  onApply: (description: string) => void;
-  onHide: () => void;
+  /** How applying its correction is going; null when the check suggested none. */
+  correction: CorrectionState | null;
 }) {
   const corrected = check.corrected_description?.trim();
+  // Folded away or open, remembered per task.
+  const key = `check-open:${taskId}`;
+  const [open, setOpen] = useState(() => localStorage.getItem(key) !== "0");
+  const toggle = () => {
+    localStorage.setItem(key, open ? "0" : "1");
+    setOpen(!open);
+  };
   return (
-    <div className={`check-result task-check ${check.verdict}`}>
-      <div className="check-head small">
-        <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span>
-        <span className="timestamp">checked {ago(check.at)}</span>
+    <div className={`check-result task-check ${check.verdict}${open ? "" : " folded"}`}>
+      {/* The whole title row folds and unfolds it. */}
+      <div className="check-head small" onClick={toggle}>
+        <span className="check-title">Task investigation</span>
+        {/* One status: a correction being applied (spinner, no time yet), or the outcome and when. */}
+        {correction && "working" in correction ? (
+          <span className="timestamp check-status">
+            <Spinner /> {correction.working}…
+          </span>
+        ) : correction ? (
+          <span className="timestamp check-status">Correction applied {sinceWhen(correction.appliedAt)}</span>
+        ) : (
+          <span className="check-status">
+            <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span> <span className="timestamp">{sinceWhen(check.at)}</span>
+          </span>
+        )}
+        <button
+          className="task-toggle check-toggle"
+          aria-expanded={open}
+          aria-label={open ? "Fold the investigation away" : "Show the investigation"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+        >
+          <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+            <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
+      <Reveal open={open} className="check-body">
       <p className="small">{check.summary}</p>
       {check.findings.length > 0 && (
         <ul className="check-findings small">
@@ -688,15 +812,10 @@ function TaskCheckResult({
           ))}
         </ul>
       )}
-      {corrected && <p className="small corrected">Suggested description: {corrected}</p>}
+      {corrected && <p className="small corrected">Corrected description: {corrected}</p>}
       <div className="check-actions small">
         <LinkChips links={check.evidence.map((e) => ({ url: e.link, title: e.title, kind: linkKind(e.link) }))} />
         <span className="check-buttons">
-          {corrected && (
-            <button className="link-button small" onClick={() => onApply(corrected)} title="Use this description and plan again">
-              Apply correction
-            </button>
-          )}
           {check.verdict === "already_done" && (
             <button className="link-button small" onClick={onDone}>
               Mark done
@@ -712,11 +831,9 @@ function TaskCheckResult({
               Dismiss task
             </button>
           )}
-          <button className="link-button small muted" onClick={onHide}>
-            Hide
-          </button>
         </span>
       </div>
+      </Reveal>
     </div>
   );
 }
@@ -766,9 +883,15 @@ export function TaskCard({
   const awaitingSession = !!sessionLink && !linked && Date.now() - sessionLink.startedAt < GIVE_UP_MS;
   // Collapsed cards show one line; the arrow after the badges opens and closes them. Compact cards
   // (finished tasks in Today, other groups' rows) start collapsed, and collapse again when they become compact.
-  const [collapsed, setCollapsed] = useState(compact);
+  // A card you opened or closed stays that way while the app runs, even when it's dragged to another
+  // list (which renders it afresh there); otherwise it starts as its list shows cards.
+  const [collapsed, setCollapsedState] = useState(() => openCards.get(task.id) === undefined ? compact : !openCards.get(task.id));
+  const setCollapsed = (value: boolean) => {
+    openCards.set(task.id, !value);
+    setCollapsedState(value);
+  };
   /** The body's content is only rendered once the card has been opened, then kept for the close animation. */
-  const [bodyMounted, setBodyMounted] = useState(!compact);
+  const [bodyMounted, setBodyMounted] = useState(!collapsed);
   /** True while the height animates; the body clips its content only then (and while collapsed). */
   const [animating, setAnimating] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
@@ -781,9 +904,12 @@ export function TaskCard({
       requestAnimationFrame(() => requestAnimationFrame(() => setCollapsed(false)));
     } else setCollapsed(!open);
   };
-  // A card that becomes compact (a task just marked done in Today) closes itself.
+  // A card that becomes compact while shown (a task just marked done in Today) closes itself; one that
+  // merely arrives in a compact list (dragged there) keeps its state.
+  const wasCompact = useRef(compact);
   useEffect(() => {
-    if (compact) setOpen(false);
+    if (compact && !wasCompact.current) setOpen(false);
+    wasCompact.current = compact;
   }, [compact]);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
@@ -861,7 +987,8 @@ export function TaskCard({
             Approve & start
           </button>
         )}
-        {plan && !planning && (
+        {/* Once a session is under way, the steps and the conversation are the plan. */}
+        {plan && !planning && !sessionLink && (
           <button className="cta-ghost" onClick={() => setShowPlan(true)}>
             Show plan details
           </button>
@@ -878,6 +1005,7 @@ export function TaskCard({
             working={sessionWorking}
             waiting={!!waitingStep}
             toSend={toSend}
+            progress={progress}
             onChange={onChange}
           />
         )}
@@ -901,6 +1029,24 @@ export function TaskCard({
     onChange();
     if (next && !linked) runPlan(next);
   };
+  // A double check that found the task captured wrong applies its corrected description on its own,
+  // once (recorded first, so it can't apply twice), and the task is planned again from it.
+  const [applyingCorrection, setApplyingCorrection] = useState(false);
+  const correction = check?.corrected_description?.trim();
+  useEffect(() => {
+    if (!correction || check?.appliedAt || applyingCorrection) return;
+    setApplyingCorrection(true);
+    markCorrectionApplied(task.id)
+      .then(() => saveDescription(correction))
+      .finally(() => setApplyingCorrection(false));
+  }, [correction, check?.appliedAt]);
+  const correctionState: CorrectionState | null = !correction
+    ? null
+    : applyingCorrection || !check?.appliedAt
+      ? { working: "Applying correction" }
+      : planning || assessing
+        ? { working: "Replanning" }
+        : { appliedAt: check.appliedAt };
   const source =
     task.source === "manual"
       ? "the user's own to-do list"
@@ -1158,11 +1304,8 @@ export function TaskCard({
                   }
                   onDone={() => setStateAndRefresh({ status: "done" })}
                   onDismiss={() => setStateAndRefresh({ dismissed: true })}
-                  onApply={(text) => saveDescription(text)}
-                  onHide={async () => {
-                    await clearTaskCheck(task.id);
-                    onChange();
-                  }}
+                  correction={correctionState}
+                  taskId={task.id}
                 />
               )}
             </>

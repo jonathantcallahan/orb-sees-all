@@ -108,21 +108,37 @@ void main() {
  * lobes and adds broad folds of its own. Normals come from the displaced surface (by finite
  * differences), so reflections and refraction follow the folds.
  */
+/**
+ * The glass shell's radius at a direction: it hugs the core's lobes and adds broad folds of its
+ * own. Also given to the particle layer as the Glass and Crystal orbs' surface (orbSurface), so
+ * particles know where its wave tips are. Needs NOISE, RIPPLE and FERRO before it.
+ */
+export const GLASS_SURFACE = /* glsl */ `
+${BLOB}
+const float SHELL_RADIUS = 1.1;
+const float SHELL_SEED = 1.7;
+float shellRadius(vec3 n, float t) {
+  float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
+  float drift = snoise(n * 0.75 + vec3(SHELL_SEED) + t * 0.22);
+  float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + SHELL_SEED * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
+  return SHELL_RADIUS + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.6 * ferro(n);
+}
+float orbSurface(vec3 n) {
+  return shellRadius(normalize(n), uTime * mix(0.32, 1.0, uStress));
+}
+`;
+
+/**
+ * The shell's molten shape, injected into MeshPhysicalMaterial's vertex shader. Normals come from
+ * the displaced surface (by finite differences), so reflections and refraction follow the folds.
+ */
 const SHELL_SHAPE = /* glsl */ `
 uniform float uTime;
 uniform float uStress;
-uniform float uRadius;
-uniform float uSeed;
 ${NOISE}
 ${RIPPLE}
 ${FERRO}
-${BLOB}
-float shellRadius(vec3 n, float t) {
-  float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
-  float drift = snoise(n * 0.75 + vec3(uSeed) + t * 0.22);
-  float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
-  return uRadius + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.6 * ferro(n);
-}
+${GLASS_SURFACE}
 vec3 shellPoint(vec3 n, float t) {
   n = normalize(n);
   return n * shellRadius(n, t);
@@ -230,8 +246,6 @@ export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRender
       uSpike: uniforms.uSpike,
       uSpikeDir: uniforms.uSpikeDir,
       uClock: uniforms.uClock,
-      uRadius: { value: 1.1 },
-      uSeed: { value: 1.7 },
     });
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>\n${SHELL_SHAPE}`)
@@ -257,5 +271,5 @@ export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRender
   });
   disposables.push(environment);
 
-  return { group, environment, dispose: () => disposables.forEach((d) => d.dispose()) };
+  return { group, environment, surface: GLASS_SURFACE, dispose: () => disposables.forEach((d) => d.dispose()) };
 }

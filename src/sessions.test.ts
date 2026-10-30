@@ -90,3 +90,11 @@ describe("handed-off messages", () => {
     expect(unsentMessages(sends, { startedAt: 0, sentKeys: [sends[1].key] }).map((s) => s.text)).toEqual(["other"]);
   });
 });
+
+describe("readable reply", () => {
+  it("drops report lines and hand-off blocks, keeping what Claude said", async () => {
+    const { readableReply } = await import("./sessions");
+    const text = "[orb] step 1 done\n\nTwo rates are on the table:\n- 0.92 (storefront)\n- 0.85 (Finance)\n\n[orb] send step 5 to #refunds\nDraft here\n[orb] end\n`[orb] step 2 waiting: which rate?`";
+    expect(readableReply(text)).toBe("Two rates are on the table:\n- 0.92 (storefront)\n- 0.85 (Finance)");
+  });
+});

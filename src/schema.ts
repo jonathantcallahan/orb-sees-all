@@ -125,10 +125,25 @@ export type ProjectProfile = z.infer<typeof ProjectProfile>;
 export const RelatedChannel = z.object({ channel_id: z.string(), name: z.string(), reason: z.string() });
 export type RelatedChannel = z.infer<typeof RelatedChannel>;
 
-/** What a project refresh returns: the new snapshot, the refined profile, and channels it found. */
+/** A Jira epic that belongs to a project, with how far along its child issues are. */
+export const ProjectEpic = z.object({
+  key: z.string(),
+  title: z.string(),
+  /** Jira's status name, e.g. "In Progress". */
+  status: z.string(),
+  done: z.number().default(0),
+  total: z.number().default(0),
+  link: z.string(),
+  /** When it last changed, ISO 8601. */
+  updated: z.string().nullish(),
+});
+export type ProjectEpic = z.infer<typeof ProjectEpic>;
+
+/** What a project refresh returns: the new snapshot, the refined profile, channels and epics it found. */
 export const ProjectRefresh = ProjectSnapshot.extend({
   profile: ProjectProfile,
   related_channels: z.array(RelatedChannel).default([]),
+  epics: z.array(ProjectEpic).default([]),
 });
 export type ProjectRefresh = z.infer<typeof ProjectRefresh>;
 

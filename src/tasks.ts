@@ -321,6 +321,15 @@ export function ago(since: string | null | undefined, now = new Date()): string 
   return a && a !== "just now" ? `${a} ago` : a;
 }
 
+/** When something happened, to finish a phrase: "just now", "5m ago" or "3h ago" within a day, then the date ("Oct 29"). */
+export function sinceWhen(at: string | null | undefined, now = new Date()): string {
+  if (!at) return "";
+  const t = new Date(at);
+  if (Number.isNaN(t.getTime())) return "";
+  if (now.getTime() - t.getTime() < 86_400_000) return ago(at, now) ?? "";
+  return t.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export interface ProjectFilter {
   /** Empty means any status. */
   statuses: ProjectStatus[];

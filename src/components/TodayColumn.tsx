@@ -147,6 +147,7 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
 export function TodayColumn({
   pressure,
   orbLook,
+  working,
   calendar,
   taskStates,
   busy,
@@ -154,6 +155,8 @@ export function TodayColumn({
 }: {
   pressure: Pressure;
   orbLook: OrbLook;
+  /** Orb is busy (a refresh or task session): the orb gives off motes. */
+  working: boolean;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
   taskStates: Map<string, TaskState>;
   busy: boolean;
@@ -169,7 +172,7 @@ export function TodayColumn({
 
   return (
     <section className="column">
-      <PressureBlob pressure={pressure} look={orbLook} />
+      <PressureBlob pressure={pressure} look={orbLook} working={working} />
       <header className="column-header">
         <div>
           <h2>Today</h2>

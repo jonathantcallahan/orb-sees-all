@@ -5,20 +5,18 @@ import { PressureBars } from "./PressureBars";
 import { NOISE } from "./orbNoise";
 import { FERRO, NO_RIPPLE, RIPPLE, type OrbUniforms } from "./orbEffects";
 import { ORB_AGITATE_EVENT, TASK_DONE_EVENT } from "../orbEvents";
+import { buildParticles } from "./orbParticles";
+import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
 import { buildLiquidOrb } from "./liquidOrb";
 
 
-const VERTEX = /* glsl */ `
-uniform float uTime;
-uniform float uStress;
-varying vec3 vPos;
-varying vec3 vViewPos;
-varying float vDisp;
-varying float vSpike;
-${NOISE}
-${RIPPLE}
-${FERRO}
+/**
+ * The Classic orb's surface at a direction: classicBase is its swells, stress spikes and ripples
+ * (without ferrofluid spikes); orbSurface is the whole radius, for the particle layer. Needs NOISE,
+ * RIPPLE and FERRO before it.
+ */
+const CLASSIC_SURFACE = /* glsl */ `
 // One wave train: a sine along direction d, its phase bent by noise so crests wander, and its
 // height scaled by a slow noise envelope (seeded) so it swells in some places and fades in others.
 float wave(vec3 n, vec3 d, float freq, float phase, float seed) {
@@ -28,10 +26,9 @@ float wave(vec3 n, vec3 d, float freq, float phase, float seed) {
   float height = 0.08 + 0.92 * env * env * 1.6;
   return height * sin(dot(n, normalize(d)) * freq + phase + bend);
 }
-void main() {
+float classicBase(vec3 n) {
   // Calm: slow, irregular swells. Stressed: high-frequency ridged noise, i.e. spikes.
   float flow = uTime * mix(0.125, 0.9, uStress);
-  vec3 n = normal;
   // Nine wave trains of different sizes, directions and speeds, from a broad swell that lifts
   // whole regions to quick small ripples. Each has its own slowly drifting height envelope, so
   // waves rise tall in some places and all but vanish in others.
@@ -47,10 +44,30 @@ void main() {
     + 0.06 * wave(n, vec3(-0.10, 0.25, -0.96), 10.5, -flow * 2.3, 7.9);
   // Spikes grow with the square of stress: faint until the orb is genuinely overloaded.
   float sharp = uStress * uStress;
-  float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, sharp) + flow * 1.3));
+  float ridge = 1.0 - abs(snoise(n * mix(2.0, 4.5, sharp) + flow * 1.3));
   float spikes = pow(ridge, mix(2.0, 6.0, sharp));
+  return mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp + 0.14 * ripple(n);
+}
+float orbSurface(vec3 n) {
+  n = normalize(n);
+  return 1.0 + classicBase(n) + 0.75 * ferro(n);
+}
+`;
+
+const VERTEX = /* glsl */ `
+uniform float uTime;
+uniform float uStress;
+varying vec3 vPos;
+varying vec3 vViewPos;
+varying float vDisp;
+varying float vSpike;
+${NOISE}
+${RIPPLE}
+${FERRO}
+${CLASSIC_SURFACE}
+void main() {
   float spike = ferro(normal);
-  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp + 0.14 * ripple(normal) + 0.75 * spike;
+  float disp = classicBase(normal) + 0.75 * spike;
   vec3 pos = position + normal * disp;
   // Colored by where the point sits on the undisplaced surface, so a ferrofluid spike takes the
   // color of the surface it grows from.
@@ -134,6 +151,7 @@ function buildClassicOrb(uniforms: OrbUniforms) {
   group.add(new THREE.Mesh(geometry, material));
   return {
     group,
+    surface: CLASSIC_SURFACE,
     dispose: () => {
       geometry.dispose();
       material.dispose();
@@ -141,10 +159,32 @@ function buildClassicOrb(uniforms: OrbUniforms) {
   };
 }
 
-export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressure; look?: OrbLook }) {
+/** Mote colors for each look while Orb works: bright on a dark page, deeper on a light one. */
+/** How far above its surroundings a point must stand to count as a wave tip, per look (their waves differ in depth). */
+const TIP: Record<OrbLook, [number, number]> = {
+  classic: [0.0015, 0.01],
+  iridescent: [0.002, 0.012],
+  glass: [0.006, 0.03],
+  crystal: [0.006, 0.03],
+};
+
+const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [number, number, number] }> = {
+  classic: { dark: [0.55, 0.8, 1.0], light: [0.25, 0.38, 0.85] },
+  glass: { dark: [0.45, 0.85, 1.0], light: [0.15, 0.35, 0.85] },
+  crystal: { dark: [0.78, 0.9, 1.0], light: [0.3, 0.4, 0.72] },
+  iridescent: { dark: [0.85, 0.76, 1.0], light: [0.55, 0.35, 0.8] },
+};
+
+/**
+ * The orb. `working` is true while Orb is busy (a refresh, a task session): it then gives off motes
+ * from the tips of its waves.
+ */
+export function PressureBlob({ pressure, look = "classic", working = false }: { pressure: Pressure; look?: OrbLook; working?: boolean }) {
   const mount = useRef<HTMLDivElement>(null);
   const target = useRef(pressure.level);
   target.current = pressure.level;
+  const workingRef = useRef(working);
+  workingRef.current = working;
 
   useEffect(() => {
     const el = mount.current!;
@@ -171,6 +211,7 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       uSpike: { value: 0 },
       uSpikeDir: { value: new THREE.Vector3(0, 0, 1) },
       uClock: { value: 0 },
+      uWorking: { value: 0 },
     };
     const orb =
       look === "glass"
@@ -182,6 +223,12 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
             : buildClassicOrb(uniforms);
     if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
+    // Motes off the wave tips while Orb works; they ride along as the orb turns.
+    const moteColor = new THREE.Color();
+    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look]);
+    blob.add(particles.points);
+    const paintMotes = () => moteColor.setRGB(...MOTE_COLORS[look][isDark((document.documentElement.dataset.theme as Theme) ?? "system") ? "dark" : "light"]);
+    paintMotes();
     // The orb spins inside a group that turns it toward the cursor when the cursor comes near.
     const facing = new THREE.Group();
     facing.add(blob);
@@ -248,6 +295,10 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       uniforms.uTime.value += dt * motion;
       if (uniforms.uRippleAge.value < NO_RIPPLE) uniforms.uRippleAge.value += dt;
       uniforms.uClock.value += dt;
+      // Motes fade in over about half a second when work starts, and out a little slower.
+      const work = workingRef.current && motion === 1 ? 1 : 0;
+      uniforms.uWorking.value += (work - uniforms.uWorking.value) * Math.min(dt * (work ? 2.5 : 1.5), 1);
+      if (frame % 30 === 0) paintMotes();
       // Spikes surge in quickly and sink back a little slower.
       const spike = uniforms.uSpike.value;
       uniforms.uSpike.value = spike + ((agitated ? 1 : 0) - spike) * Math.min(dt * (agitated ? 5 : 2.5), 1);
@@ -280,6 +331,7 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       document.removeEventListener("pointerleave", onLeave);
       observer.disconnect();
       orb.dispose();
+      particles.dispose();
       renderer.dispose();
       el.removeChild(renderer.domElement);
     };

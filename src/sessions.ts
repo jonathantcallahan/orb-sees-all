@@ -45,6 +45,10 @@ export interface SessionProgress {
   steps: Record<number, StepProgress>;
   /** Messages the session handed to Orb, oldest first. */
   sends: PendingSend[];
+  /** Your latest message to the session, unless it's still the opening prompt. */
+  lastUser?: string | null;
+  /** What Claude has said since, without its "[orb]" report lines and hand-off blocks. */
+  lastReply?: string | null;
   /** When the transcript last changed (ms). */
   updatedAt: number | null;
   found: boolean;
@@ -107,6 +111,17 @@ export function unsentMessages(sends: PendingSend[], link: SessionLink | undefin
   return [...latest.values()].filter((send) => !sent.has(send.key));
 }
 
+/** Claude's message as the user should read it: "[orb]" report lines and hand-off blocks taken out. */
+export function readableReply(text: string): string {
+  return text
+    .replace(/^\s*`?\[orb\] send[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    .split("\n")
+    .filter((line) => !/^\s*[-`]*\s*\[orb\]/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 interface FoundSession {
   path: string;
   sessionId: string;
@@ -164,11 +179,23 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
           await db.updateSessionLink(taskId, { path: found.path, sessionId: found.sessionId });
           onLinked?.();
         }
-        const { lines, sends, modifiedMs } = await invoke<{ lines: string[]; sends: { header: string; body: string }[]; modifiedMs: number }>(
-          "read_session_progress",
-          { path },
-        );
-        if (!cancelled) setProgress({ steps: parseProgress(lines), sends: parseSends(sends), updatedAt: modifiedMs, found: true });
+        const { lines, sends, lastUser, lastReply, modifiedMs } = await invoke<{
+          lines: string[];
+          sends: { header: string; body: string }[];
+          lastUser: string | null;
+          lastReply: string | null;
+          modifiedMs: number;
+        }>("read_session_progress", { path });
+        if (!cancelled)
+          setProgress({
+            steps: parseProgress(lines),
+            sends: parseSends(sends),
+            // The opening prompt isn't a reply of yours.
+            lastUser: lastUser && !lastUser.startsWith("Orb task:") ? lastUser : null,
+            lastReply: lastReply ? readableReply(lastReply) || null : null,
+            updatedAt: modifiedMs,
+            found: true,
+          });
       } catch {
         // The transcript moved or isn't readable; try again next poll.
       }

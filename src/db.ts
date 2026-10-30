@@ -2,6 +2,7 @@ import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import type { DiscoveryPlan, ProjectChannel } from "./projects";
+import type { ProjectTracking } from "./jobs/tracking";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 import { announceTaskDone } from "./orbEvents";
 
@@ -210,7 +211,8 @@ type Store =
   | "task_checks"
   | "blocker_checks"
   | "reminders"
-  | "not_duplicates";
+  | "not_duplicates"
+  | "project_tracking";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -255,6 +257,8 @@ export const saveRefinedDescription = (taskId: string, text: string) => putRow("
 
 export interface StoredTaskCheck extends TaskCheck {
   at: string;
+  /** When its corrected description was applied to the task (corrections apply on their own, once). */
+  appliedAt?: string;
 }
 
 /** Priorities the user set by hand, keyed by task id. */
@@ -267,6 +271,10 @@ export async function setPriorityOverride(taskId: string, priority: Priority | n
 }
 
 /** Claude Code sessions Orb opened for tasks, keyed by task id. */
+/** Each project's tracking feed (epics, PRs, branches), by project id. */
+export const getProjectTracking = () => getRows<ProjectTracking>("project_tracking");
+export const saveProjectTracking = (projectId: string, tracking: ProjectTracking) => putRow("project_tracking", projectId, tracking);
+
 export const getSessionLinks = () => getRows<SessionLink>("session_links");
 
 export const saveSessionLink = (taskId: string, link: SessionLink) => putRow("session_links", taskId, link);
@@ -283,6 +291,12 @@ export const getTaskChecks = () => getRows<StoredTaskCheck>("task_checks");
 export const clearTaskCheck = (taskId: string) => deleteRow("task_checks", taskId);
 
 export const saveTaskCheck = (taskId: string, check: TaskCheck) => putRow("task_checks", taskId, { ...check, at: nowIso() });
+
+/** Records that a check's correction was applied, so it never applies twice. */
+export async function markCorrectionApplied(taskId: string) {
+  const check = (await getTaskChecks())[taskId];
+  if (check) await putRow("task_checks", taskId, { ...check, appliedAt: nowIso() });
+}
 
 export interface StoredBlockerCheck extends BlockerCheck {
   at: string;
