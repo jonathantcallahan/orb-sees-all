@@ -472,9 +472,9 @@ Work out where each step really stands from the conversation:
 - done: finished, including when a message or decision in the conversation took care of it, or it was done out of order.
 - skipped: no longer needed, because a decision changed the approach or someone else took it on. Say why in note.
 - started: being worked on now.
-- waiting: Claude needs something from me to go on. Say what in note.
-- blocked: can't move until someone else acts (an answer, an approval). Say who or what in note.
-- todo: not started yet.
+- waiting: Claude has stopped and needs something from me right now to go on (an answer, a decision, a message to send). Say what in note.
+- blocked: can't move until someone else acts (an answer, an approval). In note, say who or what in a few words, like "Eric's Legal answer".
+- todo: not started yet. A step that can't begin until a blocked step clears is todo, not waiting, even if it's mine.
 
 If the plan itself changed in the conversation (a step reassigned, reworded, dropped or added), return the steps as they now stand: keep finished and skipped steps, reword or add steps to match, mark mine with by "you" and Claude's with by "claude". Otherwise keep the titles exactly as listed. Keep the order the work happens in.
 

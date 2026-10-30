@@ -557,13 +557,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-result p { margin: 0; }
 .check-head { display: flex; align-items: center; gap: 8px; }
 .task-check .check-title { color: var(--muted); font-size: 12px; }
-/* Outlined like the "Orb can help" box, with no fill. */
+/* Outlined like the Plan box, with no fill. */
 .check-result.task-check { gap: 0; background: none; border: 1px dashed var(--border); padding: 6px 8px; }
 .task-check .check-toggle { margin-left: auto; }
 .task-check .check-head { cursor: pointer; user-select: none; }
 .task-check .check-head:hover .check-title, .task-check .check-head:hover .check-toggle { color: var(--text); }
 .check-status { display: inline-flex; align-items: center; gap: 4px; }
-/* Its text is the same gray as other body text (descriptions, Orb can help); the ✓ and ! marks keep their colors. */
+/* Its text is the same gray as other body text (descriptions, the Plan box); the ✓ and ! marks keep their colors. */
 .task-check .check-body p, .task-check .check-findings li, .task-check .corrected { color: var(--muted); }
 .check-body .reveal-inner { gap: 3px; }
 .check-body .reveal-inner > :first-child { margin-top: 3px; }
@@ -686,7 +686,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .step-circle.done { color: var(--green); }
 .step-circle.skipped { color: var(--muted); opacity: 0.7; }
 .step-circle.blocked { color: var(--red); }
-.step-blocked { margin-left: 6px; font-size: 11px; color: var(--red); }
+.plan-outline-steps li.step-blocked > .hover-tip-anchor > .small { color: var(--red); }
+.hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
 .plan-outline-steps li.step-skipped > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); animation: step-turn 2.4s linear infinite; }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
@@ -1242,3 +1243,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .slack-empty { font-size: 13px; color: var(--slack-muted); }
 .slack-editor { min-height: 120px; border-radius: 8px; resize: none; font-size: 13px; line-height: 1.5; padding: 8px 10px; }
 .slack-editor:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* "Orb can help" after the Plan heading, in the timestamps' lighter gray (.timestamp). */
+.automation-role { font-size: 12px; }

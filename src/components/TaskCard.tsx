@@ -366,10 +366,11 @@ function carriedLabel(day: string): string {
   return days === 1 ? "from yesterday" : `from ${days} days ago`;
 }
 
-const AUTOMATION_LABEL: Record<Automation, string> = {
-  human: "You do it",
+/** What Orb can do for a task, beside the Plan heading; nothing for tasks that are all yours. */
+const ORB_ROLE: Record<Automation, string | null> = {
+  human: null,
   assisted: "Orb can help",
-  claude: "Orb can do it",
+  claude: "Orb can complete this task",
 };
 
 /**
@@ -413,6 +414,27 @@ function StepCircle({ state }: { state?: StepState }) {
         <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
       )}
     </svg>
+  );
+}
+
+/**
+ * Shows `text` in a small card under its child while it's hovered (the webview doesn't show native
+ * title tooltips). With no text, renders the child alone.
+ */
+function HoverTip({ text, children }: { text: string | null; children: ReactNode }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  if (!text) return <>{children}</>;
+  return (
+    <span className="hover-tip-anchor" onMouseEnter={(e) => setAnchor(e.currentTarget.getBoundingClientRect())} onMouseLeave={() => setAnchor(null)}>
+      {children}
+      {anchor &&
+        createPortal(
+          <div className="card meeting-card hover-tip small" role="tooltip" style={{ left: anchor.left, top: anchor.bottom + 6 }}>
+            {text}
+          </div>,
+          document.body,
+        )}
+    </span>
   );
 }
 
@@ -461,15 +483,14 @@ function PlanOutline({
               ) : (
                 <StepCircle state={step.progress?.state} />
               )}
-              <span className="small">
-                {step.title}
-                {step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked" && (
-                  <span className="step-by you">Human input needed</span>
-                )}
-                {step.progress?.state === "blocked" && (
-                  <span className="step-blocked">Blocked{step.progress.note ? ` on ${step.progress.note.replace(/^(?:on|waiting on|by)\s+/i, "")}` : ""}</span>
-                )}
-              </span>
+              <HoverTip text={step.progress?.state === "blocked" ? (step.progress.note ? `Blocked: ${step.progress.note}` : "Blocked") : null}>
+                <span className="small">
+                  {step.title}
+                  {step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked" && (
+                    <span className="step-by you">Human input needed</span>
+                  )}
+                </span>
+              </HoverTip>
             </li>
           ))}
         </ol>
@@ -512,7 +533,8 @@ function AssessmentView({
       )}
       <div className={`automation ${assessment.automation}`}>
         <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-          <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
+          <span className="automation-kind">Plan</span>
+          {ORB_ROLE[assessment.automation] && <span className="automation-role timestamp">{ORB_ROLE[assessment.automation]}</span>}
           <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
             <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -1061,7 +1083,12 @@ export function TaskCard({
       : plan
         ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
         : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
-  ).map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title) }));
+  )
+    .map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title) }))
+    // A step after a blocked one can't be waiting on you yet; it starts once the block clears.
+    .map((st, i, all) =>
+      st.progress?.state === "waiting" && all.slice(0, i).some((earlier) => earlier.progress?.state === "blocked") ? { ...st, progress: undefined } : st,
+    );
   // Once a session is under way, any step not yet done can be marked done by hand.
   const markDone = sessionLink
     ? async (i: number) => {
