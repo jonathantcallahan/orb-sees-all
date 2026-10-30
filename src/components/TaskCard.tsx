@@ -817,12 +817,12 @@ export function TaskCard({
           Open in Claude
         </button>
         {linked ? null : checkStatus ? (
-          <span className="muted small checking" title={checkStatus}>
+          <span className="muted small checking footer-end" title={checkStatus}>
             <span className="spin">✦</span> {checkStatus}…
           </span>
         ) : (
           <button
-            className="link-button small more-link"
+            className="link-button small more-link footer-end hover-only"
             onClick={runCheck}
             title="Have Claude check the task was captured right, is still needed, and isn't a duplicate"
           >
