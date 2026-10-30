@@ -144,6 +144,7 @@ export function ComposeModal({
   onChange,
   onCancel,
   onSend,
+  actions,
 }: {
   heading: string;
   /** Where it will go, shown until there's a status to report. */
@@ -154,7 +155,10 @@ export function ComposeModal({
   busy: boolean;
   onChange: (text: string) => void;
   onCancel: () => void;
-  onSend: () => void;
+  /** Without it there's nothing to send from here (an email you reply to in Gmail): Cancel reads Close. */
+  onSend?: () => void;
+  /** Extra footer actions, beside Cancel (e.g. Copy, Open thread). */
+  actions?: ReactNode;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
@@ -183,17 +187,20 @@ export function ComposeModal({
           disabled={busy}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend();
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend?.();
           }}
         />
         <footer className="plan-modal-actions edit-actions">
           <span className={`small ${failed ? "error" : "muted"} remind-status`}>{status ?? note}</span>
+          {actions}
           <button className="cta-ghost" disabled={busy} onClick={onCancel}>
-            Cancel
+            {onSend ? "Cancel" : "Close"}
           </button>
-          <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Send (⌘↩)">
-            Send
-          </button>
+          {onSend && (
+            <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title="Send (⌘↩)">
+              Send
+            </button>
+          )}
         </footer>
       </div>
     </div>,

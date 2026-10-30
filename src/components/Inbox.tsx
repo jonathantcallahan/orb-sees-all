@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { setTaskState } from "../db";
 import { draftReply, sendSlackReply } from "../jobs";
 import { slackThread } from "../projects";
@@ -10,64 +10,75 @@ import { CloseIcon, ComposeModal, ExternalLink, Spinner } from "./common";
 
 const SOURCE_LABEL = { slack: "Slack", email: "Email" } as const;
 
-function Draft({ reply, text, onRegenerate, onSent }: { reply: QuickReply; text: string; onRegenerate: () => void; onSent: () => void }) {
+/**
+ * A drafted response in a centered editor. Slack replies can be sent from here, into the
+ * message's thread; emails are copied or opened in Gmail.
+ */
+function ResponseModal({
+  reply,
+  draft,
+  regenerating,
+  onRegenerate,
+  onClose,
+  onSent,
+}: {
+  reply: QuickReply;
+  draft: string;
+  regenerating: boolean;
+  onRegenerate: () => void;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const [text, setText] = useState(draft);
+  // A regenerated draft replaces the text.
+  useEffect(() => setText(draft), [draft]);
   const [copied, setCopied] = useState(false);
-  // Slack replies go out from here, through the same review-and-send modal as blocker reminders.
-  const canSend = reply.source === "slack" && !!slackThread(reply.link);
-  const [composing, setComposing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sending = useJobStatus(`reply:${reply.id}`);
+  const canSend = reply.source === "slack" && !!slackThread(reply.link);
   const send = async () => {
-    if (!composing?.trim() || !reply.link) return;
+    if (!text.trim() || !reply.link) return;
     try {
       setError(null);
-      await sendSlackReply(reply.id, reply.link, composing.trim());
-      setComposing(null);
+      await sendSlackReply(reply.id, reply.link, text.trim());
+      onClose();
       onSent();
     } catch (e) {
       setError((e as Error).message);
     }
   };
   return (
-    <div className="reply-draft">
-      <p className="small">{text}</p>
-      <div className="reply-draft-actions">
-        {canSend && (
-          <button className="link-button small" onClick={() => setComposing(text)}>
-            Send reply
+    <ComposeModal
+      heading={`Reply to ${reply.from}`}
+      note={canSend ? `Replies in the ${reply.where ?? "Slack"} thread, as you.` : `Copy it into your reply${reply.where ? ` to "${reply.where}"` : ""}.`}
+      text={text}
+      status={sending ? `${sending}…` : regenerating ? "Drafting a new version…" : error ? `Couldn't send: ${error}` : null}
+      failed={!!error && !sending}
+      busy={!!sending || regenerating}
+      onChange={setText}
+      onCancel={() => !sending && onClose()}
+      onSend={canSend ? send : undefined}
+      actions={
+        <>
+          <button className="link-button small more-link" disabled={regenerating} onClick={onRegenerate}>
+            Regenerate
           </button>
-        )}
-        <button
-          className="link-button small"
-          onClick={async () => {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-        <ExternalLink href={reply.link} className="link-button small">
-          Open {reply.source === "email" ? "email" : "thread"}
-        </ExternalLink>
-        <button className="link-button small muted" onClick={onRegenerate}>
-          Regenerate
-        </button>
-      </div>
-      {composing !== null && (
-        <ComposeModal
-          heading={`Reply to ${reply.from}`}
-          note={`Replies in the ${reply.where ?? "Slack"} thread, as you.`}
-          text={composing}
-          status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
-          failed={!!error && !sending}
-          busy={!!sending}
-          onChange={setComposing}
-          onCancel={() => !sending && setComposing(null)}
-          onSend={send}
-        />
-      )}
-    </div>
+          <ExternalLink href={reply.link} className="link-button small more-link">
+            Open {reply.source === "email" ? "email" : "thread"}
+          </ExternalLink>
+          <button
+            className="link-button small more-link"
+            onClick={async () => {
+              await navigator.clipboard.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </>
+      }
+    />
   );
 }
 
@@ -106,49 +117,64 @@ export function Inbox({
         Inbox <span className="muted">{open.length}</span>
       </h4>
       <div className="inbox-list">
-      {open.map((r) => {
-        const drafting = running.includes(`draft:${r.id}`);
-        const draft = drafts.get(r.id);
-        const draftIt = () => draftReply(r).catch(() => {});
-        return (
-          <div key={r.id} className="card inbox-item">
-            <div className="inbox-row" title={r.where ?? undefined}>
-              <span className={`source ${r.source}`}>{SOURCE_LABEL[r.source]}</span>
-              <span className="inbox-from">{r.from}</span>
-              <ExternalLink href={r.link} className="inbox-summary">
-                {r.summary}
-              </ExternalLink>
-              {r.received && (
-                <span className="inbox-time" title={new Date(r.received).toLocaleString()}>
-                  {formatWhen(r.received)}
-                </span>
-              )}
-              {drafting ? (
-                <DraftingStatus id={r.id} />
-              ) : (
-                !draft && (
-                  <button className="link-button small inbox-action" onClick={draftIt}>
-                    Draft response
-                  </button>
-                )
-              )}
-              <button
-                className="icon-button inbox-action"
-                title="Mark as handled"
-                aria-label="Mark as handled"
-                onClick={async () => {
-                  await setTaskState(r.id, { status: "done" });
-                  onChange();
-                }}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            {draft && !drafting && <Draft reply={r} text={draft.text} onRegenerate={draftIt} onSent={onChange} />}
-          </div>
-        );
-      })}
+      {open.map((r) => (
+        <InboxItem key={r.id} reply={r} draft={drafts.get(r.id)?.text} drafting={running.includes(`draft:${r.id}`)} onChange={onChange} />
+      ))}
       </div>
     </section>
+  );
+}
+
+/** One inbox row. Draft response opens the editor once the draft arrives; View draft reopens it. */
+function InboxItem({ reply: r, draft, drafting, onChange }: { reply: QuickReply; draft?: string; drafting: boolean; onChange: () => void }) {
+  const [editing, setEditing] = useState(false);
+  // Set when you ask for a draft, so the editor opens when it's ready.
+  const [awaiting, setAwaiting] = useState(false);
+  useEffect(() => {
+    if (awaiting && draft && !drafting) {
+      setEditing(true);
+      setAwaiting(false);
+    }
+  }, [awaiting, draft, drafting]);
+  const draftIt = () => {
+    setAwaiting(true);
+    draftReply(r).catch(() => setAwaiting(false));
+  };
+  return (
+    <div className="card inbox-item">
+      <div className="inbox-row" title={r.where ?? undefined}>
+        <span className={`source ${r.source}`}>{SOURCE_LABEL[r.source]}</span>
+        <span className="inbox-from">{r.from}</span>
+        <ExternalLink href={r.link} className="inbox-summary">
+          {r.summary}
+        </ExternalLink>
+        {r.received && (
+          <span className="inbox-time" title={new Date(r.received).toLocaleString()}>
+            {formatWhen(r.received)}
+          </span>
+        )}
+        {drafting && !editing ? (
+          <DraftingStatus id={r.id} />
+        ) : (
+          <button className="link-button small inbox-action" onClick={() => (draft ? setEditing(true) : draftIt())}>
+            {draft ? "View draft" : "Draft response"}
+          </button>
+        )}
+        <button
+          className="icon-button inbox-action"
+          title="Mark as handled"
+          aria-label="Mark as handled"
+          onClick={async () => {
+            await setTaskState(r.id, { status: "done" });
+            onChange();
+          }}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      {editing && draft && (
+        <ResponseModal reply={r} draft={draft} regenerating={drafting} onRegenerate={() => draftReply(r).catch(() => {})} onClose={() => setEditing(false)} onSent={onChange} />
+      )}
+    </div>
   );
 }
