@@ -1,5 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import * as THREE from "three";
+import { mistColors, toCss } from "../orbColors";
+import type { OrbLook } from "./PressureBlob";
 
 const VERTEX = /* glsl */ `
 varying vec2 vUv;
@@ -35,6 +37,8 @@ uniform float uTime;
 uniform float uStress;
 uniform vec2 uResolution;
 uniform vec3 uBg;
+uniform vec3 uDeep;
+uniform vec3 uWisp;
 varying vec2 vUv;
 
 ${NOISE}
@@ -56,12 +60,10 @@ void main() {
   float alpha = pow(edge, 0.7) * (0.45 + 0.55 * density) * smoothstep(0.0, 0.3, depth + 0.1);
   alpha = clamp(alpha + smoothstep(0.6, 1.0, depth) * 0.2, 0.0, 0.9) * 0.7;
 
-  // The orb's mood, blended into the page background: icy blue when calm,
-  // violet when restless, ember when stressed.
-  vec3 moodDeep = mix(vec3(0.36, 0.46, 0.92), vec3(0.50, 0.30, 0.80), smoothstep(0.0, 0.5, uStress));
-  moodDeep = mix(moodDeep, vec3(0.80, 0.22, 0.12), smoothstep(0.5, 1.0, uStress));
-  vec3 moodWisp = mix(vec3(0.70, 0.80, 1.00), vec3(0.80, 0.70, 1.00), smoothstep(0.0, 0.5, uStress));
-  moodWisp = mix(moodWisp, vec3(1.00, 0.62, 0.30), smoothstep(0.5, 1.0, uStress));
+  // The orb's mood colors, set from orbColors.ts for the look you've picked and blended into the
+  // page background.
+  vec3 moodDeep = uDeep;
+  vec3 moodWisp = uWisp;
   // Dense swirls take some of the mood color; thin areas glow faintly with a pale tint.
   vec3 glow = mix(uBg, mix(moodWisp, vec3(1.0), 0.35), 0.2);
   vec3 color = mix(glow, mix(uBg, moodDeep, 0.3), density);
@@ -69,17 +71,7 @@ void main() {
 }
 `;
 
-/** The deep mist color for a stress level, matching the shader's moodDeep, for the CSS fade. */
-function moodTint(level: number): string {
-  const mix = (a: number[], b: number[], t: number) => a.map((v, i) => v + (b[i] - v) * t);
-  const smooth = (e0: number, e1: number, x: number) => {
-    const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
-    return t * t * (3 - 2 * t);
-  };
-  let c = mix([0.36, 0.46, 0.92], [0.5, 0.3, 0.8], smooth(0, 0.5, level));
-  c = mix(c, [0.8, 0.22, 0.12], smooth(0.5, 1, level));
-  return `rgb(${c.map((v) => Math.round(v * 255)).join(" ")})`;
-}
+
 
 /** Blur radii (px) of the stacked layers, lightest at the top of the fade zone. */
 const BLUR_STEPS = [0.25, 0.5, 1, 2, 4, 8];
@@ -112,6 +104,8 @@ function useShaderLayer(
   maxPixelRatio: number,
   /** Target stress (0-1); uStress eases toward it like the orb does. */
   stress: React.RefObject<number>,
+  /** The chosen orb look, whose mood colors tint the mist. */
+  look: React.RefObject<OrbLook>,
 ) {
   useEffect(() => {
     const el = mount.current!;
@@ -124,6 +118,8 @@ function useShaderLayer(
       uStress: { value: stress.current },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uBg: { value: new THREE.Color() },
+      uDeep: { value: new THREE.Vector3() },
+      uWisp: { value: new THREE.Vector3() },
     };
     const scheme = window.matchMedia("(prefers-color-scheme: dark)");
     const readBg = () => {
@@ -164,6 +160,10 @@ function useShaderLayer(
       const dt = Math.min(clock.getDelta(), 0.1);
       uniforms.uTime.value += dt * motion;
       uniforms.uStress.value += (stress.current - uniforms.uStress.value) * Math.min(dt * 1.2, 1);
+      // Colors follow the eased stress, so they glide with the orb's.
+      const { deep, wisp } = mistColors(look.current, uniforms.uStress.value);
+      uniforms.uDeep.value.set(...deep);
+      uniforms.uWisp.value.set(...wisp);
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
     };
@@ -183,15 +183,17 @@ function useShaderLayer(
 }
 
 /** A swirling band of mist tinted by the orb's mood, along the bottom of the window. Purely decorative; clicks pass through. */
-export function Mist({ level }: { level: number }) {
+export function Mist({ level, look }: { level: number; look: OrbLook }) {
   const mount = useRef<HTMLDivElement>(null);
   const stress = useRef(level);
   stress.current = level;
-  useShaderLayer(mount, FRAGMENT, 1.5, stress);
+  const lookRef = useRef(look);
+  lookRef.current = look;
+  useShaderLayer(mount, FRAGMENT, 1.5, stress, lookRef);
 
   return (
     <>
-      <div className="mist-fade" aria-hidden style={{ "--mist-mood": moodTint(level) } as CSSProperties}>
+      <div className="mist-fade" aria-hidden style={{ "--mist-mood": toCss(mistColors(look, level).deep) } as CSSProperties}>
         {BLUR_STEPS.map((px, i) => (
           <div key={px} className="mist-fade-layer" style={blurLayer(px, i)} />
         ))}

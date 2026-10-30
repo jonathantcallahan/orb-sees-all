@@ -198,3 +198,46 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
     </div>
   );
 }
+
+type Rgb = [number, number, number];
+const lerp = (a: Rgb, b: Rgb, t: number): Rgb => [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Rgb;
+
+/** Three glow colors for a look at a stress level, each easing from its calm color to its stressed one. */
+function glowColors(look: OrbLook, level: number): string[] {
+  const t = Math.min(Math.max(level, 0), 1);
+  const pairs: Record<OrbLook, [Rgb, Rgb][]> = {
+    // Icy blue, lavender and cyan when calm; orange, red and amber under stress.
+    classic: [
+      [[120, 160, 255], [255, 120, 40]],
+      [[180, 150, 255], [235, 40, 70]],
+      [[120, 230, 240], [255, 190, 60]],
+    ],
+    // The Glass core's cool ramp: cyan and blue when calm, violet and magenta under stress.
+    glass: [
+      [[60, 200, 255], [150, 80, 230]],
+      [[40, 90, 240], [220, 70, 180]],
+      [[100, 160, 255], [120, 80, 225]],
+    ],
+    // Soap-film pastels, warming toward pink and gold under stress.
+    iridescent: [
+      [[150, 230, 255], [255, 170, 220]],
+      [[200, 180, 255], [255, 200, 150]],
+      [[255, 190, 235], [255, 150, 200]],
+    ],
+  };
+  return pairs[look].map(([calm, stressed]) => `rgb(${lerp(calm, stressed, t).join(" ")})`);
+}
+
+/**
+ * Light the orb casts on the wall behind it: large, blurred, drifting patches of its colors, very
+ * faint. Drawn behind the whole page, centered on the orb, so it can spread past its column.
+ */
+export function OrbGlow({ look, level }: { look: OrbLook; level: number }) {
+  return (
+    <div className="orb-glow" aria-hidden>
+      {glowColors(look, level).map((color, i) => (
+        <span key={i} className={`orb-glow-${i}`} style={{ backgroundColor: color }} />
+      ))}
+    </div>
+  );
+}

@@ -14,6 +14,7 @@ import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORIT
 import { canonicalId } from "./registry";
 import { isDark, useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
+import { OrbGlow } from "./components/PressureBlob";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
@@ -158,6 +159,7 @@ export default function App() {
       </header>
 
       <main className="columns">
+        <OrbGlow look={orbLook} level={load.level} />
         <TodayColumn pressure={load} orbLook={orbLook} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
 
         <section className="column projects-column">
@@ -222,7 +224,7 @@ export default function App() {
         />
       </main>
 
-      <Mist level={load.level} />
+      <Mist level={load.level} look={orbLook} />
 
       {showSettings && <Settings projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => setShowSettings(false)} onSaved={reload} />}
     </div>

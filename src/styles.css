@@ -635,7 +635,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-modal section h4 { margin-top: 0; }
 .plan-modal-actions { display: flex; gap: 14px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
 /* The orb's stats line: a step fainter than other gray text */
-.pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
+.pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); text-align: center; }
 
 /* Relevant links on a task, as Google Docs–style smart chips */
 .link-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -748,3 +748,39 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
     repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 32%, transparent) 0 4px, transparent 4px 9px),
     var(--surface);
 }
+
+/* Light the orb casts on the wall: big, faint, blurred patches of its colors drifting slowly behind
+   the page. Centered on the orb (the first column's center, about 158px down), above nothing. */
+.columns { position: relative; }
+.columns > :not(.orb-glow) { position: relative; z-index: 1; }
+.orb-glow {
+  position: absolute;
+  z-index: 0;
+  /* The first column spans 1 of 4.2 grid fractions after the 20px side padding and two 16px gaps. */
+  left: calc(20px + (100% - 72px) / 8.4);
+  top: 158px;
+  width: 620px;
+  height: 620px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  /* Light mode needs much more: faint color barely shows against a light wall. */
+  opacity: 0.55;
+}
+[data-theme="dark"] .orb-glow { opacity: 0.3; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .orb-glow { opacity: 0.3; } }
+.orb-glow span {
+  position: absolute;
+  width: 46%;
+  height: 46%;
+  border-radius: 50%;
+  filter: blur(70px);
+  transition: background-color 4s ease;
+  will-change: transform;
+}
+.orb-glow-0 { left: 18%; top: 20%; animation: glow-a 23s ease-in-out infinite alternate; }
+.orb-glow-1 { left: 36%; top: 34%; animation: glow-b 31s ease-in-out infinite alternate; }
+.orb-glow-2 { left: 26%; top: 40%; animation: glow-c 37s ease-in-out infinite alternate; }
+@keyframes glow-a { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(14%, 10%) scale(1.15); } 100% { transform: translate(-10%, 16%) scale(0.92); } }
+@keyframes glow-b { 0% { transform: translate(0, 0) scale(1.1); } 50% { transform: translate(-16%, -8%) scale(0.9); } 100% { transform: translate(8%, -14%) scale(1.2); } }
+@keyframes glow-c { 0% { transform: translate(0, 0) scale(0.95); } 50% { transform: translate(10%, -16%) scale(1.2); } 100% { transform: translate(-14%, 6%) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .orb-glow span { animation: none; } }
