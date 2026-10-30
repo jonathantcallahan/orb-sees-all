@@ -11,6 +11,9 @@ import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
 const PX_PER_MIN = 1.2;
+/** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
+const EVENT_INSET_TOP = 1;
+const EVENT_INSET_BOTTOM = 2;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 /** "meet.google.com" from a call link, tolerating a malformed URL from the model. */
@@ -99,8 +102,8 @@ function DayGrid({ events, now }: { events: CalendarEvent[]; now: Date }) {
               tabIndex={0}
               className={`event-block${past ? " past" : ""}${current ? " current" : ""}`}
               style={{
-                top: top * PX_PER_MIN,
-                height: Math.max(height * PX_PER_MIN, 18),
+                top: top * PX_PER_MIN + EVENT_INSET_TOP,
+                height: Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18),
                 left: `${(column / columns) * 100}%`,
                 width: `calc(${100 / columns}% - 2px)`,
               }}
