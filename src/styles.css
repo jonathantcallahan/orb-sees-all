@@ -298,22 +298,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Task status, estimate and Today controls */
 .task-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.status-select {
-  appearance: none;
-  -webkit-appearance: none;
-  flex-shrink: 0;
-  text-align: center;
-  font-size: 11px;
- 
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--grey-bg);
-  cursor: pointer;
-}
-.status-select.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
-.status-select.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
-.status-select.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
+/* The status badge; an invisible native menu covers it, so clicking opens the usual list. */
+.status-badge { position: relative; flex-shrink: 0; cursor: pointer; }
+.status-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.status-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
+.status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+.status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
 .carried { font-size: 11px; color: var(--muted); }
 
@@ -533,6 +524,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
 .badge.recommended, .filter-select.recommended { display: inline-flex; align-items: center; gap: 3px; }
+/* Just the star: a square badge the height of the others. */
+.badge.recommended.icon-only { justify-content: center; padding: 0; width: 18px; height: 18px; box-sizing: border-box; }
 /* A drawn star rather than the ✦ character, whose ink sits off-center in most fonts. */
 .sparkle { flex-shrink: 0; display: block; }
 
@@ -670,3 +663,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 @keyframes skeleton-pulse { 50% { opacity: 0.45; } }
 /* Task body text matches the project cards' gray. */
 .automation .suggestion { color: var(--muted); }
+
+/* Badges stay gray until you hover their card, so color draws the eye only where you're looking. */
+.card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { transition: filter 0.15s ease; }
+.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { filter: grayscale(1); }

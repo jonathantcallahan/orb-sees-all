@@ -250,10 +250,15 @@ const PRIORITY_LABEL: Record<EffectivePriority, string> = {
 
 function RecommendedBadge() {
   return (
-    <span className="badge recommended" title="The Orb recommends doing this today to move a P0 project forward">
-      <svg className="sparkle" width="8" height="8" viewBox="0 0 8 8" aria-hidden>
+    <span
+      className="badge recommended icon-only"
+      role="img"
+      aria-label="Recommended"
+      title="Recommended: the Orb suggests doing this today to move a P0 project forward"
+    >
+      <svg className="sparkle" width="9" height="9" viewBox="0 0 8 8" aria-hidden>
         <path d="M4 0Q4.6 3.4 8 4Q4.6 4.6 4 8Q3.4 4.6 0 4Q3.4 3.4 4 0Z" fill="currentColor" />
-      </svg>Recommended
+      </svg>
     </span>
   );
 }
@@ -271,25 +276,28 @@ const DISMISS = "dismiss";
 export const TASK_DRAG_TYPE = "application/x-orb-task";
 
 function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
+  // A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
   return (
-    <select
-      className={`status-select ${task.status}`}
-      value={task.status}
-      aria-label="Status"
-      onChange={async (e) => {
-        // Dismiss lives in the same menu: it hides the task rather than setting a status.
-        await setTaskState(task.id, e.target.value === DISMISS ? { dismissed: true } : { status: e.target.value as TaskStatus });
-        onChange();
-      }}
-    >
-      {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
-        <option key={s} value={s}>
-          {STATUS_LABEL[s]}
-        </option>
-      ))}
-      <option disabled>──────</option>
-      <option value={DISMISS}>Dismiss</option>
-    </select>
+    <span className={`badge status-badge ${task.status}`}>
+      {STATUS_LABEL[task.status]}
+      <select
+        value={task.status}
+        aria-label="Status"
+        onChange={async (e) => {
+          // Dismiss lives in the same menu: it hides the task rather than setting a status.
+          await setTaskState(task.id, e.target.value === DISMISS ? { dismissed: true } : { status: e.target.value as TaskStatus });
+          onChange();
+        }}
+      >
+        {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
+          <option key={s} value={s}>
+            {STATUS_LABEL[s]}
+          </option>
+        ))}
+        <option disabled>──────</option>
+        <option value={DISMISS}>Dismiss</option>
+      </select>
+    </span>
   );
 }
 
@@ -709,8 +717,8 @@ export function TaskCard({
         <span className="task-title">{task.title}</span>
         {task.recommended && <RecommendedBadge />}
         {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
-        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         <StatusSelect task={task} onChange={onChange} />
+        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
       </article>
     );
   }
@@ -723,12 +731,12 @@ export function TaskCard({
         </ExternalLink>
         {task.recommended && <RecommendedBadge />}
         {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
+        <StatusSelect task={task} onChange={onChange} />
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Claude's estimate of your hands-on time">
             ~{formatMinutes(assessment.estimate_minutes)}
           </span>
         )}
-        <StatusSelect task={task} onChange={onChange} />
       </header>
 
       {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
