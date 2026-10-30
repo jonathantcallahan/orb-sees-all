@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { COLORED_ICONS } from "../linkIcons";
+import { linkKind } from "../links";
+import { LinkChips } from "./LinkChips";
 import { activeChannels, projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
@@ -36,22 +39,68 @@ function channelPermalinks(project: Project): (string | null | undefined)[] {
   return [...s.blockers.map((b) => b.link), ...(s.active ?? []).map((a) => a.link), ...s.my_tasks.map((t) => t.link), ...(s.recent_updates ?? []).map((u) => u.link)];
 }
 
-/** What's known about the project, built up by its refreshes: goal, channels, people, milestones, links, decisions. */
-function ProfilePanel({ project }: { project: Project }) {
+type ProfilePerson = NonNullable<Project["profile"]>["people"][number];
+
+/** A person on the project; hovering shows their role in a card (native tooltips don't show in the app). */
+function PersonChip({ person }: { person: ProfilePerson }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const width = 220;
+  return (
+    <>
+      <span className="chip person-chip" onMouseEnter={(e) => setAnchor(e.currentTarget.getBoundingClientRect())} onMouseLeave={() => setAnchor(null)}>
+        {person.name}
+      </span>
+      {anchor &&
+        createPortal(
+          <div
+            className="card meeting-card person-card"
+            role="tooltip"
+            style={{ left: Math.max(8, Math.min(anchor.left, window.innerWidth - width - 8)), top: anchor.bottom + 6, width }}
+          >
+            <div className="meeting-card-title">{person.name}</div>
+            <div className="small">{person.role}</div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+/**
+ * What's known about the project, built up by its refreshes: goal, channels, people, milestones,
+ * links, decisions. A centered modal, portaled to <body>.
+ */
+function ProfileModal({ project, onClose }: { project: Project; onClose: () => void }) {
   const p = project.profile;
   const channels = activeChannels(project);
   const permalinks = channelPermalinks(project);
-  return (
-    <div className="profile-panel tab-panel small" role="tabpanel" title="">
-      {p?.goal && <p className="profile-goal">{p.goal}</p>}
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Clicks still bubble through React from the portal, so stop them before they select the project.
+  return createPortal(
+    <div
+      className="modal-backdrop plan-modal-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="modal plan-modal profile-modal" role="dialog" aria-label={`About ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>{projectName(project)}</h2>
+          <button className="icon-button" title="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        {(p?.goal || project.snapshot?.description) && <p className="profile-goal">{p?.goal || project.snapshot?.description}</p>}
       <dl>
         <dt>Channels</dt>
-        <dd className="profile-channels">
-          {channels.map((c) => (
-            <ExternalLink key={c.channel_id} href={slackChannelUrl(c.channel_id, permalinks)} className="chip" title={c.reason ?? undefined}>
-              #{c.name}
-            </ExternalLink>
-          ))}
+        <dd>
+          <LinkChips links={channels.map((c) => ({ url: slackChannelUrl(c.channel_id, permalinks), title: `#${c.name}`, kind: "slack" as const }))} />
         </dd>
         {!!p?.aliases.length && (
           <>
@@ -62,7 +111,11 @@ function ProfilePanel({ project }: { project: Project }) {
         {!!p?.people.length && (
           <>
             <dt>People</dt>
-            <dd>{p.people.map((x) => `${x.name} (${x.role})`).join(", ")}</dd>
+            <dd className="profile-channels">
+              {p.people.map((x) => (
+                <PersonChip key={x.name} person={x} />
+              ))}
+            </dd>
           </>
         )}
         {!!p?.milestones.length && (
@@ -84,12 +137,8 @@ function ProfilePanel({ project }: { project: Project }) {
         {!!p?.resources.length && (
           <>
             <dt>Links</dt>
-            <dd className="profile-channels">
-              {p.resources.map((r) => (
-                <ExternalLink key={r.link} href={r.link} className="chip">
-                  {r.title}
-                </ExternalLink>
-              ))}
+            <dd>
+              <LinkChips links={p.resources.map((r) => ({ url: r.link, title: r.title, kind: linkKind(r.link) }))} />
             </dd>
           </>
         )}
@@ -108,9 +157,11 @@ function ProfilePanel({ project }: { project: Project }) {
             </dd>
           </>
         )}
-      </dl>
-      {!p && <p className="muted">The next refresh builds the project's profile.</p>}
-    </div>
+        </dl>
+        {!p && <p className="muted small">The next refresh builds the project's profile.</p>}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -374,10 +425,11 @@ export function ProjectCard({
   const status = s?.status;
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
-  // Blocking, Active and About are tabs: none open at first, clicking the open tab closes it,
+  // Blocking and Active are tabs: none open at first, clicking the open tab closes it,
   // clicking the other one switches to it.
-  const [tab, setTab] = useState<"blockers" | "active" | "about" | null>(null);
-  const toggle = (next: "blockers" | "active" | "about") => setTab((current) => (current === next ? null : next));
+  const [tab, setTab] = useState<"blockers" | "active" | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const toggle = (next: "blockers" | "active") => setTab((current) => (current === next ? null : next));
   // Blockers the user marked resolved after a double check stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
   const channelCount = activeChannels(project).length;
@@ -408,7 +460,7 @@ export function ProjectCard({
             <ExternalLink
               href={slackChannelUrl(project.channel_id, channelPermalinks(project))}
               className="slack-link"
-              title={`Open #${project.name} in Slack${channelCount > 1 ? ` (${channelCount - 1} more channel${channelCount > 2 ? "s" : ""} under About)` : ""}`}
+              title={`Open #${project.name} in Slack${channelCount > 1 ? ` (${channelCount - 1} more channel${channelCount > 2 ? "s" : ""} in About)` : ""}`}
             >
               <SlackIcon />
             </ExternalLink>
@@ -443,10 +495,9 @@ export function ProjectCard({
                   {tab === "active" && <TabClose />}
                 </button>
               )}
-              <button role="tab" aria-selected={tab === "about"} className={`work-tab${tab === "about" ? " open" : ""}`} onClick={() => toggle("about")}>
+              <button className="work-tab about-tab" onClick={() => setAboutOpen(true)}>
                 About
                 {channelCount > 1 && <span className="muted"> · {channelCount} channels</span>}
-                {tab === "about" && <TabClose />}
               </button>
             </div>
 
@@ -473,7 +524,7 @@ export function ProjectCard({
             </ul>
           )}
 
-          {tab === "about" && <ProfilePanel project={project} />}
+          {aboutOpen && <ProfileModal project={project} onClose={() => setAboutOpen(false)} />}
 
           {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">
