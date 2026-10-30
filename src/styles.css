@@ -565,9 +565,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .projects-column > .column-header { flex-wrap: wrap; row-gap: 4px; }
 
 /* Blocking / Active tabs: none open at first */
-.work-tabs { display: flex; gap: 14px; margin-top: 8px; }
-.work-tab { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; padding: 0; font-size: 12px; color: var(--muted); }
+/* Blocking / Active: plain labels until one is open; then it becomes a tab joined to a ruled panel. */
+.work-tabs { display: flex; align-items: flex-end; gap: 2px; margin: 8px 0 0 -8px; }
+.work-tabs.has-open { border-bottom: 1px solid var(--border); }
+.work-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: -1px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  font-size: 12px;
+  color: var(--muted);
+}
 .work-tab:hover, .work-tab.open { color: var(--text); }
+.work-tab.open { border-color: var(--border); border-bottom-color: var(--surface); background: var(--surface); }
+.work-items.tab-panel { margin-top: 0; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
 /* High-level plan inside the assessment: numbered circles, then Approve & start */
