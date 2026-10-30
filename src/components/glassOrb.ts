@@ -10,9 +10,9 @@ import { NOISE } from "./orbNoise";
 /** Large, smooth lobes from domain-warped low-frequency noise: the molten shape. */
 const BLOB = /* glsl */ `
 float blob(vec3 p, float t) {
-  vec3 q = p * 0.8 + vec3(0.0, t * 0.3, t * 0.18);
+  vec3 q = p * 0.55 + vec3(0.0, t * 0.28, t * 0.16);
   vec3 w = vec3(snoise(q + 3.1), snoise(q + 7.7), snoise(q + 12.3));
-  return 0.72 * snoise(p * 0.95 + w * 0.7 + t * 0.2) + 0.14 * snoise(p * 1.6 + w * 0.5 - t * 0.25);
+  return 0.9 * snoise(p * 0.65 + w * 0.6 + t * 0.18);
 }
 `;
 
@@ -25,11 +25,12 @@ const CORE_COLOR = /* glsl */ `
 vec3 coreColor(vec3 p, float time, float stress) {
   float g = dot(normalize(p), normalize(vec3(0.55, 0.75, 0.2))) * 0.5 + 0.5;
   g += 0.16 * snoise(p * 1.4 + time * 0.12);
-  // Calm: a red accent on one side. Stressed: red spreads over most of the core.
-  float edge = mix(0.8, 0.36, stress);
-  vec3 color = mix(vec3(0.0, 0.74, 1.0), vec3(0.06, 0.26, 0.95), smoothstep(0.15, 0.5, g));
-  color = mix(color, vec3(0.52, 0.22, 0.74), smoothstep(edge - 0.2, edge, g));
-  return mix(color, vec3(0.98, 0.07, 0.32), smoothstep(edge, edge + 0.22, g));
+  // Cool tones throughout: cyan and blue, then violet, then a cool magenta. Calm keeps the
+  // magenta to a small accent; stress spreads it.
+  float edge = mix(0.86, 0.42, stress);
+  vec3 color = mix(vec3(0.22, 0.8, 1.0), vec3(0.12, 0.3, 0.92), smoothstep(0.15, 0.5, g));
+  color = mix(color, vec3(0.46, 0.32, 0.88), smoothstep(edge - 0.22, edge, g));
+  return mix(color, vec3(0.86, 0.26, 0.7), smoothstep(edge, edge + 0.22, g));
 }
 `;
 
@@ -42,7 +43,7 @@ ${NOISE}
 ${BLOB}
 void main() {
   float t = uTime * mix(0.32, 1.0, uStress);
-  vec3 pos = position + normal * blob(normal, t) * mix(0.2, 0.3, uStress);
+  vec3 pos = position + normal * blob(normal, t) * mix(0.3, 0.4, uStress);
   vObj = pos;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = view.xyz;
@@ -63,13 +64,15 @@ void main() {
 
   vec3 color = coreColor(vObj, uTime, uStress);
 
-  // Polished metal: a bright sky reflected from above, a key highlight and a softer fill.
+  // Polished metal: little diffuse light; the color comes from tinted reflections of a bright
+  // sky, a chrome-like horizon band and a dark floor, with sharp highlights and bright edges.
   vec3 r = reflect(-v, n);
-  float sky = 0.22 + 0.78 * smoothstep(-0.35, 0.9, r.y);
-  float key = pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 60.0);
-  float fill = pow(max(dot(r, normalize(vec3(-0.6, 0.25, 0.7))), 0.0), 14.0) * 0.35;
-  float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-  vec3 lit = color * (0.22 + 0.9 * sky) + (key + fill) * vec3(1.0) + fres * color * 0.5;
+  float sky = smoothstep(-0.05, 0.7, r.y);
+  float horizon = exp(-pow((r.y - 0.05) * 5.0, 2.0));
+  float key = pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 90.0);
+  float fill = pow(max(dot(r, normalize(vec3(-0.6, 0.25, 0.7))), 0.0), 20.0) * 0.45;
+  float fres = pow(1.0 - max(dot(n, v), 0.0), 2.5);
+  vec3 lit = color * (0.1 + 1.05 * sky + 0.55 * horizon) + (key * 1.3 + fill) * vec3(0.92, 0.97, 1.0) + fres * mix(color, vec3(1.0), 0.4) * 0.7;
   gl_FragColor = vec4(lit, 1.0);
 }
 `;
@@ -86,10 +89,10 @@ ${BLOB}
 void main() {
   float t = uTime * mix(0.32, 1.0, uStress);
   // Follow the core's molten shape, so the glass hugs it, then add soft folds of its own.
-  float lobe = blob(normal, t) * mix(0.2, 0.3, uStress) * 1.1;
+  float lobe = blob(normal, t) * mix(0.3, 0.4, uStress) * 1.1;
   // Broad, slow folds, like sheets of soft glass draped over the core.
-  float drift = snoise(normal * 1.1 + vec3(uSeed) + t * 0.25);
-  float folds = sin(dot(normal, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 2.6 + drift * 1.8 + t * 0.4);
+  float drift = snoise(normal * 0.75 + vec3(uSeed) + t * 0.22);
+  float folds = sin(dot(normal, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
   vec3 pos = normal * (uRadius + lobe + folds * 0.07 + drift * 0.1);
   vObj = pos;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
