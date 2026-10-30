@@ -692,7 +692,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline-steps li:hover .step-remind, .step-remind:focus-visible { opacity: 1; }
 .hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
 .plan-outline-steps li.step-skipped > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
-.step-circle.waiting { color: var(--amber); animation: step-turn 2.4s linear infinite; }
+.step-circle.waiting { color: var(--amber); }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
 @keyframes step-turn { to { transform: rotate(360deg); } }
 .plan-outline-steps li.step-done > .small { color: var(--muted); }

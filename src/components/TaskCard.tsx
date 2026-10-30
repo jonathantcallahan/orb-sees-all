@@ -389,7 +389,7 @@ const openCards = new Map<string, boolean>();
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * A plan step's marker: dashed when not started, turning while in progress or waiting on you,
+ * A plan step's marker: dashed when not started, turning while in progress, amber and still while waiting on you,
  * checked when done, a red bar when blocked on someone else, struck through when skipped.
  */
 function StepCircle({ state }: { state?: StepState }) {

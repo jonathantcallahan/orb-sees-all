@@ -44,6 +44,18 @@ const USE_CLAUDE_AI_LOGIN = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTH
 // Belt and braces: built-in tools that could touch the machine are denied outright.
 const DISALLOWED = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent"];
 
+/**
+ * Tools a working session must not even see: everything that posts, drafts or changes something in
+ * Slack, Gmail, Calendar or Jira. Orb does the sending once the user approves, so with these gone a
+ * session's only way to send is to hand the message to Orb.
+ */
+const SESSION_DISALLOWED = [
+  ...["slack_send_message", "slack_send_message_draft", "slack_schedule_message", "slack_create_canvas", "slack_update_canvas", "slack_add_reaction", "slack_create_conversation", "slack_create_list", "slack_add_list_record", "slack_update_list", "slack_update_list_record"].map((t) => `${SLACK}${t}`),
+  ...["create_draft", "send_message", "send_draft", "delete_draft"].map((t) => `${GMAIL}${t}`),
+  ...["create_event", "update_event", "delete_event", "respond_to_event"].map((t) => `${GCAL}${t}`),
+  ...["jira_create_issue", "jira_update_issue", "jira_add_comment", "jira_transition_issue", "jira_delete_issue", "jira_edit_comment"].map((t) => `mcp__mcp-jira__${t}`),
+];
+
 export interface ClaudeOptions<T> {
   prompt: string;
   schema: z.ZodType<T>;
@@ -290,6 +302,7 @@ export async function runSessionTurn(
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
+    ...SESSION_DISALLOWED,
   ];
   const onStatus = opts.onStatus;
   const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
