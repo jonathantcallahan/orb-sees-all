@@ -13,8 +13,18 @@ export interface SessionTask {
   projectName?: string | null;
 }
 
-/** A self-contained prompt for a new Claude Code session: the task and the plan Claude proposed for it. */
-export function sessionPrompt(task: SessionTask, plan: TaskPlan): string {
+/** What Orb knows about a task without a full plan: its quick assessment. */
+export interface QuickTake {
+  suggestion?: string | null;
+  /** Steps Claude said it could do, in order. */
+  steps: string[];
+}
+
+/**
+ * A self-contained prompt for a new Claude Code session: the task and the plan
+ * Claude proposed for it, or, with no plan yet, its quick assessment.
+ */
+export function sessionPrompt(task: SessionTask, plan: TaskPlan | null, quick?: QuickTake): string {
   const lines = [
     ...(task.id ? [sessionMarker(task.id), ""] : []),
     "I'm working on this task from my day planner and want your help getting it done.",
@@ -26,15 +36,27 @@ export function sessionPrompt(task: SessionTask, plan: TaskPlan): string {
   if (task.link) lines.push(`Source: ${task.link}`);
   if (task.description) lines.push("", task.description);
 
-  lines.push("", "Here's the plan you proposed earlier:", "", `Approach: ${plan.approach}`, "", "Steps:");
-  plan.steps.forEach((step, i) => {
-    const detail = [step.detail, step.link].filter(Boolean).join(" ");
-    lines.push(`${i + 1}. ${step.title}${detail ? ` (${detail})` : ""}`);
-  });
-  if (plan.open_questions.length) lines.push("", "Open questions:", ...plan.open_questions.map((q) => `- ${q}`));
-  if (plan.sources.length) lines.push("", "Sources:", ...plan.sources.map((s) => `- ${s.title}: ${s.link}`));
-  lines.push("", "Help me carry this out, starting with step 1. Raise the open questions with me when they come up.");
-  if (task.id) lines.push(...progressInstructions());
+  let hasSteps = false;
+  if (plan) {
+    lines.push("", "Here's the plan you proposed earlier:", "", `Approach: ${plan.approach}`, "", "Steps:");
+    plan.steps.forEach((step, i) => {
+      const detail = [step.detail, step.link].filter(Boolean).join(" ");
+      lines.push(`${i + 1}. ${step.title}${detail ? ` (${detail})` : ""}`);
+    });
+    hasSteps = plan.steps.length > 0;
+    if (plan.open_questions.length) lines.push("", "Open questions:", ...plan.open_questions.map((q) => `- ${q}`));
+    if (plan.sources.length) lines.push("", "Sources:", ...plan.sources.map((s) => `- ${s.title}: ${s.link}`));
+    lines.push("", "Help me carry this out, starting with step 1. Raise the open questions with me when they come up.");
+  } else {
+    if (quick?.suggestion) lines.push("", `Your first take: ${quick.suggestion}`);
+    if (quick?.steps.length) {
+      lines.push("", "Steps you said you could do:");
+      quick.steps.forEach((step, i) => lines.push(`${i + 1}. ${step}`));
+      hasSteps = true;
+    }
+    lines.push("", "Help me work out the approach and carry it out. Ask me for anything you need.");
+  }
+  if (task.id && hasSteps) lines.push(...progressInstructions());
 
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;

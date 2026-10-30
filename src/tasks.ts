@@ -181,17 +181,17 @@ export function taskPriority(
 export type PriorityFilter = EffectivePriority | "unrated";
 
 export interface TaskFilter {
-  /** null means any status. */
-  status: TaskStatus | null;
-  /** null means any priority. */
-  priority: PriorityFilter | null;
+  /** Empty means any status. */
+  statuses: TaskStatus[];
+  /** Empty means any priority. */
+  priorities: PriorityFilter[];
   recommendedOnly: boolean;
 }
 
-export const NO_FILTER: TaskFilter = { status: null, priority: null, recommendedOnly: false };
+export const NO_FILTER: TaskFilter = { statuses: [], priorities: [], recommendedOnly: false };
 
 export function isFiltering(f: TaskFilter): boolean {
-  return f.status !== null || f.priority !== null || f.recommendedOnly;
+  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
 }
 
 /** Whether a task passes every filter that's set. */
@@ -199,8 +199,8 @@ export function matchesFilter(
   t: { status: TaskStatus; priority: EffectivePriority | null; recommended?: boolean },
   f: TaskFilter,
 ): boolean {
-  if (f.status && t.status !== f.status) return false;
-  if (f.priority && (t.priority ?? "unrated") !== f.priority) return false;
+  if (f.statuses.length && !f.statuses.includes(t.status)) return false;
+  if (f.priorities.length && !f.priorities.includes(t.priority ?? "unrated")) return false;
   if (f.recommendedOnly && !t.recommended) return false;
   return true;
 }
@@ -215,18 +215,18 @@ export function ago(since: string | null | undefined, now = new Date()): string 
 }
 
 export interface ProjectFilter {
-  /** null means any status. */
-  status: ProjectStatus | null;
-  /** null means any priority. */
-  priority: ProjectPriority | null;
+  /** Empty means any status. */
+  statuses: ProjectStatus[];
+  /** Empty means any priority. */
+  priorities: ProjectPriority[];
   /** Only projects with a task the Orb recommends today. */
   recommendedOnly: boolean;
 }
 
-export const NO_PROJECT_FILTER: ProjectFilter = { status: null, priority: null, recommendedOnly: false };
+export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [], recommendedOnly: false };
 
 export function isFilteringProjects(f: ProjectFilter): boolean {
-  return f.status !== null || f.priority !== null || f.recommendedOnly;
+  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
 }
 
 /** Whether a project passes every filter that's set. */
@@ -235,8 +235,8 @@ export function matchesProjectFilter(
   f: ProjectFilter,
   recommended: Set<string>,
 ): boolean {
-  if (f.status && p.status !== f.status) return false;
-  if (f.priority && p.priority !== f.priority) return false;
+  if (f.statuses.length && (!p.status || !f.statuses.includes(p.status))) return false;
+  if (f.priorities.length && (!p.priority || !f.priorities.includes(p.priority))) return false;
   if (f.recommendedOnly && !p.taskIds.some((id) => recommended.has(id))) return false;
   return true;
 }

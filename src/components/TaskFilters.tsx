@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProjectPriority, ProjectStatus } from "../schema";
 import { NO_FILTER, NO_PROJECT_FILTER, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskStatus } from "../tasks";
 
@@ -32,38 +32,71 @@ function useStoredFilter<F extends object>(key: string, empty: F, isStale?: (sto
   return [filter, setFilter];
 }
 
-/** The All tasks filter. Older versions stored lists of values; those start fresh. */
-export const useTaskFilter = () => useStoredFilter<TaskFilter>("task-filter", NO_FILTER, (s) => Array.isArray(s.statuses));
+/** The All tasks filter. Saved filters from before multi-select start fresh. */
+export const useTaskFilter = () => useStoredFilter<TaskFilter>("task-filter", NO_FILTER, (s) => !Array.isArray(s.statuses) || !Array.isArray(s.priorities));
 
-export const useProjectFilter = () => useStoredFilter<ProjectFilter>("project-filter", NO_PROJECT_FILTER);
+export const useProjectFilter = () =>
+  useStoredFilter<ProjectFilter>("project-filter", NO_PROJECT_FILTER, (s) => !Array.isArray(s.statuses) || !Array.isArray(s.priorities));
 
-function FilterSelect<V extends string>({
-  value,
+/** A pill that opens a checklist; any number of options can be picked, none means any. */
+function MultiFilter<V extends string>({
+  values,
   anyLabel,
   options,
   label,
   onChange,
 }: {
-  value: V | null;
+  values: V[];
   anyLabel: string;
   options: [V, string][];
   label: string;
-  onChange: (v: V | null) => void;
+  onChange: (v: V[]) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  const names = options.filter(([v]) => values.includes(v)).map(([, l]) => l);
+  const text = names.length === 0 ? anyLabel : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
+  const toggle = (v: V) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
   return (
-    <select
-      className={`filter-select${value ? " on" : ""}`}
-      value={value ?? ""}
-      aria-label={label}
-      onChange={(e) => onChange((e.target.value || null) as V | null)}
-    >
-      <option value="">{anyLabel}</option>
-      {options.map(([v, l]) => (
-        <option key={v} value={v}>
-          {l}
-        </option>
-      ))}
-    </select>
+    <div className="multi-filter" ref={ref}>
+      <button
+        className={`filter-select${values.length ? " on" : ""}`}
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={names.join(", ") || undefined}
+        onClick={() => setOpen(!open)}
+      >
+        {text}
+      </button>
+      {open && (
+        <div className="multi-filter-menu" role="listbox" aria-multiselectable aria-label={label}>
+          {options.map(([v, l]) => (
+            <label key={v} className="multi-filter-option">
+              <input type="checkbox" checked={values.includes(v)} onChange={() => toggle(v)} />
+              {l}
+            </label>
+          ))}
+          {values.length > 0 && (
+            <button className="link-button small more-link multi-filter-clear" onClick={() => onChange([])}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -96,8 +129,8 @@ const PROJECT_PRIORITIES: [ProjectPriority, string][] = [
 export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; onChange: (f: ProjectFilter) => void }) {
   return (
     <div className="task-filters">
-      <FilterSelect label="Filter projects by status" anyLabel="Any status" value={filter.status} options={PROJECT_STATUSES} onChange={(status) => onChange({ ...filter, status })} />
-      <FilterSelect label="Filter projects by priority" anyLabel="Any priority" value={filter.priority} options={PROJECT_PRIORITIES} onChange={(priority) => onChange({ ...filter, priority })} />
+      <MultiFilter label="Filter projects by status" anyLabel="Any status" values={filter.statuses} options={PROJECT_STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
+      <MultiFilter label="Filter projects by priority" anyLabel="Any priority" values={filter.priorities} options={PROJECT_PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>
   );
@@ -107,8 +140,8 @@ export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; on
 export function TaskFilters({ filter, onChange }: { filter: TaskFilter; onChange: (f: TaskFilter) => void }) {
   return (
     <div className="task-filters">
-      <FilterSelect label="Filter by status" anyLabel="Any status" value={filter.status} options={STATUSES} onChange={(status) => onChange({ ...filter, status })} />
-      <FilterSelect label="Filter by priority" anyLabel="Any priority" value={filter.priority} options={PRIORITIES} onChange={(priority) => onChange({ ...filter, priority })} />
+      <MultiFilter label="Filter by status" anyLabel="Any status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
+      <MultiFilter label="Filter by priority" anyLabel="Any priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>
   );

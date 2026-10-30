@@ -338,20 +338,22 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
   if (steps.length === 0 && !action) return null;
   return (
     <div className="plan-outline">
-      <ol className="plan-outline-steps">
-        {steps.map((step, i) => (
-          <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
-            <StepCircle state={step.progress?.state} />
-            <span className="small">
-              {step.title}
-              {step.by === "you" && <span className="step-by you">Human input needed</span>}
-              {step.progress?.state === "waiting" && (
-                <span className="step-waiting">Waiting on you{step.progress.note ? `: ${step.progress.note}` : ""}</span>
-              )}
-            </span>
-          </li>
-        ))}
-      </ol>
+      {steps.length > 0 && (
+        <ol className="plan-outline-steps">
+          {steps.map((step, i) => (
+            <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
+              <StepCircle state={step.progress?.state} />
+              <span className="small">
+                {step.title}
+                {step.by === "you" && <span className="step-by you">Human input needed</span>}
+                {step.progress?.state === "waiting" && (
+                  <span className="step-waiting">Waiting on you{step.progress.note ? `: ${step.progress.note}` : ""}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
       {action}
     </div>
   );
@@ -540,10 +542,10 @@ export function TaskCard({
       openUrl(resumeSessionUrl(sessionLink!.sessionId!));
       return;
     }
-    if (!plan) return;
     const prompt = sessionPrompt(
       { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
-      plan.plan,
+      plan?.plan ?? null,
+      assessment ? { suggestion: assessment.suggestion, steps: assessment.claude_steps ?? [] } : undefined,
     );
     await linkSession(task.id);
     onChange();
@@ -570,25 +572,28 @@ export function TaskCard({
     );
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
+  // Planning lives here, in the Orb section: before a plan, Plan steps leads; after, Approve & start.
+  const canPlan = !plan && !planning && !linked && !!description;
   const planActions =
-    outlineSteps.length > 0 || planning || (assessment && description) ? (
+    outlineSteps.length > 0 || planning || canPlan || sessionLink ? (
       <div className="plan-actions">
+        {canPlan && (
+          <button className="cta-primary" onClick={() => runPlan()} title="Have Claude research the task and plan every step, marking which it can do">
+            Plan steps
+          </button>
+        )}
         {hasClaudeSteps && assessment && !linked && (
-          <button className="cta-primary" onClick={approveAndStart} title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours">
+          <button
+            className={canPlan ? "cta-ghost" : "cta-primary"}
+            onClick={approveAndStart}
+            title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours"
+          >
             Approve & start
           </button>
         )}
         {plan && !planning && (
-          <>
-            <button className="cta-ghost" onClick={() => setShowPlan(true)}>
-              Show plan details
-            </button>
-          </>
-        )}
-        {/* No steps yet (older assessments didn't list them): plan from here, as on every assessment. */}
-        {outlineSteps.length === 0 && !planning && !linked && (
-          <button className="cta-ghost" onClick={() => runPlan()} title="Have Claude plan the steps, marking which it can do">
-            Plan steps
+          <button className="cta-ghost" onClick={() => setShowPlan(true)}>
+            Show plan details
           </button>
         )}
         {planning && (
@@ -781,29 +786,13 @@ export function TaskCard({
             Collapse
           </button>
         )}
-        {planning ? (
-          <span className="muted small">
-            <span className="spin">↻</span> {planStatus ?? "Researching a plan"}…
-          </span>
-        ) : linked ? (
-          <button className="link-button small" onClick={openInClaude} title="Open the Claude Code session working on this task">
-            Open in Claude
-          </button>
-        ) : plan ? (
-          <>
-            <button className="link-button small" onClick={openInClaude} title="Open a new Claude Code session with this task and its plan filled in">
-              Open in Claude
-            </button>
-          </>
-        ) : description ? (
-          <button className="link-button small" onClick={() => runPlan()}>
-            ✦ Plan with Claude
-          </button>
-        ) : (
-          <button className="link-button small muted" onClick={() => setEditing(true)}>
-            Add a description to plan with Claude
-          </button>
-        )}
+        <button
+          className="link-button small"
+          onClick={openInClaude}
+          title={linked ? "Open the Claude Code session working on this task" : "Open a new Claude Code session with this task filled in"}
+        >
+          Open in Claude
+        </button>
         {linked ? null : checkStatus ? (
           <span className="muted small checking" title={checkStatus}>
             <span className="spin">✦</span> {checkStatus}…

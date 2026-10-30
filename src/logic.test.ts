@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskFilter, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -380,19 +380,27 @@ describe("task filters", () => {
   });
 
   it("requires every filter that's set", () => {
-    const f = { status: "in_progress" as const, priority: "critical" as const, recommendedOnly: false };
+    const f: TaskFilter = { statuses: ["in_progress"], priorities: ["critical"], recommendedOnly: false };
     expect(matchesFilter(t("in_progress", "critical"), f)).toBe(true);
     expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
     expect(matchesFilter(t("waiting", "critical"), f)).toBe(false);
   });
 
+  it("matches any of several picks within a filter", () => {
+    const f: TaskFilter = { statuses: ["todo", "waiting"], priorities: ["critical", "high"], recommendedOnly: false };
+    expect(matchesFilter(t("waiting", "high"), f)).toBe(true);
+    expect(matchesFilter(t("todo", "critical"), f)).toBe(true);
+    expect(matchesFilter(t("in_progress", "high"), f)).toBe(false);
+    expect(matchesFilter(t("todo", "low"), f)).toBe(false);
+  });
+
   it("filters on blocking like any other priority", () => {
-    expect(matchesFilter({ status: "todo", priority: "blocking" }, { ...NO_FILTER, priority: "blocking" })).toBe(true);
-    expect(matchesFilter({ status: "todo", priority: "critical" }, { ...NO_FILTER, priority: "blocking" })).toBe(false);
+    expect(matchesFilter({ status: "todo", priority: "blocking" }, { ...NO_FILTER, priorities: ["blocking"] })).toBe(true);
+    expect(matchesFilter({ status: "todo", priority: "critical" }, { ...NO_FILTER, priorities: ["blocking"] })).toBe(false);
   });
 
   it("treats unassessed tasks as unrated, and can require recommended", () => {
-    expect(matchesFilter(t("todo", null), { ...NO_FILTER, priority: "unrated" })).toBe(true);
+    expect(matchesFilter(t("todo", null), { ...NO_FILTER, priorities: ["unrated"] })).toBe(true);
     expect(matchesFilter(t("todo", "low"), { ...NO_FILTER, recommendedOnly: true })).toBe(false);
     expect(matchesFilter(t("todo", "low", true), { ...NO_FILTER, recommendedOnly: true })).toBe(true);
   });
@@ -403,8 +411,8 @@ describe("project filters", () => {
 
   it("requires every filter that's set", () => {
     expect(matchesProjectFilter(p, NO_PROJECT_FILTER, new Set())).toBe(true);
-    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, status: "at_risk", priority: "P0" }, new Set())).toBe(true);
-    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priority: "P1" }, new Set())).toBe(false);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, statuses: ["at_risk"], priorities: ["P0"] }, new Set())).toBe(true);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priorities: ["P1"] }, new Set())).toBe(false);
   });
 
   it("keeps projects with a recommended task when asked", () => {
