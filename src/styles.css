@@ -107,12 +107,16 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .columns {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(420px, 1.6fr) minmax(420px, 1.6fr);
+  /* Minimums add up to fit the 1000px minimum window, so no column runs off the right edge. */
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.6fr) minmax(320px, 1.6fr);
   gap: 16px;
   padding: 16px 20px;
   overflow: hidden;
 }
 .column { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 20px; }
+/* Grid items default to their content's minimum width; without this a wide header (filters) pushes a
+   column past its track, and the next column draws over its right edge. */
+.columns > * { min-width: 0; }
 .column-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
 .card {
@@ -535,7 +539,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* All tasks filters: one control per category in the group heading */
 .group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .group-header h4 { margin: 0; }
-.task-filters { display: flex; gap: 6px; align-items: center; }
+.task-filters { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
 /* Dropdowns and the Recommended button share one box, so their text lines up. */
 .filter-select {
   appearance: none;
