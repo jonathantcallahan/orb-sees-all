@@ -451,12 +451,15 @@ function PlanOutline({
   action,
   planning = false,
   onMarkDone,
+  onRemind,
 }: {
   steps: OutlineStep[];
   action?: ReactNode;
   planning?: boolean;
   /** Marks a step done by hand (once a session is under way): for work the session didn't see, like a message sent from Slack. */
   onMarkDone?: (index: number) => void;
+  /** Has the session draft a reminder to whoever a blocked step is waiting on. */
+  onRemind?: (index: number) => void;
 }) {
   if (steps.length === 0 && !action) return null;
   return (
@@ -491,6 +494,11 @@ function PlanOutline({
                   )}
                 </span>
               </HoverTip>
+              {onRemind && step.progress?.state === "blocked" && (
+                <button className="link-button small step-remind" onClick={() => onRemind(i)}>
+                  Remind
+                </button>
+              )}
             </li>
           ))}
         </ol>
@@ -507,6 +515,7 @@ function AssessmentView({
   planning,
   onAddDetails,
   onMarkDone,
+  onRemind,
 }: {
   assessment: Assessment;
   /** Plan steps tagged by who does them, shown inside the assessment. */
@@ -517,6 +526,7 @@ function AssessmentView({
   planning: boolean;
   onAddDetails?: () => void;
   onMarkDone?: (index: number) => void;
+  onRemind?: (index: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -541,7 +551,7 @@ function AssessmentView({
         </button>
         <Reveal open={open} className="automation-body">
           <span className="small suggestion">{assessment.suggestion}</span>
-          <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} />
+          <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} onRemind={onRemind} />
         </Reveal>
       </div>
     </>
@@ -1112,6 +1122,20 @@ export function TaskCard({
     onChange();
   };
   const sessionWorking = useJobStatus(`session:${task.id}`);
+  // A blocked step's Remind: the session drafts a nudge where the step was asked and hands it over
+  // to review and send, like any message. It isn't tied to the step, so sending it doesn't finish it.
+  const remind =
+    sessionLink?.sessionId && !sessionWorking
+      ? (i: number) => {
+          const step = outlineSteps[i];
+          const on = step.progress?.note ? ` on ${step.progress.note}` : "";
+          continueTaskSession(
+            task.id,
+            `Step ${i + 1} ("${step.title}") is still blocked${on}. Please draft a short, friendly reminder to whoever it's waiting on, in the thread or channel where it was asked (mention them), and hand it to me to send with an "[orb] send to …" block, without a step number. Leave the step blocked.`,
+          ).then(onChange, onChange);
+          onChange();
+        }
+      : undefined;
   // Steps that have drifted from the conversation (a later one moving while an earlier one isn't
   // done) are re-checked against it once the session is idle, once per change in the transcript.
   const recheckStatus = useJobStatus(`recheck:${task.id}`);
@@ -1485,6 +1509,7 @@ export function TaskCard({
                   actions={planActions}
                   planning={planning}
                   onMarkDone={markDone}
+                  onRemind={remind}
                 />
               ) : (
                 <>
@@ -1494,7 +1519,7 @@ export function TaskCard({
                     </div>
                   )}
                   {/* No assessment to nest it in yet. */}
-                  <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} />
+                  <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} />
                 </>
               )}
 

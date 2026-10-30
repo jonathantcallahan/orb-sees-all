@@ -687,6 +687,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .step-circle.skipped { color: var(--muted); opacity: 0.7; }
 .step-circle.blocked { color: var(--red); }
 .plan-outline-steps li.step-blocked > .hover-tip-anchor > .small { color: var(--red); }
+/* Remind sits at the end of a blocked step's line, shown while the step is hovered. */
+.step-remind { margin-left: auto; padding-left: 8px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s ease; }
+.plan-outline-steps li:hover .step-remind, .step-remind:focus-visible { opacity: 1; }
 .hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
 .plan-outline-steps li.step-skipped > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); animation: step-turn 2.4s linear infinite; }
