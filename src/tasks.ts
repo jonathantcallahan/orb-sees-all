@@ -1,4 +1,4 @@
-import type { Priority, ProjectPriority, ProjectStatus } from "./schema";
+import type { Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "done";
 
@@ -219,18 +219,24 @@ export interface ProjectFilter {
   statuses: ProjectStatus[];
   /** Empty means any priority. */
   priorities: ProjectPriority[];
+  /** Empty means any role. */
+  roles: Raci[];
 }
 
-export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [] };
+export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [], roles: [] };
 
 export function isFilteringProjects(f: ProjectFilter): boolean {
-  return f.statuses.length > 0 || f.priorities.length > 0;
+  return f.statuses.length > 0 || f.priorities.length > 0 || f.roles.length > 0;
 }
 
 /** Whether a project passes every filter that's set. */
-export function matchesProjectFilter(p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined }, f: ProjectFilter): boolean {
+export function matchesProjectFilter(
+  p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined; role: Raci | null | undefined },
+  f: ProjectFilter,
+): boolean {
   if (f.statuses.length && (!p.status || !f.statuses.includes(p.status))) return false;
   if (f.priorities.length && (!p.priority || !f.priorities.includes(p.priority))) return false;
+  if (f.roles.length && (!p.role || !f.roles.includes(p.role))) return false;
   return true;
 }
 

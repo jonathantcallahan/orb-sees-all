@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ProjectPriority, ProjectStatus } from "../schema";
+import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
 import { NO_FILTER, NO_PROJECT_FILTER, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskStatus } from "../tasks";
 
 const STATUSES: [TaskStatus, string][] = [
@@ -125,12 +125,20 @@ const PROJECT_PRIORITIES: [ProjectPriority, string][] = [
   ["P4", "P4"],
 ];
 
-/** Status and priority filters for the Projects column. */
+const PROJECT_ROLES: [Raci, string][] = [
+  ["responsible", "Responsible"],
+  ["accountable", "Accountable"],
+  ["consulted", "Consulted"],
+  ["informed", "Informed"],
+];
+
+/** Status, priority and RACI role filters for the Projects column. */
 export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; onChange: (f: ProjectFilter) => void }) {
   return (
     <div className="task-filters">
       <MultiFilter label="Filter projects by status" anyLabel="Any status" values={filter.statuses} options={PROJECT_STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
       <MultiFilter label="Filter projects by priority" anyLabel="Any priority" values={filter.priorities} options={PROJECT_PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
+      <MultiFilter label="Filter projects by your RACI role" anyLabel="Any role" values={filter.roles} options={PROJECT_ROLES} onChange={(roles) => onChange({ ...filter, roles })} />
     </div>
   );
 }

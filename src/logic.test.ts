@@ -407,11 +407,12 @@ describe("task filters", () => {
 });
 
 describe("project filters", () => {
-  const p = { status: "at_risk" as const, priority: "P0" as const };
+  const p = { status: "at_risk" as const, priority: "P0" as const, role: "accountable" as const };
 
   it("requires every filter that's set", () => {
     expect(matchesProjectFilter(p, NO_PROJECT_FILTER)).toBe(true);
-    expect(matchesProjectFilter(p, { statuses: ["at_risk"], priorities: ["P0"] })).toBe(true);
+    expect(matchesProjectFilter(p, { statuses: ["at_risk"], priorities: ["P0"], roles: ["accountable", "responsible"] })).toBe(true);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, roles: ["informed"] })).toBe(false);
     expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priorities: ["P1"] })).toBe(false);
   });
 });

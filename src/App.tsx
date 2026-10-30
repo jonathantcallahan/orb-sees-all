@@ -75,7 +75,10 @@ export default function App() {
   const refreshingAll = running.includes("all");
   const recommended = new Set(data.reading?.date === localDate(new Date()) ? (data.reading.recommended ?? []) : []);
   const shownProjects = projects.filter((p) =>
-    matchesProjectFilter({ status: p.snapshot?.status ?? null, priority: p.snapshot?.priority?.level }, projectFilter),
+    matchesProjectFilter(
+      { status: p.snapshot?.status ?? null, priority: p.snapshot?.priority?.level, role: p.snapshot?.raci?.role },
+      projectFilter,
+    ),
   );
   const load = pressure(
     projects.map((p) => ({
