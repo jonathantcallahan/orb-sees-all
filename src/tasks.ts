@@ -184,6 +184,43 @@ export function pressure(tasks: PressureTask[], states: Map<string, TaskState>, 
   };
 }
 
+/** "a, b and c" */
+function listOf(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Everything that feeds the orb's score, as a sentence or two, e.g. "2 projects are blocked on you.
+ * You have 2 critical, 19 high and 5 low-priority tasks, 3 due soon and 1 overdue." Zero counts are
+ * left out; null when nothing is waiting.
+ */
+export function describePressure(p: Pick<Pressure, "projectsOnMe" | "tally">): string | null {
+  const sentences: string[] = [];
+  if (p.projectsOnMe) sentences.push(`${p.projectsOnMe} project${p.projectsOnMe === 1 ? " is" : "s are"} blocked on you.`);
+  const t = p.tally;
+  if (t) {
+    const levels = (
+      [
+        [t.blocking, "blocking"],
+        [t.critical, "critical"],
+        [t.high, "high"],
+        [t.medium, "medium"],
+        [t.low, "low"],
+      ] as const
+    ).filter(([n]) => n);
+    if (levels.length) {
+      const total = levels.reduce((sum, [n]) => sum + n, 0);
+      const last = levels[levels.length - 1][1];
+      // "-priority" reads naturally after high, medium and low, not after blocking or critical.
+      const suffix = last === "blocking" || last === "critical" ? "" : "-priority";
+      const kinds = listOf(levels.map(([n, label]) => `${n} ${label}`));
+      const due = listOf([t.dueSoon ? `${t.dueSoon} due soon` : "", t.overdue ? `${t.overdue} overdue` : ""].filter(Boolean));
+      sentences.push(`You have ${kinds}${suffix} task${total === 1 ? "" : "s"}${due ? `, ${due}` : ""}.`);
+    }
+  }
+  return sentences.length ? sentences.join(" ") : null;
+}
+
 /** From calm to angry; each step down is a finished task or two closer to peace. */
 export type OrbMood = "pleased" | "serene" | "content" | "attentive" | "restless" | "agitated" | "irritated" | "furious";
 

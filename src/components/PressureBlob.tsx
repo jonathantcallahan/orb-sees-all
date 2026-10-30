@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { orbMood, type Pressure } from "../tasks";
+import { describePressure, orbMood, type Pressure } from "../tasks";
 import { NOISE } from "./orbNoise";
 import { buildGlassOrb } from "./glassOrb";
 import { buildLiquidOrb } from "./liquidOrb";
@@ -184,25 +184,8 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
   }, [look]);
 
   const mood = orbMood(pressure);
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  // Everything that feeds the score, most urgent first, leaving out what's zero.
-  const t = pressure.tally;
-  const tally = t
-    ? [
-        [t.blocking, "blocking"],
-        [t.critical, "critical"],
-        [t.high, "high"],
-        [t.medium, "medium"],
-        [t.low, "low"],
-        [t.dueSoon, "due soon"],
-        [t.overdue, "overdue"],
-      ]
-        .filter(([n]) => n)
-        .map(([n, label]) => `${n} ${label}`)
-        .join(" · ")
-    : "";
-  const blocked = pressure.projectsOnMe ? `${plural(pressure.projectsOnMe, "project")} blocked on you` : null;
-  const counts = [blocked, tally].filter(Boolean).join(" · ") || null;
+  // Everything that feeds the score, in plain words.
+  const counts = describePressure(pressure);
 
   return (
     <div className={`pressure mood-${mood}`} title={counts ?? "Nothing waiting on you"}>

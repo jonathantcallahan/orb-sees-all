@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
+import { applyTaskState, compareProjects, describePressure, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -185,6 +185,18 @@ describe("pressure", () => {
       now,
     );
     expect(p.tally).toEqual({ blocking: 1, critical: 1, high: 1, medium: 1, low: 2, dueSoon: 1, overdue: 1 });
+  });
+
+  it("describes the tally in a sentence", () => {
+    const tally = { blocking: 0, critical: 2, high: 19, medium: 24, low: 5, dueSoon: 3, overdue: 1 };
+    expect(describePressure({ projectsOnMe: 2, tally })).toBe(
+      "2 projects are blocked on you. You have 2 critical, 19 high, 24 medium and 5 low-priority tasks, 3 due soon and 1 overdue.",
+    );
+    expect(describePressure({ projectsOnMe: 1, tally: { ...tally, high: 0, medium: 0, low: 0, critical: 0, blocking: 1, dueSoon: 0, overdue: 0 } })).toBe(
+      "1 project is blocked on you. You have 1 blocking task.",
+    );
+    expect(describePressure({ projectsOnMe: 0, tally: { blocking: 0, critical: 0, high: 1, medium: 0, low: 0, dueSoon: 0, overdue: 0 } })).toBe("You have 1 high-priority task.");
+    expect(describePressure({ projectsOnMe: 0, tally: { blocking: 0, critical: 0, high: 0, medium: 0, low: 0, dueSoon: 0, overdue: 0 } })).toBeNull();
   });
 
   it("barely notices a long medium and low backlog", () => {
