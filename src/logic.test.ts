@@ -475,3 +475,11 @@ describe("manual priority", () => {
     expect(taskPriority("high", "P0", false, undefined)).toBe("critical");
   });
 });
+
+describe("slack channel links", () => {
+  it("uses the workspace domain from a permalink, so Enterprise Grid resolves it", async () => {
+    const { slackChannelUrl } = await import("./projects");
+    expect(slackChannelUrl("C123", [null, "https://unity.slack.com/archives/C123/p1700000000000100"])).toBe("https://unity.slack.com/archives/C123");
+    expect(slackChannelUrl("C123")).toBe("https://slack.com/app_redirect?channel=C123");
+  });
+});

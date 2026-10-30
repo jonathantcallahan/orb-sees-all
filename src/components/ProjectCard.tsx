@@ -30,6 +30,13 @@ function SlackIcon() {
   return <img src={COLORED_ICONS.slack} width={12} height={12} alt="" />;
 }
 
+/** Message links from the project's snapshot, which carry its Slack workspace's domain. */
+function channelPermalinks(project: Project): (string | null | undefined)[] {
+  const s = project.snapshot;
+  if (!s) return [];
+  return [...s.blockers.map((b) => b.link), ...(s.active ?? []).map((a) => a.link), ...s.my_tasks.map((t) => t.link), ...(s.recent_updates ?? []).map((u) => u.link)];
+}
+
 /** Hides a project from the dashboard after an inline confirmation. */
 function Untrack({ name, onConfirm }: { name: string; onConfirm: () => Promise<void> }) {
   const [confirming, setConfirming] = useState(false);
@@ -360,7 +367,7 @@ export function ProjectCard({
               </span>
             )}
             {projectName(project)}
-            <ExternalLink href={slackChannelUrl(project.channel_id)} className="slack-link" title={`Open #${project.name} in Slack`}>
+            <ExternalLink href={slackChannelUrl(project.channel_id, channelPermalinks(project))} className="slack-link" title={`Open #${project.name} in Slack`}>
               <SlackIcon />
             </ExternalLink>
           </h3>

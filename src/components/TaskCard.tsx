@@ -812,7 +812,6 @@ export function TaskCard({
           <span className="task-title" title={task.title}>
             {task.title}
           </span>
-          {claudeIcon}
         </span>
         {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         {task.recommended && <RecommendedBadge />}
