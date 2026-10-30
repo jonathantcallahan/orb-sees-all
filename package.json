@@ -10,28 +10,32 @@
     "test": "vitest run",
     "tauri": "tauri",
     "icons": "node scripts/link-icons.mjs",
-    "install-app": "sh scripts/install-app.sh"
+    "install-app": "sh scripts/install-app.sh",
+    "release": "sh scripts/release.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-sql": "^2",
+    "@tauri-apps/plugin-updater": "^2",
     "react": "^19",
     "react-dom": "^19",
     "three": "^0.186.1",
     "zod": "^4"
   },
   "devDependencies": {
+    "@iconify-json/logos": "^1.2.18",
     "@iconify-json/lucide": "^1.2.149",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^5",
+    "simple-icons": "^16.36.0",
     "typescript": "^5",
     "vite": "^7",
-    "vitest": "^3",
-    "@iconify-json/logos": "^1.2.18",
-    "simple-icons": "^16.36.0"
-  }
+    "vitest": "^3"
+  },
+  "packageManager": "pnpm@8.15.9"
 }

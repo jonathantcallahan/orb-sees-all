@@ -4,6 +4,7 @@ import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { SuggestedProjects } from "./components/SuggestedProjects";
+import { UpdateButton } from "./components/UpdateButton";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
@@ -149,6 +150,7 @@ export default function App() {
           ) : (
             running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>
           )}
+          <UpdateButton />
           <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title="Refresh everything (⌘R)">
             {refreshingAll ? "Refreshing…" : "Refresh all"}
           </button>

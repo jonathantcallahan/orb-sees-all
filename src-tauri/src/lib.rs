@@ -222,10 +222,31 @@ fn migrations() -> Vec<Migration> {
     ]
 }
 
+/// The identifier the app had before it was shared; its data folders move to the current one.
+const OLD_IDENTIFIER: &str = "com.jcallahan.dayplanner";
+const IDENTIFIER: &str = "com.orb.app";
+
+/// Moves the old identifier's folders (database, backups, web storage, caches) to the current
+/// identifier's, once, before anything opens them. A folder that already exists is left alone.
+fn migrate_old_identifier() {
+    let Ok(home) = std::env::var("HOME") else { return };
+    let library = PathBuf::from(home).join("Library");
+    for dir in ["Application Support", "WebKit", "Caches"] {
+        let old = library.join(dir).join(OLD_IDENTIFIER);
+        let new = library.join(dir).join(IDENTIFIER);
+        if old.exists() && !new.exists() {
+            let _ = std::fs::rename(&old, &new);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    migrate_old_identifier();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:dayplanner.db", migrations())
