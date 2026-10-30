@@ -22,7 +22,7 @@ export interface IndexSource {
 }
 
 /** How much of a description to include; the index goes into every refresh prompt. */
-const GIST_CHARS = 140;
+const GIST_CHARS = 100;
 /** Most entries to send; the user's open list rarely gets this long. */
 const MAX_ENTRIES = 120;
 

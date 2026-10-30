@@ -163,7 +163,9 @@ export async function refreshProject(channelId: string): Promise<void> {
         if (repoState) await db.saveRepoState(channelId, repoState);
 
         const startedAt = new Date();
-        const index = await loadTaskIndex();
+        // This project's own tasks are already in its previous snapshot; the index adds everything else.
+        const own = new Set((project.snapshot?.my_tasks ?? []).map((t) => t.id));
+        const index = (await loadTaskIndex()).filter((e) => !own.has(e.id));
         const { data, costUsd } = await runClaude({
         onStatus: status,
           prompt: projectPrompt({

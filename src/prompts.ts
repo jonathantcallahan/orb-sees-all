@@ -65,7 +65,7 @@ export function projectPrompt(p: ProjectPromptInput): string {
   const since = windowStart(p.lastRefreshedAt, p.now, 14);
   const reading = p.previous
     ? `You already have a snapshot from ${p.lastRefreshedAt}:
-${JSON.stringify(p.previous)}
+${JSON.stringify({ ...p.previous, summary: undefined })}
 
 Read only what changed since then:
 - slack_read_channel on ${p.channelId} with oldest=${since.unix} for new top-level messages.
@@ -96,7 +96,6 @@ Fields:
 - active: planned work that's underway and isn't stopping anyone (tickets in a sprint, a doc being written, a build in progress), with the same fields; since is when it started. Don't repeat anything listed in blockers. At most five, most important first.
 - my_tasks: (if the project's priority is P0, set every task's assessment priority to "critical") things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
 - recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with when it was posted (ISO 8601 date-time with offset, e.g. "2026-10-29T14:05:00-07:00") and the message permalink. Empty when nothing notable happened.
-- summary: three to five sentences on where the project stands.
 - last_activity: YYYY-MM-DD of the latest message.
 
 ${READ_ONLY}
@@ -108,7 +107,7 @@ ${JSON_ONLY} Shape:
  "active": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "refines": string|null, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
- "summary": string, "last_activity": "YYYY-MM-DD"|null}`;
+ "last_activity": "YYYY-MM-DD"|null}`;
 }
 
 export interface AdhocPromptInput {

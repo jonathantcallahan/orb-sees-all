@@ -23,7 +23,7 @@ describe("task index", () => {
     );
     expect(index.map((e) => e.id)).toEqual(["own:1"]);
     expect(index[0]).toMatchObject({ title: "Send Q3 numbers", project: "Refunds" });
-    expect(index[0].gist!.length).toBe(140);
+    expect(index[0].gist!.length).toBe(100);
   });
 
   it("accepts only refinements of other open tasks", () => {

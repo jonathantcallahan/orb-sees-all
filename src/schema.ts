@@ -96,7 +96,8 @@ export const ProjectSnapshot = z.object({
   my_tasks: z.array(ProjectTask),
   /** Notable developments since the previous snapshot. */
   recent_updates: z.array(z.object({ summary: z.string(), date: z.string().nullish(), link: z.string().nullish() })).default([]),
-  summary: z.string(),
+  /** No longer requested (nothing shows it); kept optional so older snapshots still parse. */
+  summary: z.string().nullish(),
   last_activity: z.string().nullish(),
 });
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
