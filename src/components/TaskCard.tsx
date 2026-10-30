@@ -116,10 +116,9 @@ function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string)
   const lineHeight = parseFloat(getComputedStyle(p).lineHeight);
   const probe = p.cloneNode(false) as HTMLParagraphElement;
   probe.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;width:${p.clientWidth}px;`;
-  const label = p.querySelector(".draft-label")?.outerHTML ?? "";
   p.parentElement!.appendChild(probe);
   const fits = (body: string) => {
-    probe.innerHTML = label;
+    probe.innerHTML = "";
     const span = document.createElement("span");
     span.textContent = body;
     probe.appendChild(span);
@@ -141,7 +140,7 @@ function fitTwoLines(p: HTMLParagraphElement, text: string, actionsHtml: string)
   }
 }
 
-function Description({ text, draft, onEdit, actions }: { text: string; draft: boolean; onEdit?: () => void; actions?: ReactNode }) {
+function Description({ text, onEdit, actions }: { text: string; onEdit?: () => void; actions?: ReactNode }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   /** Characters shown when collapsed, or null when the whole text fits. */
@@ -162,7 +161,6 @@ function Description({ text, draft, onEdit, actions }: { text: string; draft: bo
   return (
     <>
       <p ref={ref} className="description small">
-        {draft && <span className="draft-label" title="Claude drafted this from Slack, email and Jira. Edit it to correct it.">✦ Claude's draft </span>}
         <span>{truncated ? `${text.slice(0, cut).trimEnd()}…` : text}</span>
       </p>
       <div className="description-actions small">
@@ -733,7 +731,7 @@ export function TaskCard({
         <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       )}
       {description ? (
-        <Description text={description} draft={!!draft} onEdit={() => setEditing(true)} actions={linksToggle} />
+        <Description text={description} onEdit={() => setEditing(true)} actions={linksToggle} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>

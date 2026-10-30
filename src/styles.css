@@ -283,7 +283,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 
 /* Task descriptions: two lines until expanded */
-.draft-label { color: var(--accent); }
 .add-description { align-self: flex-start; font-style: italic; }
 
 /* Claude's assessment of a task */
