@@ -117,6 +117,9 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 /* Grid items default to their content's minimum width; without this a wide header (filters) pushes a
    column past its track, and the next column draws over its right edge. */
 .columns > * { min-width: 0; }
+/* Columns scroll rather than squeeze: without this, a tall column shrinks its sections (like an empty
+   Today box) and their content spills past their borders. The project list is meant to flex and scroll. */
+.column > :not(.project-list) { flex-shrink: 0; }
 .column-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 
 .card {
