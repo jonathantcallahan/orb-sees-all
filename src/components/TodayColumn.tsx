@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
@@ -52,7 +53,8 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
   // grows upward from the block's bottom edge so it isn't cut off.
   const left = Math.min(anchor.right + 8, window.innerWidth - width - 8);
   const vertical = anchor.top > window.innerHeight / 2 ? { bottom: Math.max(8, window.innerHeight - anchor.bottom) } : { top: anchor.top };
-  return (
+  // Rendered into <body>: inside the column it would sit under the next column's layer.
+  return createPortal(
     <div className="card meeting-card" style={{ left, width, ...vertical }} role="tooltip">
       <div className="meeting-card-title">{ev.title}</div>
       <div className="timestamp small">
@@ -71,7 +73,8 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
           </ul>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

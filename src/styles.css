@@ -342,7 +342,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
 .day-grid .hour { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 .hour-label { position: absolute; top: -7px; left: 0; width: 38px; font-size: 10px; color: var(--muted); background: var(--bg); padding-right: 4px; text-align: right; }
-.day-grid .events { position: absolute; top: 0; bottom: 0; left: 44px; right: 0; }
+/* Inset from the right so blocks and their borders sit inside the scrolling column, which clips. */
+.day-grid .events { position: absolute; top: 0; bottom: 0; left: 44px; right: 4px; }
 .event-block {
   position: absolute;
   overflow: hidden;
