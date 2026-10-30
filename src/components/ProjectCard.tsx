@@ -243,9 +243,13 @@ function WorkItem({
               />
             )}
             {remind && <RemindAction item={item} ask={kind === "active" ? "update" : "reminder"} {...remind} />}
-            {/* Someone else's blocker that's been handled: clear it by hand, as a double check's Mark resolved does. */}
-            {check && !item.owners.some((o) => o.is_me) && (
-              <button className="link-button small more-link" onClick={check.onResolve} title="They've done it: stop listing this as blocking">
+            {/* A blocker that's been handled: clear it by hand, as a double check's Mark resolved does. */}
+            {check && (
+              <button
+                className="link-button small more-link"
+                onClick={check.onResolve}
+                title={item.owners.some((o) => o.is_me) ? "Done: clear the blocker and mark your task done" : "They've done it: stop listing this as blocking"}
+              >
                 Mark done
               </button>
             )}
@@ -373,6 +377,8 @@ export function ProjectCard({
                     onCheck: () => checkBlocker(projectName(project), project.channel_id, b, reminders[b.id]).then(onChange, () => {}),
                     onResolve: async () => {
                       await setTaskState(blockerKey(b.id), { dismissed: true });
+                      // Your own blockers are also tasks on your list (same id); finishing one finishes both.
+                      if (b.owners.some((o) => o.is_me)) await setTaskState(b.id, { status: "done" });
                       onChange();
                     },
                   }}
