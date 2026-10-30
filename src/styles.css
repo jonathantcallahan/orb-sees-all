@@ -519,8 +519,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .finding-mark { width: 10px; flex: none; text-align: center; color: var(--muted); }
 .check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
 .check-result .corrected { color: var(--text); }
-/* Everything after the owners on a blocker line is the age's size: 11px. */
-.reminded, .work-actions .link-button, .work-actions .checking { font-size: 11px; }
+/* Action links everywhere are 11px, the size of the small age and time labels. */
+.link-button, .link-button.small, .reminded, .work-actions .checking { font-size: 11px; }
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }

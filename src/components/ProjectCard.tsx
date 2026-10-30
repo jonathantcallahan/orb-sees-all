@@ -276,7 +276,8 @@ function WorkItem({
         {(check || remind) && (
           // Slides open on hover; stays open while a double check runs so its status shows.
           <span className={`work-actions${checking ? " open" : ""}`}>
-            {check && (
+            {/* Once you've nudged the owner, there's no more to check: the reminder is the next step. */}
+            {check && !remind?.reminder && (
               <CheckAction
                 checking={checking}
                 onCheck={() => {
