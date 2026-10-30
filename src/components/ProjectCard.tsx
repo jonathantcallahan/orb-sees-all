@@ -386,7 +386,8 @@ export function ProjectCard({
           {s.status_reason && <p className="reason small">{s.status_reason}</p>}
 
           {(blockers.length > 0 || (s.active?.length ?? 0) > 0) && (
-            <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist">
+            // title="" keeps the card's "Click to show…" tooltip off the tabs and their lists.
+            <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist" title="">
               {blockers.length > 0 && (
                 <button role="tab" aria-selected={tab === "blockers"} className={`work-tab${tab === "blockers" ? " open" : ""}`} onClick={() => toggle("blockers")}>
                   Blocking {blockers.length}
@@ -403,7 +404,7 @@ export function ProjectCard({
           )}
 
           {tab === "blockers" && blockers.length > 0 && (
-            <ul className="work-items tab-panel" role="tabpanel">
+            <ul className="work-items tab-panel" role="tabpanel" title="">
               {blockers.map((b) => (
                 <WorkItem
                   key={b.id}
@@ -424,7 +425,7 @@ export function ProjectCard({
           )}
 
           {tab === "active" && s.active?.length > 0 && (
-            <ul className="work-items tab-panel" role="tabpanel">
+            <ul className="work-items tab-panel" role="tabpanel" title="">
               {s.active.map((a) => (
                 <WorkItem key={a.id} item={a} kind="active" />
               ))}
