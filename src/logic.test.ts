@@ -343,7 +343,7 @@ describe("readingContext", () => {
       summary: "",
     };
     const ctx = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, repo_state: null, last_error: null }],
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null }],
       adhoc: { tasks: [], replies: [{ id: "r1", source: "slack", from: "Kim", summary: "OK to ship?" }], news: [{ id: "n1", headline: "Reorg announced" }], refreshed_at: null },
       manual: [{ id: "m1", title: "Done thing", description: null, project_id: null, created_at: "" }],
       assessments: new Map(),
@@ -362,7 +362,7 @@ describe("readingContext", () => {
 
     // A blocker marked resolved after a double check drops out.
     const after = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, repo_state: null, last_error: null }],
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null }],
       adhoc: { tasks: [], replies: [], news: [], refreshed_at: null },
       manual: [],
       assessments: new Map(),

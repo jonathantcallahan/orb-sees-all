@@ -2,6 +2,7 @@ import { setUserProfile } from "../prompts";
 import { useEffect, useState } from "react";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
+import { activeChannels, projectName } from "../projects";
 import type { Theme } from "../theme";
 import type { OrbLook } from "./PressureBlob";
 
@@ -11,7 +12,7 @@ const lines = (text: string) =>
     .map((l) => l.trim())
     .filter(Boolean);
 
-function ProjectRow({ project, onSaved }: { project: db.Project; onSaved: () => void }) {
+function ProjectRow({ project, others, onSaved }: { project: db.Project; others: db.Project[]; onSaved: () => void }) {
   const [hidden, setHidden] = useState(project.hidden);
   const [local, setLocal] = useState(project.local_repos.join("\n"));
   const [gh, setGh] = useState(project.gh_repos.join("\n"));
@@ -22,8 +23,48 @@ function ProjectRow({ project, onSaved }: { project: db.Project; onSaved: () => 
     <tr className={hidden ? "muted" : undefined}>
       <td>
         <label className="row">
-          <input type="checkbox" checked={!hidden} onChange={(e) => setHidden(!e.target.checked)} />#{project.name}
+          <input type="checkbox" checked={!hidden} onChange={(e) => setHidden(!e.target.checked)} />
+          {projectName(project)}
+          {project.state === "suggested" && <span className="chip">Suggested</span>}
         </label>
+        <div className="project-channel-list small">
+          {activeChannels(project).map((c) => (
+            <span key={c.channel_id} className="chip" title={c.reason ?? undefined}>
+              #{c.name}
+              {c.role === "related" && (
+                <button
+                  className="link-button muted"
+                  title={`Unlink #${c.name} from this project`}
+                  onClick={async () => {
+                    await db.unlinkChannel(c.channel_id);
+                    onSaved();
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+        {others.length > 0 && (
+          <select
+            className="small"
+            value=""
+            title="Fold this project into another one; its channels and tasks move there"
+            onChange={async (e) => {
+              if (!e.target.value) return;
+              await db.mergeProject(project.channel_id, e.target.value);
+              onSaved();
+            }}
+          >
+            <option value="">Merge into…</option>
+            {others.map((o) => (
+              <option key={o.channel_id} value={o.channel_id}>
+                {projectName(o)}
+              </option>
+            ))}
+          </select>
+        )}
       </td>
       <td>
         <textarea rows={2} value={local} onChange={(e) => setLocal(e.target.value)} placeholder="/Users/you/repo (one per line)" />
@@ -171,22 +212,29 @@ export function Settings({
               onSaved();
             }}
           >
-            {discovering ? "Finding channels…" : "Find #tmp- channels"}
+            {discovering ? "Finding project channels…" : "Find project channels"}
           </button>
         </header>
         <table className="projects-table">
           <thead>
             <tr>
-              <th>Channel (shown)</th>
+              <th>Project (shown) and channels</th>
               <th>Local repos</th>
               <th>GitHub repos</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {projects.map((p) => (
-              <ProjectRow key={`${p.channel_id}:${p.hidden}:${p.local_repos}:${p.gh_repos}`} project={p} onSaved={onSaved} />
-            ))}
+            {projects
+              .filter((p) => p.state !== "merged")
+              .map((p) => (
+                <ProjectRow
+                  key={`${p.channel_id}:${p.hidden}:${p.local_repos}:${p.gh_repos}`}
+                  project={p}
+                  others={projects.filter((o) => o.channel_id !== p.channel_id && o.state === "tracked")}
+                  onSaved={onSaved}
+                />
+              ))}
           </tbody>
         </table>
 

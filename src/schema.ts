@@ -102,9 +102,47 @@ export const ProjectSnapshot = z.object({
 });
 export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
 
+/**
+ * What's known about a project, kept across refreshes and refined by each one: the durable facts,
+ * as opposed to the snapshot's current status.
+ */
+export const ProjectProfile = z.object({
+  /** What the project is for and what "done" looks like. */
+  goal: z.string(),
+  /** Other names people use for it: codenames, ticket prefixes, abbreviations. */
+  aliases: z.array(z.string()).default([]),
+  people: z.array(z.object({ name: z.string(), slack_user_id: z.string().nullish(), role: z.string() })).default([]),
+  /** Key docs, tickets, epics, dashboards and repos. */
+  resources: z.array(z.object({ title: z.string(), link: z.string(), kind: z.string().nullish() })).default([]),
+  milestones: z
+    .array(z.object({ what: z.string(), date: z.string().nullish(), status: z.enum(["done", "planned", "at_risk", "missed"]) }))
+    .default([]),
+  decisions: z.array(z.object({ what: z.string(), date: z.string().nullish(), link: z.string().nullish() })).default([]),
+});
+export type ProjectProfile = z.infer<typeof ProjectProfile>;
+
+/** Another Slack channel a refresh found the project being worked on in. */
+export const RelatedChannel = z.object({ channel_id: z.string(), name: z.string(), reason: z.string() });
+export type RelatedChannel = z.infer<typeof RelatedChannel>;
+
+/** What a project refresh returns: the new snapshot, the refined profile, and channels it found. */
+export const ProjectRefresh = ProjectSnapshot.extend({
+  profile: ProjectProfile,
+  related_channels: z.array(RelatedChannel).default([]),
+});
+export type ProjectRefresh = z.infer<typeof ProjectRefresh>;
+
 export const Discovery = z.object({
   user_id: z.string(),
-  channels: z.array(z.object({ channel_id: z.string(), name: z.string() })),
+  /** Each project found, as the channels it spans; existing projects keep their id. */
+  projects: z.array(
+    z.object({
+      project_id: z.string().nullish(),
+      name: z.string(),
+      reason: z.string(),
+      channels: z.array(z.object({ channel_id: z.string(), name: z.string(), role: z.enum(["primary", "related"]) })),
+    }),
+  ),
 });
 export type Discovery = z.infer<typeof Discovery>;
 

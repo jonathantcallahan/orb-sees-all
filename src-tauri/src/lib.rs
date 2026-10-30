@@ -213,6 +213,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/006_task_registry.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "projects as entities with channels and a profile",
+            sql: include_str!("../migrations/007_project_entity.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

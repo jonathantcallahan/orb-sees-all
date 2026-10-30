@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
+import { SuggestedProjects } from "./components/SuggestedProjects";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
@@ -186,7 +187,7 @@ export default function App() {
           <div className="project-list">
           {projects.length === 0 && (
             <p className="muted small">
-              {running.includes("discover") ? "Finding your #tmp- channels…" : "No projects yet. Refresh all to find your #tmp- channels."}
+              {running.includes("discover") ? "Finding your project channels…" : "No projects yet. Refresh all to find your project channels."}
             </p>
           )}
           {projects.length > 0 && shownProjects.length === 0 && <p className="muted small">No projects match the filters.</p>}
@@ -203,6 +204,7 @@ export default function App() {
               onChange={reload}
             />
           ))}
+          <SuggestedProjects projects={data.projects.filter((p) => p.state === "suggested")} onChange={reload} />
           </div>
         </section>
 

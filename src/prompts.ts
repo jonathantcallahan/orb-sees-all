@@ -7,7 +7,7 @@ let profile = DEFAULT_PROFILE;
 export function setUserProfile(text: string | null | undefined) {
   profile = text?.trim() || DEFAULT_PROFILE;
 }
-import type { AdhocTask, Blocker, ProjectSnapshot, QuickReply, RepoState } from "./schema";
+import type { AdhocTask, Blocker, ProjectProfile, ProjectSnapshot, QuickReply, RepoState } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
@@ -51,19 +51,38 @@ export function windowStart(lastRefreshedAt: string | null, now: Date, firstRunD
   return { date: start.toISOString().slice(0, 10), unix: Math.floor(start.getTime() / 1000) };
 }
 
-export function discoveryPrompt(): string {
-  return `Find the current Slack user's ID (call slack_read_user_profile with no user_id) and every Slack channel they are a member of whose name starts with "tmp-". Use slack_list_user_channels with name_prefix "tmp-" and exclude_archived true, paging through all results.
+export interface DiscoveryPromptInput {
+  /** Projects already known, with their channels and other names. */
+  known: { project_id: string; name: string; aliases: string[]; channels: string[] }[];
+  /** Channels the user unlinked or ignored; leave them out. */
+  skip: string[];
+}
+
+export function discoveryPrompt(p: DiscoveryPromptInput): string {
+  return `Find the user's project channels in Slack. Projects don't all follow a naming convention, and one project can span several channels.
+
+1. Find the current Slack user's ID: call slack_read_user_profile with no user_id.
+2. List every channel they're a member of: slack_list_user_channels with types "public_channel,private_channel", exclude_archived true, limit 200, paging through all results. Note each channel's name, topic and purpose.
+3. Decide which channels are about a project: a specific initiative with a goal and an end, such as a feature, launch, migration, integration, partnership, pricing change, incident follow-up or deal. Every channel named "tmp-*" is a project channel by convention. Other channels count when their name, topic or purpose points at one initiative (e.g. "proj-*", "launch-*", a feature or codename, "*-eng" or "*-legal" for a named feature). Team, function, region, social, help, support, announcement, alert, bot and general discussion channels are not projects. When a channel's name and topic leave it unclear, read its last few messages (slack_read_channel, limit 15, response_format "concise"); do this for at most about 15 channels.
+4. Group channels by project: channels about the same initiative (e.g. #tmp-refunds, #refunds-eng and #refunds-legal) are one project. Use this list of projects the user already has to keep their ids and match new channels to them by name, codename or topic:
+${JSON.stringify(p.known)}
+   An existing project's channels stay with it; include them under its project_id. A channel that clearly belongs to an existing project (same initiative, a sub-team's channel for it) joins it as "related".
+${p.skip.length ? `5. Leave these channels out entirely; the user said they aren't part of a project: ${JSON.stringify(p.skip)}\n` : ""}
+For each project: project_id is the existing project's id, or null for a new one. name: its proper name, two to four words. reason: one short sentence on what the project is and, for a channel not named tmp-*, why it looks like a project. channels: each with role "primary" for the main channel (the tmp-* one if there is one) and "related" for the rest. Leave out channels that aren't part of any project.
+
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"user_id": string, "channels": [{"channel_id": string, "name": string}]}. Names have no leading "#".`;
+${JSON_ONLY} Shape: {"user_id": string, "projects": [{"project_id": string|null, "name": string, "reason": string, "channels": [{"channel_id": string, "name": string, "role": "primary"|"related"}]}]}. Names have no leading "#".`;
 }
 
 export interface ProjectPromptInput {
   /** Open tasks from every source, so new ones can refine them instead of duplicating them. */
   index?: IndexEntry[];
-  channelId: string;
-  channelName: string;
+  /** The project's linked channels, primary first. */
+  channels: { channel_id: string; name: string }[];
   userId: string;
   previous: ProjectSnapshot | null;
+  /** What's known about the project so far; refined by this refresh. */
+  profile: ProjectProfile | null;
   lastRefreshedAt: string | null;
   repoState: RepoState | null;
   now: Date;
@@ -71,26 +90,40 @@ export interface ProjectPromptInput {
 
 export function projectPrompt(p: ProjectPromptInput): string {
   const since = windowStart(p.lastRefreshedAt, p.now, 14);
+  const ids = p.channels.map((c) => c.channel_id);
+  const inAll = ids.map((id) => `in:<#${id}>`).join(" ");
   const reading = p.previous
     ? `You already have a snapshot from ${p.lastRefreshedAt}:
 ${JSON.stringify({ ...p.previous, summary: undefined })}
 
 Read only what changed since then:
-- slack_read_channel on ${p.channelId} with oldest=${since.unix} for new top-level messages.
-- slack_search_public_and_private with query "in:<#${p.channelId}> after:${since.date}" to catch new replies in older threads. Open a thread with slack_read_thread only when the new reply matters for status, blockers, or requests of the user.
+- slack_read_channel on each project channel with oldest=${since.unix} for new top-level messages.
+- slack_search_public_and_private with query "${inAll} after:${since.date}" to catch new replies in older threads. Open a thread with slack_read_thread only when the new reply matters for status, blockers, or requests of the user.
 - If a blocker or task in the snapshot may have been resolved, check its thread.
 Then update the snapshot: keep items that still hold, drop resolved ones, add new ones, and revise the rest. Fill in any field the previous snapshot is missing. If nothing changed, return the snapshot as is.`
-    : `Read the last 14 days of the channel (slack_read_channel with oldest=${since.unix}, response_format "concise"), and open every thread that has replies with slack_read_thread. Read the channel's topic and purpose too (slack_search_channels), and pinned or early messages that define the project if they help.`;
+    : `Read the last 14 days of each project channel (slack_read_channel with oldest=${since.unix}, response_format "concise"), and open every thread that has replies with slack_read_thread. Read each channel's topic and purpose too (slack_search_channels), and pinned or early messages that define the project if they help.`;
+
+  const known = p.profile
+    ? `What's known about the project so far (its profile, built up by earlier refreshes):
+${JSON.stringify(p.profile)}`
+    : "There's no profile of the project yet; build one from what you read.";
+  const names = [p.previous?.name, ...(p.profile?.aliases ?? [])].filter(Boolean);
+  const elsewhere = names.length
+    ? `- Work on a project spills into other channels. Search for it by name: slack_search_public_and_private with the query ${names.map((n) => `"${n}"`).join(" OR ")} ${ids.map((id) => `-in:<#${id}>`).join(" ")} after:${since.date} (one or two searches). Use what you find there for status, blockers and the user's tasks like messages in the project channels.`
+    : "";
 
   const repos =
     p.repoState && (p.repoState.local.length || p.repoState.prs.length)
       ? `\nLocal repo and GitHub PR state for this project (from git and gh): ${JSON.stringify(p.repoState)}\nA PR waiting on review is a blocker owned by the reviewer when the channel shows who it is.`
       : "";
 
-  return `You maintain a status snapshot of one project for the user, Slack user ${p.userId}, ${profile}.
-The project channel is #${p.channelName} (${p.channelId}). Do not look at other channels.
+  return `You maintain a status snapshot and a profile of one project for the user, Slack user ${p.userId}, ${profile}.
+The project's channels: ${p.channels.map((c) => `#${c.name} (${c.channel_id})`).join(", ")}. Read only these channels, apart from the search below.
+
+${known}
 
 ${reading}
+${elsewhere}
 ${repos}
 ${taskIndexSection(p.index ?? [], "my_tasks")}
 Fields:
@@ -105,6 +138,14 @@ Fields:
 - my_tasks: (if the project's priority is P0, set every task's assessment priority to "critical") things the user was asked to do or committed to and hasn't visibly done, including every blocker the user owns (use the same id). id is the permalink of the message that created the task, so it stays stable across refreshes. description: two or three sentences on what exactly is needed and why. follow_up: the single next action, with kind one of "reply", "review", "decide", "do", "schedule", "share" and action one specific imperative sentence. due: YYYY-MM-DD or null. ${ASSESSMENT_GUIDE}
 - recent_updates: up to three notable developments since the previous snapshot (on a first read, the last two days): a decision made, a date set or moved, something launched or merged, a new risk. One sentence each, with when it was posted (ISO 8601 date-time with offset, e.g. "2026-10-29T14:05:00-07:00") and the message permalink. Empty when nothing notable happened.
 - last_activity: YYYY-MM-DD of the latest message.
+- profile: the durable facts about the project, as opposed to its current status. Start from the profile above and refine it: keep what still holds, correct what changed, add what's new, drop what turned out wrong. Don't restate status, blockers or tasks here.
+  - goal: what the project is for and what "done" looks like, one or two sentences.
+  - aliases: other names people use for it (codenames, abbreviations, ticket keys like "CPS-6931"), at most five.
+  - people: who's involved and their role on it ("PM", "eng lead", "legal reviewer", "exec sponsor"), at most twelve, most central first. Include the user.
+  - resources: the key docs, tickets, epics, dashboards and repos, at most twelve. ${LINK_TITLE} kind is "doc", "ticket", "epic", "dashboard", "repo" or "other".
+  - milestones: dated goals and launches, done and planned, at most eight in date order.
+  - decisions: decisions that shape the project, at most ten, newest first, with when and a permalink.
+- related_channels: other Slack channels (not listed above) where this project is clearly being worked on, from the search, with channel_id, name (no "#") and a short reason. Only channels where the project is a main topic, not a passing mention. Empty when none.
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape:
@@ -115,7 +156,9 @@ ${JSON_ONLY} Shape:
  "active": [{"id": string, "what": string, "owners": [{"name": string, "slack_user_id": string|null, "is_me": boolean}], "since": "YYYY-MM-DD"|null, "link": string|null}],
  "my_tasks": [{"id": string, "refines": string|null, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
- "last_activity": "YYYY-MM-DD"|null}`;
+ "last_activity": "YYYY-MM-DD"|null,
+ "profile": {"goal": string, "aliases": [string], "people": [{"name": string, "slack_user_id": string|null, "role": string}], "resources": [{"title": string, "link": string, "kind": string}], "milestones": [{"what": string, "date": "YYYY-MM-DD"|null, "status": "done"|"planned"|"at_risk"|"missed"}], "decisions": [{"what": string, "date": "YYYY-MM-DD"|null, "link": string|null}]},
+ "related_channels": [{"channel_id": string, "name": string, "reason": string}]}`;
 }
 
 export interface AdhocPromptInput {
@@ -124,6 +167,8 @@ export interface AdhocPromptInput {
   userId: string;
   previous: AdhocTask[];
   previousReplies: QuickReply[];
+  /** Names of the channels that belong to tracked projects, which have their own task lists. */
+  projectChannels: string[];
   lastRefreshedAt: string | null;
   now: Date;
 }
@@ -132,7 +177,8 @@ export function adhocPrompt(p: AdhocPromptInput): string {
   const since = windowStart(p.lastRefreshedAt, p.now, 7);
   // Unanswered messages are rechecked over a fixed week, so one missed by an earlier refresh still turns up.
   const replyWindow = windowStart(null, p.now, 7);
-  return `Build the user's list of open ad-hoc tasks: requests or commitments that are NOT part of a project channel (channels named tmp-*). The user is Slack user ${p.userId}.
+  const projectChannels = p.projectChannels.length ? p.projectChannels.map((c) => `#${c}`).join(", ") : "channels named tmp-*";
+  return `Build the user's list of open ad-hoc tasks: requests or commitments that are NOT part of a project channel. The project channels are: ${projectChannels}. The user is Slack user ${p.userId}.
 
 Currently open tasks from the last refresh (${p.lastRefreshedAt ?? "never"}):
 ${JSON.stringify(p.previous)}
@@ -141,18 +187,18 @@ Messages waiting on a quick reply from the last refresh:
 ${JSON.stringify(p.previousReplies)}
 
 Look for new items since ${since.date}:
-- Slack messages awaiting the user's response, since ${replyWindow.date}. Check all of these, in every channel including tmp-* ones:
+- Slack messages awaiting the user's response, since ${replyWindow.date}. Check all of these, in every channel including project channels:
   - @-mentions: slack_search_public_and_private with "<@${p.userId}> after:${replyWindow.date}".
   - DMs and group DMs: slack_list_user_channels with types "im,mpim", then slack_read_channel (oldest ${replyWindow.unix}, response_format "concise") on each one with activity in that window. Also run slack_search_public_and_private with "is:dm after:${replyWindow.date}" to catch any you missed.
   For each message, decide whether a response from the user is expected: a question to them, a request or ask, a review or opinion they were asked for, an invitation or proposal awaiting a yes or no, or a follow-up on something they owe. Not expected: FYIs, thanks, announcements, @here/@channel blasts that don't ask them anything, bots, and messages where someone else already gave the answer that was needed. Then check whether the user has responded: read the thread (slack_read_thread) and, in a DM, the messages after it. A reply in the thread, a later message in the DM that addresses it, or an emoji reaction that fully answers it (a ✅ on "can you confirm?") counts as responded. Anything expected and not responded to is a reply below.
-  A task is a direct request of the user, a question awaiting their answer, or something they said they'd do, outside tmp-* channels (project channels have their own task lists).
+  A task is a direct request of the user, a question awaiting their answer, or something they said they'd do, outside the project channels (they have their own task lists).
 - Gmail: search_threads with "in:inbox after:${since.date.replaceAll("-", "/")} -category:promotions -category:social -category:updates". A task is a thread where a person (not an automated sender) asks the user to reply, decide, review, or do something, and the user hasn't replied after that ask.
-- News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")}" for messages from colleagues and company-wide lists). Keep only what matters to the user's work (they're ${profile}): launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
+- News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than the project channels and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")}" for messages from colleagues and company-wide lists). Keep only what matters to the user's work (they're ${profile}): launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
 ${taskIndexSection(p.index ?? [], "tasks")}
 Sort what's still open into two lists:
-- replies: every Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, quick or not, including in tmp-* channels. Drop a carried-over reply once the user has responded.
+- replies: every Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, quick or not, including in project channels. Drop a carried-over reply once the user has responded.
 - tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply. A message that needs both a response and real work goes in both lists, with the same id.
 
 Return the full lists of what's still open: carried-over items that aren't resolved, plus new ones.

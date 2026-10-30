@@ -5,7 +5,7 @@ import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { COLORED_ICONS } from "../linkIcons";
-import { projectName, slackChannelUrl } from "../projects";
+import { activeChannels, projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
 
@@ -34,6 +34,84 @@ function channelPermalinks(project: Project): (string | null | undefined)[] {
   const s = project.snapshot;
   if (!s) return [];
   return [...s.blockers.map((b) => b.link), ...(s.active ?? []).map((a) => a.link), ...s.my_tasks.map((t) => t.link), ...(s.recent_updates ?? []).map((u) => u.link)];
+}
+
+/** What's known about the project, built up by its refreshes: goal, channels, people, milestones, links, decisions. */
+function ProfilePanel({ project }: { project: Project }) {
+  const p = project.profile;
+  const channels = activeChannels(project);
+  const permalinks = channelPermalinks(project);
+  return (
+    <div className="profile-panel tab-panel small" role="tabpanel" title="">
+      {p?.goal && <p className="profile-goal">{p.goal}</p>}
+      <dl>
+        <dt>Channels</dt>
+        <dd className="profile-channels">
+          {channels.map((c) => (
+            <ExternalLink key={c.channel_id} href={slackChannelUrl(c.channel_id, permalinks)} className="chip" title={c.reason ?? undefined}>
+              #{c.name}
+            </ExternalLink>
+          ))}
+        </dd>
+        {!!p?.aliases.length && (
+          <>
+            <dt>Also called</dt>
+            <dd>{p.aliases.join(", ")}</dd>
+          </>
+        )}
+        {!!p?.people.length && (
+          <>
+            <dt>People</dt>
+            <dd>{p.people.map((x) => `${x.name} (${x.role})`).join(", ")}</dd>
+          </>
+        )}
+        {!!p?.milestones.length && (
+          <>
+            <dt>Milestones</dt>
+            <dd>
+              <ul className="profile-list">
+                {p.milestones.map((m) => (
+                  <li key={m.what} className={`milestone ${m.status}`}>
+                    {m.date && <span className="muted">{m.date} · </span>}
+                    {m.what}
+                    {m.status !== "planned" && <span className="muted"> · {m.status.replace("_", " ")}</span>}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
+        {!!p?.resources.length && (
+          <>
+            <dt>Links</dt>
+            <dd className="profile-channels">
+              {p.resources.map((r) => (
+                <ExternalLink key={r.link} href={r.link} className="chip">
+                  {r.title}
+                </ExternalLink>
+              ))}
+            </dd>
+          </>
+        )}
+        {!!p?.decisions.length && (
+          <>
+            <dt>Decisions</dt>
+            <dd>
+              <ul className="profile-list">
+                {p.decisions.slice(0, 4).map((d) => (
+                  <li key={d.what}>
+                    {d.link ? <ExternalLink href={d.link}>{d.what}</ExternalLink> : d.what}
+                    {d.date && <span className="muted"> · {d.date}</span>}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
+      </dl>
+      {!p && <p className="muted">The next refresh builds the project's profile.</p>}
+    </div>
+  );
 }
 
 /** Hides a project from the dashboard after an inline confirmation. */
@@ -296,12 +374,13 @@ export function ProjectCard({
   const status = s?.status;
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
-  // Blocking and Active are tabs: none open at first, clicking the open tab closes it,
+  // Blocking, Active and About are tabs: none open at first, clicking the open tab closes it,
   // clicking the other one switches to it.
-  const [tab, setTab] = useState<"blockers" | "active" | null>(null);
-  const toggle = (next: "blockers" | "active") => setTab((current) => (current === next ? null : next));
+  const [tab, setTab] = useState<"blockers" | "active" | "about" | null>(null);
+  const toggle = (next: "blockers" | "active" | "about") => setTab((current) => (current === next ? null : next));
   // Blockers the user marked resolved after a double check stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
+  const channelCount = activeChannels(project).length;
 
   return (
     <article
@@ -326,7 +405,11 @@ export function ProjectCard({
               </span>
             )}
             {projectName(project)}
-            <ExternalLink href={slackChannelUrl(project.channel_id, channelPermalinks(project))} className="slack-link" title={`Open #${project.name} in Slack`}>
+            <ExternalLink
+              href={slackChannelUrl(project.channel_id, channelPermalinks(project))}
+              className="slack-link"
+              title={`Open #${project.name} in Slack${channelCount > 1 ? ` (${channelCount - 1} more channel${channelCount > 2 ? "s" : ""} under About)` : ""}`}
+            >
               <SlackIcon />
             </ExternalLink>
           </h3>
@@ -344,9 +427,8 @@ export function ProjectCard({
         <>
           {s.status_reason && <p className="reason small">{s.status_reason}</p>}
 
-          {(blockers.length > 0 || (s.active?.length ?? 0) > 0) && (
-            // title="" keeps the card's "Click to show…" tooltip off the tabs and their lists.
-            <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist" title="">
+          {/* title="" keeps the card's "Click to show…" tooltip off the tabs and their lists. */}
+          <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist" title="">
               {blockers.length > 0 && (
                 <button role="tab" aria-selected={tab === "blockers"} className={`work-tab${tab === "blockers" ? " open" : ""}`} onClick={() => toggle("blockers")}>
                   Blocking {blockers.length}
@@ -361,8 +443,12 @@ export function ProjectCard({
                   {tab === "active" && <TabClose />}
                 </button>
               )}
+              <button role="tab" aria-selected={tab === "about"} className={`work-tab${tab === "about" ? " open" : ""}`} onClick={() => toggle("about")}>
+                About
+                {channelCount > 1 && <span className="muted"> · {channelCount} channels</span>}
+                {tab === "about" && <TabClose />}
+              </button>
             </div>
-          )}
 
           {tab === "blockers" && blockers.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">
@@ -386,6 +472,8 @@ export function ProjectCard({
               ))}
             </ul>
           )}
+
+          {tab === "about" && <ProfilePanel project={project} />}
 
           {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">

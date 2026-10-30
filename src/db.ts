@@ -1,6 +1,7 @@
 import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { DiscoveryPlan, ProjectChannel } from "./projects";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -11,14 +12,27 @@ const json = <T>(text: string | null): T | null => (text ? (JSON.parse(text) as 
 
 // ---- projects
 
+/** Tracked: on the board. Suggested: found by discovery, waiting for the user. Ignored and merged: off the board. */
+export type ProjectState = "tracked" | "suggested" | "ignored" | "merged";
+
 export interface Project {
+  /** The project's id: the channel it was first found in. */
   channel_id: string;
+  /** That channel's name. */
   name: string;
+  /** Off the board: anything but tracked. */
   hidden: boolean;
+  state: ProjectState;
+  /** Why discovery thinks this is a project, for suggestions. */
+  found_reason: string | null;
+  merged_into: string | null;
+  /** Every channel linked to the project, unlinked ones included (role "excluded"). */
+  channels: ProjectChannel[];
   local_repos: string[];
   gh_repos: string[];
   last_refreshed_at: string | null;
   snapshot: ProjectSnapshot | null;
+  profile: ProjectProfile | null;
   repo_state: RepoState | null;
   last_error: string | null;
 }
@@ -27,22 +41,33 @@ interface ProjectRow {
   channel_id: string;
   name: string;
   hidden: number;
+  state: ProjectState;
+  found_reason: string | null;
+  merged_into: string | null;
   local_repos: string;
   gh_repos: string;
   last_refreshed_at: string | null;
   snapshot: string | null;
+  profile: string | null;
   repo_state: string | null;
   last_error: string | null;
 }
 
+export async function listProjectChannels(): Promise<ProjectChannel[]> {
+  return (await db()).select<ProjectChannel[]>("SELECT channel_id, project_id, name, role, origin, reason FROM project_channels ORDER BY added_at");
+}
+
 export async function listProjects(): Promise<Project[]> {
-  const rows = await (await db()).select<ProjectRow[]>("SELECT * FROM projects ORDER BY name");
+  const d = await db();
+  const [rows, channels] = await Promise.all([d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"), listProjectChannels()]);
   return rows.map((r) => ({
     ...r,
     hidden: r.hidden === 1,
+    channels: channels.filter((c) => c.project_id === r.channel_id),
     local_repos: JSON.parse(r.local_repos),
     gh_repos: JSON.parse(r.gh_repos),
     snapshot: json<ProjectSnapshot>(r.snapshot),
+    profile: json<ProjectProfile>(r.profile),
     repo_state: json<RepoState>(r.repo_state),
   }));
 }
@@ -51,21 +76,63 @@ export async function getProject(channelId: string): Promise<Project | undefined
   return (await listProjects()).find((p) => p.channel_id === channelId);
 }
 
-/** Adds newly discovered channels and renames existing ones; never removes rows. */
-export async function upsertChannels(channels: { channel_id: string; name: string }[]) {
+/** Records what discovery found (see planDiscovery); never removes or moves anything. */
+export async function applyDiscovery(plan: DiscoveryPlan) {
   const d = await db();
-  for (const c of channels) {
+  for (const p of plan.newProjects)
     await d.execute(
-      "INSERT INTO projects (channel_id, name) VALUES ($1, $2) ON CONFLICT(channel_id) DO UPDATE SET name = excluded.name",
-      [c.channel_id, c.name],
+      "INSERT OR IGNORE INTO projects (channel_id, name, hidden, state, found_reason) VALUES ($1, $2, $3, $4, $5)",
+      [p.id, p.name, p.tracked ? 0 : 1, p.tracked ? "tracked" : "suggested", p.reason],
     );
+  for (const l of plan.links)
+    await d.execute(
+      "INSERT OR IGNORE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, $4, 'discovered', $5, $6)",
+      [l.channel_id, l.project_id, l.name, l.role, l.reason, nowIso()],
+    );
+  for (const r of plan.renames) {
+    await d.execute("UPDATE project_channels SET name = $1 WHERE channel_id = $2", [r.name, r.channel_id]);
+    await d.execute("UPDATE projects SET name = $1 WHERE channel_id = $2", [r.name, r.channel_id]);
   }
 }
 
-export async function saveProjectSnapshot(channelId: string, snapshot: ProjectSnapshot, refreshedAt: string) {
+/** Links a channel to a project. A user's link replaces whatever link the channel had. */
+export async function linkChannel(projectId: string, c: { channel_id: string; name: string; reason?: string | null }, origin: "discovered" | "user") {
+  const sql =
+    origin === "user"
+      ? "INSERT OR REPLACE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, 'related', 'user', $4, $5)"
+      : "INSERT OR IGNORE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, 'related', 'discovered', $4, $5)";
+  await (await db()).execute(sql, [c.channel_id, projectId, c.name, c.reason ?? null, nowIso()]);
+}
+
+/** Unlinks a related channel; it's remembered so discovery won't link it again. */
+export async function unlinkChannel(channelId: string) {
+  await (await db()).execute("UPDATE project_channels SET role = 'excluded', origin = 'user' WHERE channel_id = $1 AND role = 'related'", [
+    channelId,
+  ]);
+}
+
+export async function setProjectState(id: string, state: "tracked" | "ignored") {
+  await (await db()).execute("UPDATE projects SET state = $1, hidden = $2 WHERE channel_id = $3", [state, state === "tracked" ? 0 : 1, id]);
+}
+
+/**
+ * Folds one project into another: its channels become the other's related channels, its own tasks
+ * move over, and it leaves the board. The next refresh of the other project reads them all.
+ */
+export async function mergeProject(fromId: string, intoId: string) {
+  const d = await db();
+  await d.execute(
+    "UPDATE project_channels SET project_id = $1, role = CASE role WHEN 'excluded' THEN 'excluded' ELSE 'related' END, origin = 'user' WHERE project_id = $2",
+    [intoId, fromId],
+  );
+  await d.execute("UPDATE projects SET state = 'merged', merged_into = $1, hidden = 1 WHERE channel_id = $2", [intoId, fromId]);
+  await d.execute("UPDATE manual_tasks SET project_id = $1 WHERE project_id = $2", [intoId, fromId]);
+}
+
+export async function saveProjectSnapshot(channelId: string, snapshot: ProjectSnapshot, profile: ProjectProfile, refreshedAt: string) {
   await (await db()).execute(
-    "UPDATE projects SET snapshot = $1, last_refreshed_at = $2, last_error = NULL WHERE channel_id = $3",
-    [JSON.stringify(snapshot), refreshedAt, channelId],
+    "UPDATE projects SET snapshot = $1, profile = $2, last_refreshed_at = $3, last_error = NULL WHERE channel_id = $4",
+    [JSON.stringify(snapshot), JSON.stringify(profile), refreshedAt, channelId],
   );
 }
 
@@ -77,9 +144,12 @@ export async function saveProjectError(channelId: string, error: string | null) 
   await (await db()).execute("UPDATE projects SET last_error = $1 WHERE channel_id = $2", [error, channelId]);
 }
 
+/** Showing a project tracks it; hiding it keeps whatever it was (suggested, ignored). */
 export async function updateProjectConfig(channelId: string, cfg: { hidden: boolean; local_repos: string[]; gh_repos: string[] }) {
   await (await db()).execute(
-    "UPDATE projects SET hidden = $1, local_repos = $2, gh_repos = $3 WHERE channel_id = $4",
+    `UPDATE projects SET hidden = $1, local_repos = $2, gh_repos = $3,
+       state = CASE WHEN $1 = 0 THEN 'tracked' WHEN state = 'tracked' THEN 'ignored' ELSE state END
+     WHERE channel_id = $4`,
     [cfg.hidden ? 1 : 0, JSON.stringify(cfg.local_repos), JSON.stringify(cfg.gh_repos), channelId],
   );
 }

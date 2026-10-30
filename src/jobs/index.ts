@@ -1,10 +1,10 @@
-import { projectName, slackThread } from "../projects";
+import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, TOOLS } from "../claude";
 import * as db from "../db";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectSnapshot, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectRefresh, ReplyDraft, SentMessage, TaskPlan, type Blocker, type QuickReply } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -90,17 +90,31 @@ async function userId(): Promise<string> {
 export function discoverProjects(): Promise<void> {
   return track("discover", (status) =>
     logged("discover", null, async () => {
+      const [projects, known] = await Promise.all([db.listProjects(), db.listProjectChannels()]);
+      const live = projects.filter((p) => p.state === "tracked" || p.state === "suggested");
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: discoveryPrompt(),
+        prompt: discoveryPrompt({
+          known: live.map((p) => ({
+            project_id: p.channel_id,
+            name: projectName(p),
+            aliases: p.profile?.aliases ?? [],
+            channels: activeChannels(p).map((c) => c.name),
+          })),
+          // Unlinked channels, and every channel of a project the user ignored.
+          skip: known
+            .filter((c) => c.role === "excluded" || projects.find((p) => p.channel_id === c.project_id)?.state === "ignored")
+            .map((c) => c.name),
+        }),
         schema: Discovery,
         tools: TOOLS.slackRead,
-        // A mechanical listing; the cheaper model is fine here.
+        // Sorting channels into projects; the cheaper model is fine here.
         model: "sonnet",
-        maxTurns: 10,
+        // Paging through every channel, plus a look inside the unclear ones.
+        maxTurns: 40,
       });
       await db.setSetting("slack_user_id", data.user_id);
-      await db.upsertChannels(data.channels);
+      await db.applyDiscovery(planDiscovery(data.projects, known, new Set(projects.map((p) => p.channel_id))));
       return { value: undefined, costUsd };
     }),
   );
@@ -170,21 +184,24 @@ export async function refreshProject(channelId: string): Promise<void> {
         onStatus: status,
           prompt: projectPrompt({
             index,
-            channelId,
-            channelName: project.name,
+            channels: activeChannels(project),
             userId: uid,
             previous: project.snapshot,
+            profile: project.profile,
             lastRefreshedAt: project.last_refreshed_at,
             repoState,
             now: startedAt,
           }),
-          schema: ProjectSnapshot,
+          schema: ProjectRefresh,
           tools: TOOLS.slackRead,
           model: await model(),
         });
+        const { profile, related_channels, ...snapshot } = data;
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
-        await db.saveProjectSnapshot(channelId, data, startedAt.toISOString());
+        await db.saveProjectSnapshot(channelId, snapshot, profile, startedAt.toISOString());
+        // Channels the project turned up in join it, unless they're already linked somewhere or the user unlinked them.
+        for (const c of newRelatedChannels(related_channels, await db.listProjectChannels())) await db.linkChannel(channelId, c, "discovered");
         await recordRefinements(data.my_tasks, index);
         return { value: undefined, costUsd };
       } catch (e) {
@@ -202,6 +219,7 @@ export async function refreshAdhoc(): Promise<void> {
       const previous = await db.getAdhoc();
       const startedAt = new Date();
       const index = await loadTaskIndex();
+      const projects = (await db.listProjects()).filter((p) => !p.hidden);
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: adhocPrompt({
@@ -209,6 +227,7 @@ export async function refreshAdhoc(): Promise<void> {
           userId: uid,
           previous: previous.tasks,
           previousReplies: previous.replies,
+          projectChannels: projects.flatMap((p) => activeChannels(p).map((c) => c.name)),
           lastRefreshedAt: previous.refreshed_at,
           now: startedAt,
         }),
@@ -234,7 +253,7 @@ export function refreshCalendar(): Promise<void> {
         prompt: calendarPrompt({
           date: localDate(new Date()),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          projectNames: projects.filter((p) => !p.hidden).map((p) => p.name),
+          projectNames: projects.filter((p) => !p.hidden).map((p) => projectName(p)),
         }),
         schema: CalendarDay,
         tools: [...TOOLS.calendarRead, ...TOOLS.slackRead, ...TOOLS.gmailRead],

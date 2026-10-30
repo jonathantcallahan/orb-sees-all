@@ -596,6 +596,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .work-tab:hover, .work-tab.open { color: var(--text); }
 .work-tab.open { border-color: var(--border); border-bottom-color: var(--surface); background: var(--surface); }
 .work-items.tab-panel { margin: 0 -14px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.profile-panel { margin: 0 -14px; padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: default; }
+.profile-goal { margin: 0 0 8px; }
+.profile-panel dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0; }
+.profile-panel dt { color: var(--muted); }
+.profile-panel dd { margin: 0; min-width: 0; }
+.profile-channels { display: flex; flex-wrap: wrap; gap: 4px; }
+.profile-channels .chip { color: inherit; text-decoration: none; }
+.profile-channels .chip:hover { background: color-mix(in srgb, var(--grey-bg) 70%, var(--text)); }
+.profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.milestone.done { color: var(--muted); }
+.milestone.at_risk, .milestone.missed { color: var(--amber); }
+
+/* Projects discovery found outside the #tmp- convention, waiting for the user to track or ignore */
+.suggested-projects { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.suggested-projects h3 { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.suggested-project { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
+.suggested-project .body { flex: 1; min-width: 0; }
+.suggested-project .actions { display: flex; gap: 6px; flex-shrink: 0; }
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
 /* High-level plan inside the assessment: numbered circles, then Approve & start */
@@ -786,3 +804,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 @keyframes glow-c { 0% { transform: translate(0, 0) scale(0.95); } 50% { transform: translate(10%, -16%) scale(1.2); } 100% { transform: translate(-14%, 6%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .orb-glow span { animation: none; } }
 .about-you textarea { width: 100%; margin-top: 4px; }
+
+.project-channel-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.project-channel-list .chip .link-button { margin-left: 4px; padding: 0; }
