@@ -785,3 +785,4 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 @keyframes glow-b { 0% { transform: translate(0, 0) scale(1.1); } 50% { transform: translate(-16%, -8%) scale(0.9); } 100% { transform: translate(8%, -14%) scale(1.2); } }
 @keyframes glow-c { 0% { transform: translate(0, 0) scale(0.95); } 50% { transform: translate(10%, -16%) scale(1.2); } 100% { transform: translate(-14%, 6%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .orb-glow span { animation: none; } }
+.about-you textarea { width: 100%; margin-top: 4px; }

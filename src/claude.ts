@@ -26,6 +26,8 @@ export const TOOLS = {
   jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
   /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
   slackSend: [`${SLACK}slack_send_message`],
+  // An internal knowledge-base connector (U-Know at Unity). Optional: if it isn't connected,
+  // Claude just doesn't see these tools.
   uknow: [
     "mcp__claude_ai_U-Know__ask_uknow",
     "mcp__claude_ai_U-Know__ask_uknow_session",

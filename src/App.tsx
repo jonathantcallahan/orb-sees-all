@@ -7,13 +7,14 @@ import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
-import { markInterruptedJobs } from "./db";
+import { getSetting, markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
 import { isDark, useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
+import { setUserProfile } from "./prompts";
 import { OrbGlow } from "./components/PressureBlob";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
@@ -71,6 +72,10 @@ export default function App() {
   const [filterProject, setFilterProject] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
   const [orbLook, setOrbLook] = useOrbLook();
+  // Who you are, for the prompts (Settings > About you).
+  useEffect(() => {
+    getSetting("user_profile").then(setUserProfile, () => {});
+  }, []);
   const allStatus = useJobStatus("all");
   const [projectFilter, setProjectFilter] = useProjectFilter();
   useScheduler();

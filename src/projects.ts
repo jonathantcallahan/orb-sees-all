@@ -13,7 +13,7 @@ export function projectName(p: Pick<Project, "name" | "snapshot">): string {
 
 /** A link that opens the channel in the Slack app (or Slack on the web). */
 export function slackChannelUrl(channelId: string, permalinks: (string | null | undefined)[] = []): string {
-  // Enterprise Grid workspaces (like Unity's) don't resolve app_redirect without a team, so use the
+  // Enterprise Grid workspaces don't resolve app_redirect without a team, so use the
   // workspace's own domain, taken from a message permalink in the same channel, when there is one.
   const host = permalinks.map((link) => link?.match(/^https:\/\/([a-z0-9-]+\.slack\.com)\/archives\//)?.[1]).find(Boolean);
   return host ? `https://${host}/archives/${channelId}` : `https://slack.com/app_redirect?channel=${channelId}`;

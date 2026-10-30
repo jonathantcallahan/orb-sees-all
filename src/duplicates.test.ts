@@ -12,8 +12,8 @@ describe("duplicate detection", () => {
   });
 
   it("uses descriptions to confirm a looser title match", () => {
-    const a = { id: "x", title: "Refund reason codes", description: "Get the refund reason codes and scenarios from commerce for QA." };
-    const b = { id: "y", title: "Chase commerce on reason codes", description: "QA needs refund reason codes and scenarios from commerce." };
+    const a = { id: "x", title: "Refund reason codes", description: "Get the refund reason codes and scenarios from payments for QA." };
+    const b = { id: "y", title: "Chase payments on reason codes", description: "QA needs refund reason codes and scenarios from payments." };
     expect(similarity(a, b)).toBeGreaterThanOrEqual(0.5);
   });
 

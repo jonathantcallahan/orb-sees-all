@@ -1,4 +1,12 @@
 import type { IndexEntry } from "./taskIndex";
+
+/** Who the user is, as the prompts describe them. Set from Settings > About you; generic by default. */
+const DEFAULT_PROFILE = "a professional who uses this planner to run their work";
+let profile = DEFAULT_PROFILE;
+
+export function setUserProfile(text: string | null | undefined) {
+  profile = text?.trim() || DEFAULT_PROFILE;
+}
 import type { AdhocTask, Blocker, ProjectSnapshot, QuickReply, RepoState } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
@@ -8,10 +16,10 @@ const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 /** How every link title should read: what it is, not where it lives. */
 const LINK_TITLE = `Each title is a short, descriptive label of what the link is, two to five words, e.g. "Ben's Q3 numbers ask", "Pricing decision thread", "Export spec doc", "CPS-6931 export ticket". Never the channel name, the document's file name verbatim, or the URL.`;
 
-const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and Unity's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Anything else that sends, files or changes something (email, Jira tickets, docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.`;
+const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and the company's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Anything else that sends, files or changes something (email, Jira tickets, docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.`;
 
 /** Shared definition of a task assessment, used by every prompt that produces tasks. */
-const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and Unity's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
+const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and the company's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
   - automation: "human" = needs the user's judgment, relationships or presence (a decision, a negotiation, a 1:1); "assisted" = the user does it, but Claude can do much of the legwork (research, a first draft, a summary, a ticket write-up); "claude" = Claude could produce the finished result for the user to review and send (a status summary, a ticket from a clear spec, a reply that only restates facts).
   - suggestion: one sentence with a concrete first take: how to approach it, or what Claude would produce.
   - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.
@@ -79,7 +87,7 @@ Then update the snapshot: keep items that still hold, drop resolved ones, add ne
       ? `\nLocal repo and GitHub PR state for this project (from git and gh): ${JSON.stringify(p.repoState)}\nA PR waiting on review is a blocker owned by the reviewer when the channel shows who it is.`
       : "";
 
-  return `You maintain a status snapshot of one project for the user, Slack user ${p.userId}, a product manager on Unity's Asset Store.
+  return `You maintain a status snapshot of one project for the user, Slack user ${p.userId}, ${profile}.
 The project channel is #${p.channelName} (${p.channelId}). Do not look at other channels.
 
 ${reading}
@@ -139,7 +147,7 @@ Look for new items since ${since.date}:
   For each message, decide whether a response from the user is expected: a question to them, a request or ask, a review or opinion they were asked for, an invitation or proposal awaiting a yes or no, or a follow-up on something they owe. Not expected: FYIs, thanks, announcements, @here/@channel blasts that don't ask them anything, bots, and messages where someone else already gave the answer that was needed. Then check whether the user has responded: read the thread (slack_read_thread) and, in a DM, the messages after it. A reply in the thread, a later message in the DM that addresses it, or an emoji reaction that fully answers it (a ✅ on "can you confirm?") counts as responded. Anything expected and not responded to is a reply below.
   A task is a direct request of the user, a question awaiting their answer, or something they said they'd do, outside tmp-* channels (project channels have their own task lists).
 - Gmail: search_threads with "in:inbox after:${since.date.replaceAll("-", "/")} -category:promotions -category:social -category:updates". A task is a thread where a person (not an automated sender) asks the user to reply, decide, review, or do something, and the user hasn't replied after that ask.
-- News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")} from:unity3d.com" or company-wide lists). Keep only what matters to someone working on the Asset Store, commerce and package distribution: launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
+- News beyond the project channels: list the user's channels (slack_list_user_channels, exclude_archived true) other than tmp-* ones and skim the most relevant active ones (team, product, engineering, announcement and leadership channels; at most about ten) since ${since.date} with slack_read_channel and response_format "concise". Also check Gmail for internal announcements since then (search_threads "after:${since.date.replaceAll("-", "/")}" for messages from colleagues and company-wide lists). Keep only what matters to the user's work (they're ${profile}): launches, decisions, incidents, org or process changes, deadlines, dates that moved. Skip chatter, social posts and anything already covered by a task or reply.
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
 ${taskIndexSection(p.index ?? [], "tasks")}
@@ -197,12 +205,12 @@ export interface PlanPromptInput {
 }
 
 export function planPrompt(p: PlanPromptInput): string {
-  return `The user (a product manager on Unity's Asset Store${p.userId ? `, Slack user ${p.userId}` : ""}) has this task and wants a proposed plan for getting it done.
+  return `The user (${profile}${p.userId ? `, Slack user ${p.userId}` : ""}) has this task and wants a proposed plan for getting it done.
 
 Task: ${p.title}
 ${p.description ? `Description: ${p.description}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
 
-First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and ask U-Know for Unity-specific context when the task depends on internal systems, teams or processes. Spend effort in proportion to the task: a quick reply needs little research.
+First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and ask the internal knowledge-base tool, if one is available, for company-specific context when the task depends on internal systems, teams or processes. Spend effort in proportion to the task: a quick reply needs little research.
 
 Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
@@ -220,7 +228,7 @@ export interface AssessPromptInput {
 }
 
 export function assessPrompt(p: AssessPromptInput): string {
-  return `The user (a product manager on Unity's Asset Store${p.userId ? `, Slack user ${p.userId}` : ""}) keeps a personal to-do list of short notes. For each task below, work out what it means and how it could get done.
+  return `The user (${profile}${p.userId ? `, Slack user ${p.userId}` : ""}) keeps a personal to-do list of short notes. For each task below, work out what it means and how it could get done.
 
 Tasks:
 ${JSON.stringify(p.tasks)}
@@ -309,7 +317,7 @@ export interface CheckBlockerInput {
 }
 
 export function checkBlockerPrompt(p: CheckBlockerInput): string {
-  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}a product manager on Unity's Asset Store) has this item listed as blocking the "${p.projectName}" project (Slack channel ${p.channelId}):
+  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}${profile}) has this item listed as blocking the "${p.projectName}" project (Slack channel ${p.channelId}):
 ${JSON.stringify(p.blocker)}
 ${p.reminder ? `\nThe user posted a reminder about it on ${p.reminder.at}${p.reminder.link ? ` (${p.reminder.link})` : ""}. Start there: read the replies to it and anything the owners said since.\n` : ""}
 Double check it. Dig deeper than the project channel:
@@ -334,7 +342,7 @@ export interface CheckTaskInput {
 }
 
 export function checkTaskPrompt(p: CheckTaskInput): string {
-  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}a product manager on Unity's Asset Store) has this task on their list:
+  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}${profile}) has this task on their list:
 ${JSON.stringify(p.task)}
 
 Their other open tasks, for spotting duplicates:

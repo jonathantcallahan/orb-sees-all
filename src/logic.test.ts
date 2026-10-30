@@ -338,7 +338,7 @@ describe("readingContext", () => {
         { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },
       ],
       my_tasks: [{ id: "t1", title: "Confirm QA decisions", assessment: { automation: "human" as const, suggestion: "", needs_details: false, priority: "critical" as const, estimate_minutes: 20 } }],
-      active: [{ id: "a1", what: "Partial-refund tickets", owners: [{ name: "ILT team", is_me: false }] }],
+      active: [{ id: "a1", what: "Partial-refund tickets", owners: [{ name: "payments team", is_me: false }] }],
       recent_updates: [{ summary: "Dev-complete moved to Nov 17" }],
       summary: "",
     };
@@ -355,7 +355,7 @@ describe("readingContext", () => {
       name: "Asset refunds",
       blocked_on_me: ["QA decisions"],
       blocked_on_others: ["Reason codes (Alex)"],
-      active_work: ["Partial-refund tickets (ILT team)"],
+      active_work: ["Partial-refund tickets (payments team)"],
     });
     expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "blocking", estimate_minutes: 20, due: null, planned_today: true }]);
     expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
@@ -548,7 +548,7 @@ describe("manual priority", () => {
 describe("slack channel links", () => {
   it("uses the workspace domain from a permalink, so Enterprise Grid resolves it", async () => {
     const { slackChannelUrl } = await import("./projects");
-    expect(slackChannelUrl("C123", [null, "https://unity.slack.com/archives/C123/p1700000000000100"])).toBe("https://unity.slack.com/archives/C123");
+    expect(slackChannelUrl("C123", [null, "https://example.slack.com/archives/C123/p1700000000000100"])).toBe("https://example.slack.com/archives/C123");
     expect(slackChannelUrl("C123")).toBe("https://slack.com/app_redirect?channel=C123");
   });
 });
@@ -556,8 +556,8 @@ describe("slack channel links", () => {
 describe("slack threads", () => {
   it("finds the channel and thread a permalink points at", async () => {
     const { slackThread } = await import("./projects");
-    expect(slackThread("https://unity.slack.com/archives/D0ABC/p1700000000000100")).toEqual({ channelId: "D0ABC", threadTs: "1700000000.000100" });
-    expect(slackThread("https://unity.slack.com/archives/C1/p1700000000000100?thread_ts=1699999999.000200&cid=C1")).toEqual({
+    expect(slackThread("https://example.slack.com/archives/D0ABC/p1700000000000100")).toEqual({ channelId: "D0ABC", threadTs: "1700000000.000100" });
+    expect(slackThread("https://example.slack.com/archives/C1/p1700000000000100?thread_ts=1699999999.000200&cid=C1")).toEqual({
       channelId: "C1",
       threadTs: "1699999999.000200",
     });
@@ -577,8 +577,8 @@ describe("blocker status check", () => {
   it("starts from the reminder when one was sent", async () => {
     const { checkBlockerPrompt } = await import("./prompts");
     const blocker = { id: "b1", what: "Refund codes", owners: [], since: null, link: null };
-    const withReminder = checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null, reminder: { at: "2026-10-29T10:00:00Z", link: "https://unity.slack.com/archives/C1/p1" } });
-    expect(withReminder).toContain("posted a reminder about it on 2026-10-29T10:00:00Z (https://unity.slack.com/archives/C1/p1)");
+    const withReminder = checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null, reminder: { at: "2026-10-29T10:00:00Z", link: "https://example.slack.com/archives/C1/p1" } });
+    expect(withReminder).toContain("posted a reminder about it on 2026-10-29T10:00:00Z (https://example.slack.com/archives/C1/p1)");
     expect(checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null })).not.toContain("reminder");
   });
 });

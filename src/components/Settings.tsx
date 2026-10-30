@@ -1,3 +1,4 @@
+import { setUserProfile } from "../prompts";
 import { useEffect, useState } from "react";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
@@ -65,6 +66,7 @@ export function Settings({
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [model, setModel] = useState("opus");
+  const [about, setAbout] = useState("");
   const [log, setLog] = useState<db.LogEntry[]>([]);
   const [discovering, setDiscovering] = useState(false);
 
@@ -73,6 +75,7 @@ export function Settings({
       setTime((await db.getSetting("refresh_time")) ?? "07:30");
       setWeekdaysOnly(((await db.getSetting("weekdays_only")) ?? "1") === "1");
       setModel((await db.getSetting("model")) ?? "opus");
+      setAbout((await db.getSetting("user_profile")) ?? "");
       setLog(await db.recentLog(30));
     })();
   }, []);
@@ -119,6 +122,20 @@ export function Settings({
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
+          </label>
+          <label className="about-you">
+            About you
+            <textarea
+              rows={2}
+              value={about}
+              placeholder="e.g. a product manager on the payments team"
+              onChange={(e) => setAbout(e.target.value)}
+              onBlur={async () => {
+                await db.setSetting("user_profile", about.trim());
+                setUserProfile(about);
+              }}
+            />
+            <span className="muted small">How Claude describes you when it reads your channels and plans your work.</span>
           </label>
           <label>
             Orb look
