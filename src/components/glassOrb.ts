@@ -1,8 +1,8 @@
 /**
- * The Glass orb: a molten metallic core inside layers of frosted glass. The core oozes in big
+ * The Glass orb: a molten metallic core inside a layer of milky glass. The core oozes in big
  * rounded lobes, slow and viscous when calm, churning when stressed; its blue-to-magenta gradient
- * runs redder as stress rises. The glass shells follow the same molten shape with soft folds of
- * their own, clear where you look straight through them and frosted toward their edges.
+ * runs redder as stress rises. The glass follows the same molten shape with soft folds of its own,
+ * takes on the core's colors through its curves, and frosts toward its edges.
  */
 import * as THREE from "three";
 import { NOISE } from "./orbNoise";
@@ -13,6 +13,23 @@ float blob(vec3 p, float t) {
   vec3 q = p * 0.8 + vec3(0.0, t * 0.3, t * 0.18);
   vec3 w = vec3(snoise(q + 3.1), snoise(q + 7.7), snoise(q + 12.3));
   return 0.72 * snoise(p * 0.95 + w * 0.7 + t * 0.2) + 0.14 * snoise(p * 1.6 + w * 0.5 - t * 0.25);
+}
+`;
+
+/**
+ * The core's color at a direction from the center: cyan and blue across most of it, turning
+ * through violet to magenta-red on one side, which grows with stress. The glass uses it too, to
+ * show the core's colors through its curves.
+ */
+const CORE_COLOR = /* glsl */ `
+vec3 coreColor(vec3 p, float time, float stress) {
+  float g = dot(normalize(p), normalize(vec3(0.55, 0.75, 0.2))) * 0.5 + 0.5;
+  g += 0.16 * snoise(p * 1.4 + time * 0.12);
+  // Calm: a red accent on one side. Stressed: red spreads over most of the core.
+  float edge = mix(0.8, 0.36, stress);
+  vec3 color = mix(vec3(0.0, 0.74, 1.0), vec3(0.06, 0.26, 0.95), smoothstep(0.15, 0.5, g));
+  color = mix(color, vec3(0.52, 0.22, 0.74), smoothstep(edge - 0.2, edge, g));
+  return mix(color, vec3(0.98, 0.07, 0.32), smoothstep(edge, edge + 0.22, g));
 }
 `;
 
@@ -39,19 +56,12 @@ uniform float uStress;
 varying vec3 vObj;
 varying vec3 vViewPos;
 ${NOISE}
+${CORE_COLOR}
 void main() {
   vec3 n = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
   vec3 v = normalize(-vViewPos);
 
-  // Cyan and blue across most of the core, turning through violet to magenta-red on one side.
-  // The red side grows with stress, and the boundary drifts slowly.
-  float g = dot(normalize(vObj), normalize(vec3(0.55, 0.75, 0.2))) * 0.5 + 0.5;
-  g += 0.16 * snoise(vObj * 1.4 + uTime * 0.12);
-  // Calm: a red accent on one side. Stressed: red spreads over most of the core.
-  float edge = mix(0.8, 0.36, uStress);
-  vec3 color = mix(vec3(0.0, 0.74, 1.0), vec3(0.06, 0.26, 0.95), smoothstep(0.15, 0.5, g));
-  color = mix(color, vec3(0.52, 0.22, 0.74), smoothstep(edge - 0.2, edge, g));
-  color = mix(color, vec3(0.98, 0.07, 0.32), smoothstep(edge, edge + 0.22, g));
+  vec3 color = coreColor(vObj, uTime, uStress);
 
   // Polished metal: a bright sky reflected from above, a key highlight and a softer fill.
   vec3 r = reflect(-v, n);
@@ -89,19 +99,34 @@ void main() {
 `;
 
 const SHELL_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform float uStress;
 uniform float uOpacity;
 varying vec3 vObj;
 varying vec3 vViewPos;
 ${NOISE}
+${CORE_COLOR}
 void main() {
   vec3 n = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
   vec3 v = normalize(-vViewPos);
-  // Frosted glass: nearly clear face-on, milky and bright toward the edges, with a fine grain.
   float facing = abs(dot(n, v));
-  float fres = pow(1.0 - facing, 2.2);
-  float grain = 0.5 + 0.5 * snoise(vObj * 9.0);
-  float alpha = (0.07 + 0.3 * fres + 0.04 * grain) * uOpacity;
-  vec3 color = vec3(0.80, 0.88, 0.98) * (0.78 + 0.22 * n.y) + fres * 0.22;
+  float fres = pow(1.0 - facing, 2.0);
+  // How sharply the glass bends here: folds pick up more of the core's color and a brighter edge.
+  float curve = clamp(length(fwidth(n)) * 16.0, 0.0, 1.0);
+
+  // What the glass shows of the core: its color along a direction bent by the glass's shape,
+  // so the colors slide and stretch across the folds instead of sitting straight behind them.
+  vec3 bend = vec3(snoise(vObj * 1.6), snoise(vObj * 1.6 + 4.1), snoise(vObj * 1.6 + 8.3));
+  vec3 inner = coreColor(vObj + bend * 0.45 + n * 0.25, uTime, uStress);
+
+  // Milky glass tinted by the core: clearest face-on, frostier and brighter toward the edges.
+  vec3 frost = vec3(0.86, 0.9, 0.97);
+  vec3 color = mix(frost, inner * 1.1, clamp(0.5 * facing + 0.45 * curve, 0.0, 0.85));
+  vec3 r = reflect(-v, n);
+  float key = pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 40.0);
+  color += fres * 0.3 + curve * 0.12 + key * 0.6;
+
+  float alpha = clamp(mix(0.4, 0.88, fres) + curve * 0.15, 0.0, 0.95) * uOpacity;
   // The canvas uses premultiplied alpha.
   gl_FragColor = vec4(color * alpha, alpha);
 }
@@ -117,11 +142,8 @@ export function buildGlassOrb(uniforms: { uTime: { value: number }; uStress: { v
   group.add(new THREE.Mesh(coreGeometry, coreMaterial));
   disposables.push(coreGeometry, coreMaterial);
 
-  // Two glass layers, each with its own folds, drawn after the core and through each other.
-  for (const [radius, seed, opacity, order] of [
-    [1.04, 1.7, 1.0, 1],
-    [1.2, 5.3, 0.75, 2],
-  ] as const) {
+  // One layer of glass over the core, drawn after it.
+  for (const [radius, seed, opacity, order] of [[1.1, 1.7, 1.0, 1]] as const) {
     const geometry = new THREE.IcosahedronGeometry(1, 72);
     const material = new THREE.ShaderMaterial({
       vertexShader: SHELL_VERTEX,
