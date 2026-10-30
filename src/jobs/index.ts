@@ -311,7 +311,7 @@ export function draftReply(reply: QuickReply): Promise<void> {
 }
 
 /** Has Claude critically re-examine a task: captured right, still needed, not a duplicate. */
-export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTasks: string[]): Promise<void> {
+export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTasks: CheckTaskInput["otherTasks"]): Promise<void> {
   return track(`taskcheck:${taskId}`, (status) =>
     logged("taskcheck", taskId, async () => {
       const { data, costUsd } = await runClaude({

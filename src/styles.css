@@ -722,3 +722,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* "updated …" stays gray even when it's from an earlier day. */
 .timestamp.stale { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
+
+/* "Possible duplicate of …" on a task card */
+.duplicate-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 5px 8px; border-radius: 6px; background: var(--amber-bg); color: var(--amber); }
+.duplicate-text { flex: 1; min-width: 0; }
+.duplicate-title { color: var(--text); }
+.duplicate-actions { display: flex; gap: 10px; }
+.duplicate-note .link-button { color: inherit; }
+.duplicate-note .link-button.more-link { color: var(--muted); }

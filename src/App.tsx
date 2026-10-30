@@ -214,6 +214,7 @@ export default function App() {
           priorityOverrides={data.priorityOverrides}
           taskAliases={data.taskAliases}
           refinedDescriptions={data.refinedDescriptions}
+          notDuplicates={data.notDuplicates}
           running={running}
           onChange={reload}
         />

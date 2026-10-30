@@ -250,6 +250,30 @@ export async function addTaskAlias(ref: string, taskId: string, how: "refined" |
   await conn.execute("UPDATE task_sources SET task_id = $1 WHERE task_id = $2", [canonical, ref]);
 }
 
+/**
+ * Merges task `dropId` into `keepId` (both canonical ids): drop becomes another source of keep, so
+ * it folds into keep's card everywhere. Keep's own data stands; anything it lacks that drop had (a
+ * priority you set, a session, an edited or refined description, a plan, a Today slot) carries over.
+ */
+export async function mergeTasks(keepId: string, dropId: string) {
+  if (keepId === dropId) return;
+  const conn = await db();
+  await addTaskAlias(dropId, keepId, "merged");
+  await conn.execute(
+    `INSERT OR IGNORE INTO task_data (store, task_id, value, updated_at)
+     SELECT store, $1, value, $3 FROM task_data
+     WHERE task_id = $2 AND store IN ('priority_overrides', 'session_links', 'description_overrides', 'refined_descriptions')`,
+    [keepId, dropId, nowIso()],
+  );
+  await conn.execute(
+    "INSERT OR IGNORE INTO task_plans (task_id, plan, created_at, cost_usd) SELECT $1, plan, created_at, cost_usd FROM task_plans WHERE task_id = $2",
+    [keepId, dropId],
+  );
+  const states = await getTaskStates();
+  const dropToday = states.get(dropId)?.todayOn;
+  if (dropToday && !states.get(keepId)?.todayOn) await setTaskState(keepId, { todayOn: dropToday });
+}
+
 /** Pairs the user said aren't duplicates, as "a|b" with a < b. */
 export const getNotDuplicates = async () => new Set(Object.keys(await getRows<true>("not_duplicates")));
 

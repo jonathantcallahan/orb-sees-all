@@ -135,7 +135,7 @@ describe("task double check", () => {
     const { checkTaskPrompt } = await import("./prompts");
     const p = checkTaskPrompt({
       task: { title: "Send Q4 numbers", description: null, source: "Slack", link: "https://x/1", requester: "Ben", due: null, priority: null },
-      otherTasks: ["Send Q4 figures to Ben"],
+      otherTasks: [{ id: "t2", title: "Send Q4 figures to Ben" }],
       userId: "U1",
     });
     for (const check of ["Captured correctly", "Still necessary", "Duplicate", "Priority", "Missing context"]) expect(p).toContain(check);

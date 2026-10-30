@@ -328,7 +328,8 @@ ${JSON_ONLY} Shape: {"verdict": "still_blocking"|"resolved"|"partly_resolved"|"n
 
 export interface CheckTaskInput {
   task: { title: string; description: string | null; source: string; link: string | null; requester: string | null; due: string | null; priority: string | null };
-  otherTasks: string[];
+  /** The user's other open tasks, as id and title, for spotting duplicates. */
+  otherTasks: { id: string; title: string }[];
   userId: string | null;
 }
 
@@ -347,11 +348,12 @@ Critically double check it. Read the source (the link) and its thread, then sear
 - Missing context: is there a dependency, blocker or detail the task leaves out that the user needs?
 
 verdict: "looks_right", "already_done", "not_needed" (cancelled, superseded or no longer relevant), "captured_wrong" (wrong ask, owner or date), "duplicate", or "unclear" (not enough evidence).
+duplicate_of: when the verdict is "duplicate", the id (from the list of other open tasks) of the task it duplicates; otherwise null.
 summary: two or three sentences explaining the verdict.
 findings: one entry per check above: check (its short name), finding (what you found, one sentence), ok (true if it passed).
 corrected_description: when it was captured wrong or is missing important context, a corrected two-to-four sentence description of the task as it really stands; otherwise null.
 evidence: the threads, emails, tickets and docs you relied on, with links. ${LINK_TITLE}
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"verdict": "looks_right"|"already_done"|"not_needed"|"captured_wrong"|"duplicate"|"unclear", "summary": string, "findings": [{"check": string, "finding": string, "ok": boolean}], "corrected_description": string|null, "evidence": [{"title": string, "link": string}]}`;
+${JSON_ONLY} Shape: {"verdict": "looks_right"|"already_done"|"not_needed"|"captured_wrong"|"duplicate"|"unclear", "summary": string, "findings": [{"check": string, "finding": string, "ok": boolean}], "corrected_description": string|null, "duplicate_of": string|null, "evidence": [{"title": string, "link": string}]}`;
 }

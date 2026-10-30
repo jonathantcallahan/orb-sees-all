@@ -9,6 +9,7 @@ import { CloseIcon, RefreshButton, Updated } from "./common";
 import { setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
+import { findDuplicates, type DuplicateCandidate } from "../duplicates";
 import { Inbox } from "./Inbox";
 import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
@@ -23,7 +24,8 @@ function Group({
   checks,
   sessionLinks,
   priorityOverrides,
-  openTitles,
+  openTasks,
+  duplicates,
   running,
   filtered = false,
   controls,
@@ -41,7 +43,8 @@ function Group({
   checks: Record<string, StoredTaskCheck>;
   sessionLinks: Record<string, SessionLink>;
   priorityOverrides: Record<string, Priority>;
-  openTitles: string[];
+  openTasks: { id: string; title: string }[];
+  duplicates: Map<string, DuplicateCandidate>;
   running: string[];
   onChange: () => void;
 }) {
@@ -65,7 +68,8 @@ function Group({
           check={checks[t.id]}
           sessionLink={sessionLinks[t.id]}
           manualPriority={priorityOverrides[t.id]}
-          openTitles={openTitles}
+          openTasks={openTasks}
+          duplicateOf={duplicates.get(t.id)}
           compact
           onChange={onChange}
         />
@@ -91,6 +95,7 @@ export function TaskColumn({
   priorityOverrides,
   taskAliases,
   refinedDescriptions,
+  notDuplicates,
   running,
   onChange,
 }: {
@@ -119,6 +124,8 @@ export function TaskColumn({
   taskAliases: Aliases;
   /** Descriptions refreshes brought up to date, by canonical id; the user's own edits win. */
   refinedDescriptions: Record<string, string>;
+  /** Pairs you said aren't duplicates. */
+  notDuplicates: Set<string>;
   running: string[];
   onChange: () => void;
 }) {
@@ -202,10 +209,11 @@ export function TaskColumn({
   const mine = splitToday(applyTaskState(foldedMine, taskStates), today);
 
   // Every open task's title, so a double check can spot duplicates.
-  const openTitles = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest]
-    .filter((t) => !t.done)
-    .map((t) => t.title);
-  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTitles, running, onChange };
+  const openList = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest].filter((t) => !t.done);
+  const openTasks = openList.map((t) => ({ id: t.id, title: t.title }));
+  // Likely duplicates among open tasks, for each card to offer a merge.
+  const duplicates = findDuplicates(openList, notDuplicates);
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, running, onChange };
 
   // Today's plan pulls from every group; open tasks first.
   const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
@@ -238,7 +246,8 @@ export function TaskColumn({
             check={taskChecks[t.id]}
             sessionLink={sessionLinks[t.id]}
             manualPriority={priorityOverrides[t.id]}
-            openTitles={openTitles}
+            openTasks={openTasks}
+            duplicateOf={duplicates.get(t.id)}
             onChange={onChange}
           />
         ))

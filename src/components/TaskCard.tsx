@@ -2,7 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, clearTaskCheck, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { clearAssessment, clearTaskCheck, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, planTask } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
@@ -13,6 +13,7 @@ import { linkSession, useSessionProgress, type SessionLink, type SessionProgress
 import { LinkChips } from "./LinkChips";
 import { CLAUDE_ICON } from "../linkIcons";
 import { collectLinks } from "../links";
+import type { DuplicateCandidate } from "../duplicates";
 
 export interface CardTask {
   id: string;
@@ -508,14 +509,20 @@ const CHECK_VERDICT: Record<StoredTaskCheck["verdict"], string> = {
 /** The result of a double check: verdict, what each check found, evidence, and the fix it points to. */
 function TaskCheckResult({
   check,
+  duplicateTitle,
   onDone,
   onDismiss,
+  onMerge,
   onApply,
   onHide,
 }: {
   check: StoredTaskCheck;
+  /** Title of the open task the check says this duplicates, when it's still open. */
+  duplicateTitle?: string;
   onDone: () => void;
   onDismiss: () => void;
+  /** Folds this task into the one it duplicates. */
+  onMerge?: () => void;
   onApply: (description: string) => void;
   onHide: () => void;
 }) {
@@ -557,7 +564,12 @@ function TaskCheckResult({
               Mark done
             </button>
           )}
-          {(check.verdict === "not_needed" || check.verdict === "duplicate") && (
+          {check.verdict === "duplicate" && onMerge && (
+            <button className="link-button small" onClick={onMerge} title={duplicateTitle ? `Fold this into "${duplicateTitle}"` : undefined}>
+              Merge into it
+            </button>
+          )}
+          {(check.verdict === "not_needed" || (check.verdict === "duplicate" && !onMerge)) && (
             <button className="link-button small" onClick={onDismiss}>
               Dismiss task
             </button>
@@ -580,7 +592,8 @@ export function TaskCard({
   check,
   sessionLink,
   manualPriority,
-  openTitles = [],
+  openTasks = [],
+  duplicateOf,
   compact = false,
   onChange,
 }: {
@@ -598,7 +611,9 @@ export function TaskCard({
   /** A priority the user set by hand, overriding Claude's. */
   manualPriority?: Priority;
   /** Titles of the user's other open tasks, for spotting duplicates. */
-  openTitles?: string[];
+  openTasks?: { id: string; title: string }[];
+  /** Another open task that looks like the same work, offered for a merge. */
+  duplicateOf?: DuplicateCandidate;
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
   compact?: boolean;
   onChange: () => void;
@@ -732,7 +747,7 @@ export function TaskCard({
         due: task.due ?? null,
         priority,
       },
-      openTitles.filter((t) => t !== task.title),
+      openTasks.filter((t) => t.id !== task.id),
     )
       .then(onChange)
       .catch(() => {});
@@ -774,6 +789,8 @@ export function TaskCard({
       {checkAction}
     </>
   );
+  // The open task a double check says this one duplicates, if it's still open.
+  const duplicateTarget = check?.duplicate_of ? openTasks.find((t) => t.id === check.duplicate_of) : undefined;
   const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
     await setTaskState(task.id, patch);
     onChange();
@@ -875,6 +892,35 @@ export function TaskCard({
       {!description && (linksToggle || checkAction) && <div className="description-actions small">{descriptionActions}</div>}
       {linksOpen && <LinkChips links={links} />}
 
+      {duplicateOf && !linked && (
+        <div className="duplicate-note small">
+          <span className="duplicate-text">
+            Possible duplicate of <span className="duplicate-title">"{duplicateOf.title}"</span>
+          </span>
+          <span className="duplicate-actions">
+            <button
+              className="link-button small"
+              onClick={async () => {
+                await mergeTasks(task.id, duplicateOf.id);
+                onChange();
+              }}
+              title="Keep this task and fold the other into it, with its sources, links and anything this one lacks"
+            >
+              Merge
+            </button>
+            <button
+              className="link-button small more-link"
+              onClick={async () => {
+                await markNotDuplicate(task.id, duplicateOf.id);
+                onChange();
+              }}
+            >
+              Not a duplicate
+            </button>
+          </span>
+        </div>
+      )}
+
       {assessment ? (
         <AssessmentView
           assessment={assessment}
@@ -898,6 +944,16 @@ export function TaskCard({
       {check && !checkStatus && (
         <TaskCheckResult
           check={check}
+          duplicateTitle={duplicateTarget?.title}
+          onMerge={
+            duplicateTarget
+              ? async () => {
+                  await mergeTasks(duplicateTarget.id, task.id);
+                  await clearTaskCheck(task.id);
+                  onChange();
+                }
+              : undefined
+          }
           onDone={() => setStateAndRefresh({ status: "done" })}
           onDismiss={() => setStateAndRefresh({ dismissed: true })}
           onApply={(text) => saveDescription(text)}

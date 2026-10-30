@@ -202,6 +202,8 @@ export const TaskCheck = z.object({
   findings: z.array(z.object({ check: z.string(), finding: z.string(), ok: z.boolean() })).default([]),
   /** A corrected description when the task was captured wrong or is missing context. */
   corrected_description: z.string().nullish(),
+  /** For a "duplicate" verdict: the id of the open task it duplicates. */
+  duplicate_of: z.string().nullish(),
   evidence: z.array(z.object({ title: z.string(), link: z.string() })).default([]),
 });
 export type TaskCheck = z.infer<typeof TaskCheck>;
