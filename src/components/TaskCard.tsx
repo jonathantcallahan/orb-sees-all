@@ -559,23 +559,12 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   );
 }
 
-/** Inline text with its **bold** kept and other markdown marks dropped. */
-function Inline({ text }: { text: string }) {
-  return (
-    <>
-      {text
-        .replace(/`([^`]+)`/g, "$1")
-        .split(/(\*\*[^*]+\*\*)/g)
-        .map((part, i) =>
-          part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <span key={i}>{part}</span>,
-        )}
-    </>
-  );
-}
+/** Text with markdown marks (bold, italics, code) dropped: the card shows Claude's words plainly. */
+const plain = (text: string) => text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\W)[*_]([^*_\n]+)[*_](?=\W|$)/g, "$1$2").replace(/`([^`]+)`/g, "$1");
 
 /**
- * Claude's message as readable paragraphs. Sessions are asked to write plain text, but older ones
- * (and the odd slip) use markdown, so headings become a bold line and list items a bulleted line.
+ * Claude's message as plain paragraphs. Sessions are asked to write plain text, but older ones
+ * (and the odd slip) use markdown: headings read as an ordinary line and list items as bullets.
  */
 function ClaudeText({ text }: { text: string }) {
   const blocks = text.split(/\n{2,}/).map((b) => b.trim()).filter((b) => b && !/^[-*_]{3,}$/.test(b));
@@ -584,11 +573,13 @@ function ClaudeText({ text }: { text: string }) {
       {blocks.map((block, i) => (
         <div key={i} className="chat-para">
           {block.split("\n").map((line, j) => {
-            const heading = line.match(/^#{1,6}\s+(.*)$/);
-            if (heading) return <strong key={j} className="chat-line">{heading[1].replace(/\*\*/g, "")}</strong>;
             const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
-            if (item) return <span key={j} className="chat-line chat-item"><Inline text={item[1]} /></span>;
-            return <span key={j} className="chat-line"><Inline text={line} /></span>;
+            const words = plain(item ? item[1] : line.replace(/^#{1,6}\s+/, ""));
+            return (
+              <span key={j} className={`chat-line${item ? " chat-item" : ""}`}>
+                {words}
+              </span>
+            );
           })}
         </div>
       ))}

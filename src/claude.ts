@@ -246,7 +246,7 @@ export interface SessionTurn {
  */
 export const SESSION_DISPLAY = [
   "Nobody reads this conversation here. My day planner, Orb, shows your latest message in a small chat on the task's card, next to my reply box, as plain text.",
-  "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't use markdown: no headings, bullet or numbered lists, tables, bold, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
+  "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't open with a title or heading line; start straight in with what you have to say. Don't use markdown: no headings, bold or italics, bullet or numbered lists, tables, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
   "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
   "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
 ].join(" ");

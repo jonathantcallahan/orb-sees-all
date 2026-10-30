@@ -975,7 +975,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   background: var(--grey-bg); color: var(--text); font-size: 12.5px;
 }
 .chat-msg.claude .more-link { margin-top: 2px; }
-.chat-msg.claude strong { font-weight: 600; }
 .chat-text { display: flex; flex-direction: column; gap: 7px; }
 .chat-para { display: flex; flex-direction: column; gap: 2px; }
 .chat-line { display: block; }
