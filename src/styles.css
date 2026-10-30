@@ -715,3 +715,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .close-icon { display: block; }
 .icon-button:has(> .close-icon) { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; line-height: 0; }
 .tab-close { display: inline-grid; place-items: center; margin-left: 2px; }
+
+/* The mood word fades in when it changes, as the orb glides to its new state. */
+.orb-mood { animation: mood-in 0.8s ease; }
+@keyframes mood-in { from { opacity: 0; } }
+
+/* On project cards, "updated …" stays gray even when it's from an earlier day. */
+.project .timestamp.stale { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }

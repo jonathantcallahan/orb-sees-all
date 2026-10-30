@@ -98,66 +98,76 @@ export function age(since: string | null | undefined, now = new Date()): string 
 export interface Pressure {
   projectsOnMe: number;
   criticalTasks: number;
+  /** Weighted open work: see pressure(). */
+  load: number;
   /** 0 (calm) to 1 (on fire). */
   level: number;
 }
 
-interface PressureProject {
-  status: ProjectStatus | null;
-  priority?: ProjectPriority | null;
-  /** Ids of this project's tasks that are blocking it. */
-  blockingIds?: string[];
-  tasks: { id: string; due?: string | null }[];
+/** An open-or-not task, as the orb weighs it. */
+export interface PressureTask {
+  id: string;
+  priority: EffectivePriority | null;
+  due?: string | null;
+  /** The project it belongs to, for the "N projects waiting on you" count. */
+  projectId?: string | null;
 }
 
-/** Open tasks due within this many days (or overdue) count as critical. */
-const CRITICAL_DUE_DAYS = 2;
-/** Counts at which each signal saturates. */
-const PROJECTS_AT_MAX = 6;
-const CRITICAL_AT_MAX = 8;
+/** How much each open task weighs, by priority. Unrated tasks count like low ones. */
+const TASK_WEIGHT: Record<EffectivePriority, number> = { blocking: 3, critical: 2, high: 1, medium: 0.5, low: 0.25 };
+const UNRATED_WEIGHT = 0.25;
+/** Extra weight for a task due within two days, and for one already overdue. */
+const DUE_SOON_WEIGHT = 1;
+const OVERDUE_WEIGHT = 2;
+const DUE_SOON_DAYS = 2;
+/**
+ * Load at which stress reaches 63% (1 - 1/e). Stress = 1 - e^(-load/scale): it
+ * rises quickly at first, then flattens, so each finished task always lowers it
+ * a little and it never pins at the top. About twelve critical tasks and some
+ * extras make the orb furious.
+ */
+const LOAD_SCALE = 20;
 
-function dueSoon(due: string | null | undefined, now: Date): boolean {
-  if (!due) return false;
+function dueWeight(due: string | null | undefined, now: Date): number {
+  if (!due) return 0;
   const ms = new Date(`${due}T23:59:59`).getTime() - now.getTime();
-  return !Number.isNaN(ms) && ms < CRITICAL_DUE_DAYS * 86_400_000;
+  if (Number.isNaN(ms)) return 0;
+  if (ms < 0) return OVERDUE_WEIGHT;
+  return ms < DUE_SOON_DAYS * 86_400_000 ? DUE_SOON_WEIGHT : 0;
 }
 
 /**
- * How much is waiting on the user: projects with at least one open task of
- * theirs, and open tasks that are blocking, due soon, or sit in a P0, blocked
- * or at-risk project. Done and dismissed tasks don't count.
+ * How much is waiting on the user: every open task, weighted by its priority
+ * and how soon it's due, mapped smoothly onto 0 (calm) to 1 (on fire). Done and
+ * dismissed tasks don't count, so each one finished eases the orb a little.
  */
-export function pressure(
-  projects: PressureProject[],
-  otherTasks: { id: string; due?: string | null }[],
-  states: Map<string, TaskState>,
-  now = new Date(),
-): Pressure {
-  const open = (t: { id: string }) => !states.get(t.id)?.done && !states.get(t.id)?.dismissed;
-  let projectsOnMe = 0;
-  let criticalTasks = 0;
-  for (const p of projects) {
-    const tasks = p.tasks.filter(open);
-    if (tasks.length) projectsOnMe++;
-    // Every task in a P0 project is critical, as are tasks in projects in trouble.
-    const hot = p.priority === "P0" || p.status === "blocked" || p.status === "at_risk";
-    criticalTasks += tasks.filter((t) => hot || p.blockingIds?.includes(t.id) || dueSoon(t.due, now)).length;
-  }
-  criticalTasks += otherTasks.filter((t) => open(t) && dueSoon(t.due, now)).length;
-  const level =
-    0.5 * Math.min(projectsOnMe / PROJECTS_AT_MAX, 1) + 0.5 * Math.min(criticalTasks / CRITICAL_AT_MAX, 1);
-  return { projectsOnMe, criticalTasks, level };
+export function pressure(tasks: PressureTask[], states: Map<string, TaskState>, now = new Date()): Pressure {
+  const open = tasks.filter((t) => !states.get(t.id)?.done && !states.get(t.id)?.dismissed);
+  const load = open.reduce((sum, t) => sum + (t.priority ? TASK_WEIGHT[t.priority] : UNRATED_WEIGHT) + dueWeight(t.due, now), 0);
+  return {
+    projectsOnMe: new Set(open.map((t) => t.projectId).filter(Boolean)).size,
+    criticalTasks: open.filter((t) => t.priority === "blocking" || t.priority === "critical").length,
+    load,
+    level: 1 - Math.exp(-load / LOAD_SCALE),
+  };
 }
 
-export type OrbMood = "pleased" | "content" | "restless" | "agitated" | "furious";
+/** From calm to angry; each step down is a finished task or two closer to peace. */
+export type OrbMood = "pleased" | "serene" | "content" | "attentive" | "restless" | "agitated" | "irritated" | "furious";
 
-/** The orb's mood for a pressure level; pleased only when nothing is waiting on the user. */
-export function orbMood(p: Pressure): OrbMood {
-  if (!p.projectsOnMe && !p.criticalTasks) return "pleased";
-  if (p.level < 0.25) return "content";
-  if (p.level < 0.5) return "restless";
-  if (p.level < 0.75) return "agitated";
-  return "furious";
+const MOOD_STEPS: [number, OrbMood][] = [
+  [0.12, "serene"],
+  [0.25, "content"],
+  [0.4, "attentive"],
+  [0.55, "restless"],
+  [0.7, "agitated"],
+  [0.85, "irritated"],
+];
+
+/** The orb's mood for a pressure level; pleased only when nothing at all is waiting. */
+export function orbMood(p: Pick<Pressure, "load" | "level">): OrbMood {
+  if (p.load === 0) return "pleased";
+  return MOOD_STEPS.find(([max]) => p.level < max)?.[1] ?? "furious";
 }
 
 /** Claude's priority levels plus "blocking", which outranks critical and is set by the app, never by Claude. */
@@ -166,11 +176,6 @@ export type EffectivePriority = Priority | "blocking";
 /** Sort order for priorities, most urgent first; unrated last. */
 export const PRIORITY_RANK: Record<EffectivePriority, number> = { blocking: 0, critical: 1, high: 2, medium: 3, low: 4 };
 
-/**
- * A task's effective priority: a task that's one of the user's own blockers is
- * "blocking"; anything else in a P0 project is critical; otherwise Claude's
- * assessment stands (null until assessed).
- */
 /**
  * A task's priority: Blocking always wins; then one the user set by hand; then
  * critical for tasks in P0 projects; then Claude's assessment.

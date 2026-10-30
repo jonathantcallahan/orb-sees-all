@@ -10,7 +10,7 @@ import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
-import { compareProjects, matchesProjectFilter, myBlockingIds, pressure } from "./tasks";
+import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, taskPriority } from "./tasks";
 import { isDark, useTheme } from "./theme";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
@@ -80,14 +80,29 @@ export default function App() {
       projectFilter,
     ),
   );
+  // Every open task the user owns, at the priority its card shows, so the orb weighs what you see.
   const load = pressure(
-    projects.map((p) => ({
-      status: p.snapshot?.status ?? null,
-      priority: p.snapshot?.priority?.level,
-      blockingIds: myBlockingIds(p.snapshot?.blockers, data.taskStates),
-      tasks: p.snapshot?.my_tasks ?? [],
-    })),
-    data.adhoc.tasks,
+    [
+      ...projects.flatMap((p) => {
+        const blocking = new Set(myBlockingIds(p.snapshot?.blockers, data.taskStates));
+        return (p.snapshot?.my_tasks ?? []).map((t) => ({
+          id: t.id,
+          due: t.due,
+          projectId: p.channel_id,
+          priority: taskPriority(t.assessment?.priority, p.snapshot?.priority?.level, blocking.has(t.id), data.priorityOverrides[t.id]),
+        }));
+      }),
+      ...data.adhoc.tasks.map((t) => ({
+        id: t.id,
+        due: t.due,
+        priority: taskPriority(t.assessment?.priority, null, false, data.priorityOverrides[t.id]),
+      })),
+      ...data.manual.map((t) => ({
+        id: t.id,
+        projectId: t.project_id,
+        priority: taskPriority(data.assessments.get(t.id)?.priority, null, false, data.priorityOverrides[t.id]),
+      })),
+    ],
     data.taskStates,
   );
 

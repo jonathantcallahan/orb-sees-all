@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type TaskFilter, type TaskState } from "./tasks";
+import { applyTaskState, compareProjects, DEFAULT_TASK_STATE, formatMinutes, matchesFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -147,23 +147,26 @@ describe("JobQueue", () => {
 describe("pressure", () => {
   const now = new Date(2026, 9, 29, 9, 0);
   const none = new Map<string, TaskState>();
+  const task = (id: string, priority: EffectivePriority | null, extra: { due?: string; projectId?: string } = {}) => ({ id, priority, ...extra });
 
   it("is calm with nothing on the user", () => {
-    expect(pressure([{ status: "on_track", tasks: [] }], [], none, now).level).toBe(0);
+    expect(pressure([], none, now)).toMatchObject({ load: 0, level: 0 });
   });
 
-  it("counts tasks in blocked or at-risk projects and tasks due soon as critical", () => {
+  it("weighs tasks by priority and how soon they're due", () => {
     const p = pressure(
       [
-        { status: "blocked", tasks: [{ id: "a" }, { id: "b" }] },
-        { status: "on_track", tasks: [{ id: "c", due: "2026-10-30" }, { id: "d", due: "2026-12-01" }] },
+        task("a", "blocking", { projectId: "C1" }), // 3
+        task("b", "critical", { projectId: "C1" }), // 2
+        task("c", "high", { projectId: "C2", due: "2026-10-30" }), // 1 + 1 due soon
+        task("d", "medium", { due: "2026-10-28" }), // 0.5 + 2 overdue
+        task("e", null), // 0.25
       ],
-      [{ id: "e", due: "2026-10-28" }, { id: "f" }],
       none,
       now,
     );
-    expect(p).toMatchObject({ projectsOnMe: 2, criticalTasks: 4 });
-    expect(p.level).toBeCloseTo(0.5 * (2 / 6) + 0.5 * (4 / 8));
+    expect(p).toMatchObject({ projectsOnMe: 2, criticalTasks: 2, load: 9.75 });
+    expect(p.level).toBeCloseTo(1 - Math.exp(-9.75 / 20));
   });
 
   it("ignores done and dismissed tasks", () => {
@@ -171,13 +174,18 @@ describe("pressure", () => {
       ["a", st({ done: true, dismissed: false })],
       ["b", st({ done: false, dismissed: true })],
     ]);
-    const p = pressure([{ status: "blocked", tasks: [{ id: "a" }, { id: "b" }] }], [], states, now);
-    expect(p).toMatchObject({ projectsOnMe: 0, criticalTasks: 0, level: 0 });
+    expect(pressure([task("a", "critical"), task("b", "critical")], states, now)).toMatchObject({ load: 0, level: 0 });
   });
 
-  it("saturates at 1", () => {
-    const many = Array.from({ length: 10 }, (_, i) => ({ status: "blocked" as const, tasks: [{ id: `t${i}` }] }));
-    expect(pressure(many, [], none, now).level).toBe(1);
+  it("eases with every task finished, and never pins at 1", () => {
+    const tasks = Array.from({ length: 30 }, (_, i) => task(`t${i}`, "critical"));
+    const levels = [0, 10, 20, 29].map((done) => {
+      const states = new Map(tasks.slice(0, done).map((t) => [t.id, st({ done: true })] as const));
+      return pressure(tasks, states, now).level;
+    });
+    expect(levels[0]).toBeLessThan(1);
+    expect(levels).toEqual([...levels].sort((a, b) => b - a));
+    expect(new Set(levels).size).toBe(levels.length);
   });
 });
 
@@ -208,17 +216,21 @@ describe("formatMinutes", () => {
 });
 
 describe("orbMood", () => {
-  const p = (projectsOnMe: number, criticalTasks: number, level: number) => ({ projectsOnMe, criticalTasks, level });
+  const m = (load: number) => orbMood({ load, level: 1 - Math.exp(-load / 20) });
 
   it("is pleased only when nothing is waiting", () => {
-    expect(orbMood(p(0, 0, 0))).toBe("pleased");
-    expect(orbMood(p(1, 0, 0.08))).toBe("content");
+    expect(m(0)).toBe("pleased");
+    expect(m(0.25)).toBe("serene");
   });
 
-  it("gets angrier as pressure rises", () => {
-    expect(orbMood(p(2, 2, 0.3))).toBe("restless");
-    expect(orbMood(p(4, 5, 0.6))).toBe("agitated");
-    expect(orbMood(p(6, 8, 1))).toBe("furious");
+  it("moves through each mood as the load grows", () => {
+    const moods = [0, 1, 4, 8, 13, 19, 28, 45].map(m);
+    expect(moods).toEqual(["pleased", "serene", "content", "attentive", "restless", "agitated", "irritated", "furious"]);
+  });
+
+  it("takes a heavy load to be furious", () => {
+    // Ten critical tasks: busy, not furious.
+    expect(m(20)).toBe("agitated");
   });
 });
 
@@ -356,7 +368,14 @@ describe("task priority", () => {
   });
 
   it("counts blocking tasks as critical pressure", () => {
-    const p = pressure([{ status: "on_track", priority: "P3", blockingIds: ["a"], tasks: [{ id: "a" }, { id: "b" }] }], [], new Map(), new Date(2026, 9, 29));
+    const p = pressure(
+      [
+        { id: "a", priority: taskPriority("low", "P3", true) },
+        { id: "b", priority: taskPriority("low", "P3", false) },
+      ],
+      new Map(),
+      new Date(2026, 9, 29),
+    );
     expect(p.criticalTasks).toBe(1);
   });
 
@@ -366,8 +385,15 @@ describe("task priority", () => {
     expect(taskPriority(undefined, "P2")).toBeNull();
   });
 
-  it("counts open P0 tasks as critical pressure even when the project is on track", () => {
-    const p = pressure([{ status: "on_track", priority: "P0", tasks: [{ id: "a" }, { id: "b" }] }], [], new Map(), new Date(2026, 9, 29));
+  it("counts open P0 tasks as critical pressure", () => {
+    const p = pressure(
+      [
+        { id: "a", priority: taskPriority("medium", "P0") },
+        { id: "b", priority: taskPriority(null, "P0") },
+      ],
+      new Map(),
+      new Date(2026, 9, 29),
+    );
     expect(p.criticalTasks).toBe(2);
   });
 });
