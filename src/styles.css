@@ -567,8 +567,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .filter-select.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
 .filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
-/* Five rows of about 39px with 6px gaps; more scroll. */
-.inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+/* Three rows of about 39px with 6px gaps; more scroll. */
+.inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 130px; overflow-y: auto; }
 .inbox-item { flex-shrink: 0; }
 
 /* A column title with its "updated" time on the same line */
