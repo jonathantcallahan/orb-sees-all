@@ -408,7 +408,7 @@ function AssessmentView({
         </button>
         {open && (
           <>
-            <span className="small">{assessment.suggestion}</span>
+            <span className="small suggestion">{assessment.suggestion}</span>
             <PlanOutline steps={steps} action={actions} planning={planning} />
           </>
         )}
