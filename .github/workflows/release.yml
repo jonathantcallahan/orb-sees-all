@@ -40,6 +40,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Orb Sees All ${{ github.ref_name }}
-          releaseBody: See the README for setup. First launch on a new Mac: right-click the app and choose Open.
+          releaseBody: "See the README for setup. First launch on a new Mac: right-click the app and choose Open."
           releaseDraft: false
           args: --target universal-apple-darwin --bundles app,dmg
