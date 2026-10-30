@@ -1,3 +1,5 @@
+mod sessions;
+
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -217,7 +219,12 @@ pub fn run() {
                 .add_migrations("sqlite:dayplanner.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![run_cli, run_cli_stream])
+        .invoke_handler(tauri::generate_handler![
+            run_cli,
+            run_cli_stream,
+            sessions::find_session,
+            sessions::read_session_progress
+        ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Orb Sees All", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;

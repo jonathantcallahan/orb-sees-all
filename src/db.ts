@@ -1,3 +1,4 @@
+import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
@@ -145,6 +146,17 @@ export async function saveDescriptionOverride(taskId: string, text: string | nul
 
 export interface StoredTaskCheck extends TaskCheck {
   at: string;
+}
+
+/** Claude Code sessions Orb opened for tasks, keyed by task id. */
+export async function getSessionLinks(): Promise<Record<string, SessionLink>> {
+  return json<Record<string, SessionLink>>(await getSetting("session_links")) ?? {};
+}
+
+export async function saveSessionLink(taskId: string, link: SessionLink) {
+  const all = await getSessionLinks();
+  all[taskId] = link;
+  await setSetting("session_links", JSON.stringify(all));
 }
 
 /** Double checks of tasks, keyed by task id. */

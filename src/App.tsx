@@ -175,6 +175,7 @@ export default function App() {
           recommended={recommended}
           descriptionOverrides={data.descriptionOverrides}
           taskChecks={data.taskChecks}
+          sessionLinks={data.sessionLinks}
           running={running}
           onChange={reload}
         />

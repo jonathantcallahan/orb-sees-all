@@ -9,6 +9,7 @@ import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStat
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
+import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { collectLinks } from "../links";
 
@@ -311,10 +312,18 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
  * Approve & start) sits inside, under the steps.
  */
 /** A small dashed ring marking a plan step. */
-function StepCircle() {
+/** A plan step's marker: dashed when not started, turning while in progress, checked when done. */
+function StepCircle({ state }: { state?: StepState }) {
   return (
-    <svg className="step-circle" width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-      <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
+    <svg className={`step-circle${state ? ` ${state}` : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+      {state === "done" ? (
+        <>
+          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
+          <path d="M3.4 6.2 5.2 8l3.4-3.6" fill="none" stroke="var(--bg)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
+      )}
     </svg>
   );
 }
@@ -323,6 +332,8 @@ interface OutlineStep {
   title: string;
   /** Who does it; null for older plans that didn't say. */
   by: "claude" | "you" | null;
+  /** What the linked Claude session last reported for this step. */
+  progress?: StepProgress;
 }
 
 function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNode }) {
@@ -331,11 +342,14 @@ function PlanOutline({ steps, action }: { steps: OutlineStep[]; action?: ReactNo
     <div className="plan-outline">
       <ol className="plan-outline-steps">
         {steps.map((step, i) => (
-          <li key={i} className={step.by ? `by-${step.by}` : undefined}>
-            <StepCircle />
+          <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
+            <StepCircle state={step.progress?.state} />
             <span className="small">
               {step.title}
               {step.by === "you" && <span className="step-by you">Human input needed</span>}
+              {step.progress?.state === "waiting" && (
+                <span className="step-waiting">Waiting on you{step.progress.note ? `: ${step.progress.note}` : ""}</span>
+              )}
             </span>
           </li>
         ))}
@@ -386,6 +400,21 @@ function AssessmentView({
         )}
       </div>
     </>
+  );
+}
+
+/** Where the linked Claude session is: still being looked for, or how far it has got. */
+function SessionStatus({ progress, steps }: { progress: SessionProgress | null; steps: OutlineStep[] }) {
+  if (!progress) return null;
+  if (!progress.found) return <span className="timestamp small session-status">Looking for the Claude session…</span>;
+  const claudeSteps = steps.filter((st) => st.by !== "you");
+  const done = claudeSteps.filter((st) => st.progress?.state === "done").length;
+  const waiting = steps.some((st) => st.progress?.state === "waiting");
+  return (
+    <span className="timestamp small session-status" title="Orb follows the session's progress reports">
+      {waiting ? "Session is waiting on you" : `Session: ${done} of ${claudeSteps.length} steps done`}
+      {progress.updatedAt && ` · ${ago(new Date(progress.updatedAt).toISOString())}`}
+    </span>
   );
 }
 
@@ -471,6 +500,7 @@ export function TaskCard({
   manualAssessment,
   assessing,
   check,
+  sessionLink,
   openTitles = [],
   compact = false,
   onChange,
@@ -484,6 +514,8 @@ export function TaskCard({
   assessing: boolean;
   /** Claude's latest double check of the task. */
   check?: StoredTaskCheck;
+  /** The Claude Code session Orb opened for this task, if any. */
+  sessionLink?: SessionLink;
   /** Titles of the user's other open tasks, for spotting duplicates. */
   openTitles?: string[];
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
@@ -493,6 +525,7 @@ export function TaskCard({
   const [showPlan, setShowPlan] = useState(false);
   const planStatus = useJobStatus(`plan:${task.id}`);
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
+  const progress = useSessionProgress(task.id, sessionLink);
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
@@ -502,27 +535,32 @@ export function TaskCard({
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
-  const openInClaude = () => {
+  const openInClaude = async () => {
     if (!plan) return;
     const prompt = sessionPrompt(
-      { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
       plan.plan,
     );
+    await linkSession(task.id);
+    onChange();
     openUrl(claudeSessionUrl(prompt, task.repoFolder));
   };
   // Every plan step, tagged by who does it; with no plan yet, the steps the assessment says Claude can do.
-  const outlineSteps: OutlineStep[] = plan
-    ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
-    : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }));
-  // Approve & start only ever hands Claude the steps it can complete on its own.
+  // They're numbered in this order in the session's prompt, so its "[orb] step N" reports line up.
+  const outlineSteps: OutlineStep[] = (
+    plan
+      ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
+      : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
+  ).map((st, i) => ({ ...st, progress: progress?.steps[i + 1] }));
   // Approve & start sends the whole sequence; Claude does every step that isn't the user's.
   const hasClaudeSteps = outlineSteps.some((st) => st.by !== "you");
   const approveAndStart = async () => {
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
+    await linkSession(task.id);
     onChange();
     const prompt = startPrompt(
-      { title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
       assessment.suggestion,
       outlineSteps,
     );
@@ -554,6 +592,7 @@ export function TaskCard({
             <span className="spin">↻</span> {planStatus ?? "Researching a plan"}…
           </span>
         )}
+        {sessionLink && <SessionStatus progress={progress} steps={outlineSteps} />}
       </div>
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */

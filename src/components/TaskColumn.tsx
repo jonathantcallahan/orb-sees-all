@@ -7,6 +7,7 @@ import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { RefreshButton, Updated } from "./common";
 import { setTaskState, type StoredTaskCheck } from "../db";
+import type { SessionLink } from "../sessions";
 import { Inbox } from "./Inbox";
 import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
@@ -19,6 +20,7 @@ function Group({
   plans,
   assessments,
   checks,
+  sessionLinks,
   openTitles,
   running,
   filtered = false,
@@ -35,6 +37,7 @@ function Group({
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
   checks: Record<string, StoredTaskCheck>;
+  sessionLinks: Record<string, SessionLink>;
   openTitles: string[];
   running: string[];
   onChange: () => void;
@@ -57,6 +60,7 @@ function Group({
           manualAssessment={assessments.get(t.id)}
           assessing={running.includes("assess")}
           check={checks[t.id]}
+          sessionLink={sessionLinks[t.id]}
           openTitles={openTitles}
           compact
           onChange={onChange}
@@ -79,6 +83,7 @@ export function TaskColumn({
   recommended,
   descriptionOverrides,
   taskChecks,
+  sessionLinks,
   running,
   onChange,
 }: {
@@ -99,6 +104,8 @@ export function TaskColumn({
   descriptionOverrides: Record<string, string>;
   /** Double checks of tasks, by task id. */
   taskChecks: Record<string, StoredTaskCheck>;
+  /** Claude Code sessions opened for tasks, by task id. */
+  sessionLinks: Record<string, SessionLink>;
   running: string[];
   onChange: () => void;
 }) {
@@ -157,7 +164,7 @@ export function TaskColumn({
   const openTitles = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest]
     .filter((t) => !t.done)
     .map((t) => t.title);
-  const shared = { plans, assessments, checks: taskChecks, openTitles, running, onChange };
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, openTitles, running, onChange };
 
   // Today's plan pulls from every group; open tasks first.
   const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
@@ -188,6 +195,7 @@ export function TaskColumn({
             manualAssessment={assessments.get(t.id)}
             assessing={running.includes("assess")}
             check={taskChecks[t.id]}
+            sessionLink={sessionLinks[t.id]}
             openTitles={openTitles}
             onChange={onChange}
           />

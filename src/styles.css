@@ -580,11 +580,19 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
+.step-circle.done { color: var(--green); }
+.step-circle.waiting { color: var(--amber); }
+.step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
+@keyframes step-turn { to { transform: rotate(360deg); } }
+.plan-outline-steps li.step-done > .small { color: var(--muted); }
+.step-waiting { display: block; color: var(--amber); font-size: 11px; }
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
 
 /* Plan panel actions: the Claude-style approve button, then text links */
-.plan-actions { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.plan-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.plan-actions > button { white-space: nowrap; }
+.session-status { flex-basis: 100%; }
 .cta-primary { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #1c1c1a; font-size: 12px; }
 .cta-ghost { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; }
 .cta-ghost:hover { background: var(--grey-bg); }

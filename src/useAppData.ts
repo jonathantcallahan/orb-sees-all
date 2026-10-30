@@ -1,3 +1,4 @@
+import type { SessionLink } from "./sessions";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as db from "./db";
 import { dataVersion, jobStatus, queue } from "./jobs";
@@ -19,11 +20,12 @@ export interface AppData {
   blockerChecks: Record<string, db.StoredBlockerCheck>;
   descriptionOverrides: Record<string, string>;
   taskChecks: Record<string, db.StoredTaskCheck>;
+  sessionLinks: Record<string, SessionLink>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -37,9 +39,10 @@ async function loadAll(): Promise<AppData> {
     db.getBlockerChecks(),
     db.getDescriptionOverrides(),
     db.getTaskChecks(),
+    db.getSessionLinks(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

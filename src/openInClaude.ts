@@ -4,6 +4,8 @@ import type { TaskPlan } from "./schema";
 const MAX_PROMPT = 13_500;
 
 export interface SessionTask {
+  /** Orb's id for the task; the session carries it so Orb can find the session and follow its progress. */
+  id?: string;
   title: string;
   description?: string | null;
   link?: string | null;
@@ -13,7 +15,12 @@ export interface SessionTask {
 
 /** A self-contained prompt for a new Claude Code session: the task and the plan Claude proposed for it. */
 export function sessionPrompt(task: SessionTask, plan: TaskPlan): string {
-  const lines = ["I'm working on this task from my day planner and want your help getting it done.", "", `Task: ${task.title}`];
+  const lines = [
+    ...(task.id ? [sessionMarker(task.id), ""] : []),
+    "I'm working on this task from my day planner and want your help getting it done.",
+    "",
+    `Task: ${task.title}`,
+  ];
   if (task.projectName) lines.push(`Project: ${task.projectName}`);
   if (task.requester) lines.push(`Requested by: ${task.requester}`);
   if (task.link) lines.push(`Source: ${task.link}`);
@@ -27,9 +34,27 @@ export function sessionPrompt(task: SessionTask, plan: TaskPlan): string {
   if (plan.open_questions.length) lines.push("", "Open questions:", ...plan.open_questions.map((q) => `- ${q}`));
   if (plan.sources.length) lines.push("", "Sources:", ...plan.sources.map((s) => `- ${s.title}: ${s.link}`));
   lines.push("", "Help me carry this out, starting with step 1. Raise the open questions with me when they come up.");
+  if (task.id) lines.push(...progressInstructions());
 
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
+}
+
+/** First line of every session Orb opens; Orb searches transcripts for it. */
+export function sessionMarker(taskId: string): string {
+  return `Orb task: ${taskId}`;
+}
+
+/** Asks the session to report progress in lines Orb can parse. */
+function progressInstructions(): string[] {
+  return [
+    "",
+    "Report progress so my planner can follow along. On its own line, write:",
+    "- `[orb] step N started` when you begin one of the numbered steps above,",
+    "- `[orb] step N done` when you finish it,",
+    "- `[orb] step N waiting: <what you need from me>` when you stop to ask me for something.",
+    "N is the step's number in the list above.",
+  ];
 }
 
 /** Common opening: the task and its context. */
@@ -54,9 +79,15 @@ export interface StartStep {
  * the result of any earlier step of the user's that it depends on.
  */
 export function startPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
-  const lines = ["I've approved your suggested approach for this task from my day planner. Please start on it.", "", ...taskLines(task)];
+  const lines = [
+    ...(task.id ? [sessionMarker(task.id), ""] : []),
+    "I've approved your suggested approach for this task from my day planner. Please start on it.",
+    "",
+    ...taskLines(task),
+  ];
   lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
   steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
+  if (task.id) lines.push(...progressInstructions());
   lines.push(
     "",
     "Do your steps in order. Don't do the steps marked [Me].",
