@@ -744,14 +744,14 @@ export function TaskCard({
     ],
     [description],
   );
-  // Double check sits at the right end of the More / Edit row, shown on hover (and while it runs).
+  // Double check follows More / Edit / Show links, shown on hover (and while it runs). Last, so its hidden space sits at the end.
   const checkAction = linked ? null : checkStatus ? (
-    <span className="muted small checking row-end" title={checkStatus}>
+    <span className="muted small checking" title={checkStatus}>
       <span className="spin">✦</span> {checkStatus}…
     </span>
   ) : (
     <button
-      className="link-button small more-link row-end hover-only"
+      className="link-button small more-link hover-only"
       onClick={runCheck}
       title="Have Claude check the task was captured right, is still needed, and isn't a duplicate"
     >

@@ -685,8 +685,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { transition: filter 0.15s ease; }
 .card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { filter: grayscale(1); }
 
-/* Double check sits at the right end of the More / Edit row and appears when you hover the card. */
-.description-actions .row-end { margin-left: auto; }
+/* Double check follows More / Edit / Show links on the left, and appears when you hover the card. */
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }
 .card:hover .hover-only, .card .hover-only:focus-visible { opacity: 1; }
 
