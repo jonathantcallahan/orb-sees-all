@@ -695,9 +695,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .badge.priority.unset { color: var(--muted); }
 
 /* Task title with the Claude icon right after it; the title truncates, the icon stays. */
-.task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .task-row .task-title-wrap { align-items: center; }
-.task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; }
+/* One line, cut with an ellipsis; hovering shows the full title. */
+.task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .claude-link { flex: none; display: inline-grid; place-items: center; padding: 0; border: none; background: none; line-height: 0; opacity: 0.85; cursor: pointer; }
 .claude-link:hover { opacity: 1; }
 .task-card-header .claude-link { align-self: center; }

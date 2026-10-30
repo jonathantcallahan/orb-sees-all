@@ -809,7 +809,9 @@ export function TaskCard({
         title="Click for details"
       >
         <span className="task-title-wrap">
-          <span className="task-title">{task.title}</span>
+          <span className="task-title" title={task.title}>
+            {task.title}
+          </span>
           {claudeIcon}
         </span>
         {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
@@ -824,9 +826,9 @@ export function TaskCard({
     <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`} {...drag}>
       <header className="task-card-header">
         <span className="task-title-wrap">
-          <ExternalLink href={task.link} className="task-title">
+          <span className="task-title" title={task.title}>
             {task.title}
-          </ExternalLink>
+          </span>
           {claudeIcon}
         </span>
         {assessment?.estimate_minutes != null && (
