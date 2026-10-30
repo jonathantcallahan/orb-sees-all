@@ -6,7 +6,7 @@ const KEY = "orb-look";
 /** Kept in localStorage like the theme, so the chosen orb shows from the first frame. */
 export function storedOrbLook(): OrbLook {
   const look = localStorage.getItem(KEY);
-  return look === "glass" || look === "iridescent" ? look : "classic";
+  return look === "glass" || look === "crystal" || look === "iridescent" ? look : "classic";
 }
 
 export function useOrbLook(): [OrbLook, (look: OrbLook) => void] {

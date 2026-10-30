@@ -248,6 +248,8 @@ export function TaskColumn({
             manualPriority={priorityOverrides[t.id]}
             openTasks={openTasks}
             duplicateOf={duplicates.get(t.id)}
+            // Finished tasks shrink to a one-line row (click to see the card again).
+            compact={t.done}
             onChange={onChange}
           />
         ))

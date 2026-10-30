@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { describePressure, orbMood, type Pressure } from "../tasks";
+import { orbMood, type Pressure } from "../tasks";
+import { PressureBars } from "./PressureBars";
 import { NOISE } from "./orbNoise";
+import { NO_RIPPLE, RIPPLE, type OrbUniforms } from "./orbRipple";
+import { TASK_DONE_EVENT } from "../orbEvents";
 import { buildGlassOrb } from "./glassOrb";
 import { buildLiquidOrb } from "./liquidOrb";
 
@@ -13,6 +16,7 @@ varying vec3 vPos;
 varying vec3 vViewPos;
 varying float vDisp;
 ${NOISE}
+${RIPPLE}
 // One wave train: a sine along direction d, its phase bent by noise so crests wander, and its
 // height scaled by a slow noise envelope (seeded) so it swells in some places and fades in others.
 float wave(vec3 n, vec3 d, float freq, float phase, float seed) {
@@ -43,7 +47,7 @@ void main() {
   float sharp = uStress * uStress;
   float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, sharp) + flow * 1.3));
   float spikes = pow(ridge, mix(2.0, 6.0, sharp));
-  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp;
+  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp + 0.14 * ripple(normal);
   vec3 pos = position + normal * disp;
   vPos = pos;
   vDisp = disp;
@@ -96,12 +100,14 @@ void main() {
 
 /** Rotation speed in radians per second at stress 0 and 1. */
 const SPIN = { calm: 0.1, stressed: 2.2 };
+/** How far the orb turns toward the cursor, in radians (about 35 degrees). */
+const FACE_ANGLE = 0.6;
 
 /** The orb looks a user can pick in Settings. */
-export type OrbLook = "classic" | "glass" | "iridescent";
+export type OrbLook = "classic" | "glass" | "crystal" | "iridescent";
 
 /** Builds the Classic orb: one shaded sphere that swells when calm and spikes under stress. */
-function buildClassicOrb(uniforms: { uTime: { value: number }; uStress: { value: number } }) {
+function buildClassicOrb(uniforms: OrbUniforms) {
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
@@ -133,6 +139,12 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
     const el = mount.current!;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Before drawing glass, three renders what's behind it into a buffer, which it clears to
+    // half-transparent white when the canvas is transparent (renderTransmissionPass). Glass over
+    // empty space then looks milky white instead of showing the page. Clear it to transparent.
+    const setClearColor = renderer.setClearColor.bind(renderer);
+    renderer.setClearColor = (color, alpha) =>
+      alpha === 0.5 && new THREE.Color(color).getHex() === 0xffffff ? setClearColor(0x000000, 0) : setClearColor(color, alpha);
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -140,10 +152,52 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
     // Far enough back that fully spiked (radius ~1.7) still fits in frame.
     camera.position.z = 6.4;
 
-    const uniforms = { uTime: { value: 0 }, uStress: { value: target.current } };
-    const orb = look === "glass" ? buildGlassOrb(uniforms) : look === "iridescent" ? buildLiquidOrb(uniforms) : buildClassicOrb(uniforms);
+    const uniforms = {
+      uTime: { value: 0 },
+      uStress: { value: target.current },
+      uRippleAge: { value: NO_RIPPLE },
+      uRippleOrigin: { value: new THREE.Vector3(0, 0, 1) },
+    };
+    const orb =
+      look === "glass"
+        ? buildGlassOrb(uniforms, renderer)
+        : look === "crystal"
+          ? buildGlassOrb(uniforms, renderer, "clear")
+          : look === "iridescent"
+            ? buildLiquidOrb(uniforms)
+            : buildClassicOrb(uniforms);
+    if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
-    scene.add(blob);
+    // The orb spins inside a group that turns it toward the cursor when the cursor comes near.
+    const facing = new THREE.Group();
+    facing.add(blob);
+    scene.add(facing);
+    const toward = { x: 0, y: 0 };
+    const onPointer = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      const size = Math.max(r.width, r.height) / 2;
+      // -1 to 1 across the orb's box, from its center.
+      const dx = (e.clientX - (r.left + r.width / 2)) / size;
+      const dy = (e.clientY - (r.top + r.height / 2)) / size;
+      // Full attention inside the box, fading out by twice its size.
+      const near = Math.max(0, Math.min(1, 2 - Math.hypot(dx, dy)));
+      toward.x = Math.max(-1, Math.min(1, dx)) * near;
+      toward.y = Math.max(-1, Math.min(1, dy)) * near;
+    };
+    const onLeave = () => {
+      toward.x = 0;
+      toward.y = 0;
+    };
+    window.addEventListener("pointermove", onPointer);
+    // A finished task sends ripples out from the point of the orb facing the viewer.
+    const onTaskDone = () => {
+      blob.updateWorldMatrix(true, false);
+      const toViewer = new THREE.Vector3(0, 0, 1).applyQuaternion(blob.getWorldQuaternion(new THREE.Quaternion()).invert());
+      uniforms.uRippleOrigin.value.copy(toViewer.normalize());
+      uniforms.uRippleAge.value = 0;
+    };
+    window.addEventListener(TASK_DONE_EVENT, onTaskDone);
+    document.addEventListener("pointerleave", onLeave);
     // The molten Glass orb turns more slowly, so its oozing reads as weight rather than spin.
     const spinScale = look === "classic" ? 1 : 0.6;
 
@@ -166,9 +220,14 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
       const stress = uniforms.uStress.value + (target.current - uniforms.uStress.value) * Math.min(dt * 1.2, 1);
       uniforms.uStress.value = stress;
       uniforms.uTime.value += dt * motion;
+      if (uniforms.uRippleAge.value < NO_RIPPLE) uniforms.uRippleAge.value += dt;
       const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress) * motion * spinScale;
       blob.rotation.y += dt * spin;
       blob.rotation.x += dt * spin * 0.35;
+      // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
+      const ease = Math.min(dt * 4, 1);
+      facing.rotation.y += (toward.x * FACE_ANGLE * motion - facing.rotation.y) * ease;
+      facing.rotation.x += (toward.y * FACE_ANGLE * motion - facing.rotation.x) * ease;
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
     };
@@ -176,6 +235,9 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
 
     return () => {
       cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", onPointer);
+      window.removeEventListener(TASK_DONE_EVENT, onTaskDone);
+      document.removeEventListener("pointerleave", onLeave);
       observer.disconnect();
       orb.dispose();
       renderer.dispose();
@@ -184,17 +246,15 @@ export function PressureBlob({ pressure, look = "classic" }: { pressure: Pressur
   }, [look]);
 
   const mood = orbMood(pressure);
-  // Everything that feeds the score, in plain words.
-  const counts = describePressure(pressure);
 
   return (
-    <div className={`pressure mood-${mood}`} title={counts ?? "Nothing waiting on you"}>
+    <div className={`pressure mood-${mood}`}>
       <div ref={mount} className="pressure-blob" aria-hidden />
       {/* Keyed by mood so each change fades in. */}
       <div key={mood} className="muted small orb-mood">
         Orb is {mood}
       </div>
-      {counts && <div className="small pressure-stats">{counts}</div>}
+      <PressureBars pressure={pressure} />
     </div>
   );
 }
@@ -217,6 +277,12 @@ function glowColors(look: OrbLook, level: number): string[] {
       [[60, 200, 255], [150, 80, 230]],
       [[40, 90, 240], [220, 70, 180]],
       [[100, 160, 255], [120, 80, 225]],
+    ],
+    // The same core seen through clear glass, with a touch of the rainbow its edges throw.
+    crystal: [
+      [[70, 190, 255], [160, 80, 235]],
+      [[60, 100, 240], [230, 70, 170]],
+      [[120, 230, 200], [255, 170, 90]],
     ],
     // Soap-film pastels, warming toward pink and gold under stress.
     iridescent: [

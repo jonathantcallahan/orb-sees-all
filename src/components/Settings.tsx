@@ -191,6 +191,7 @@ export function Settings({
             <select value={orbLook} onChange={(e) => onOrbLookChange(e.target.value as OrbLook)}>
               <option value="classic">Classic</option>
               <option value="glass">Glass: molten metal in frosted glass</option>
+              <option value="crystal">Crystal: molten metal suspended in clear glass</option>
               <option value="iridescent">Iridescent: a liquid holographic bubble</option>
             </select>
           </label>

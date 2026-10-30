@@ -1,11 +1,21 @@
 /**
- * The Glass orb: a molten metallic core inside a layer of milky glass. The core oozes in big
+ * The Glass orb: a molten metallic core inside a shell of frosted glass. The core oozes in big
  * rounded lobes, slow and viscous when calm, churning when stressed; its blue-to-magenta gradient
- * runs redder as stress rises. The glass follows the same molten shape with soft folds of its own,
- * takes on the core's colors through its curves, and frosts toward its edges.
+ * runs redder as stress rises. The glass follows the same molten shape with soft folds of its own.
+ *
+ * The frost is real transmission (MeshPhysicalMaterial): three renders the core into a mip-mapped
+ * texture and the glass samples it through refraction, blurred by its roughness and thickness, so
+ * the core shows through as a soft glow that sharpens where the glass is thin. A studio environment
+ * gives it reflections and a bright rim.
+ *
+ * The Crystal orb is the same core suspended in clear, solid glass: no frost, a thick volume that
+ * bends the core as you'd see it through a lens, bright edge reflections, and rainbow fringes
+ * where the glass splits light (dispersion) plus a faint thin-film sheen.
  */
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { NOISE } from "./orbNoise";
+import { RIPPLE, type OrbUniforms } from "./orbRipple";
 
 /** Large, smooth lobes from domain-warped low-frequency noise: the molten shape. */
 const BLOB = /* glsl */ `
@@ -18,8 +28,7 @@ float blob(vec3 p, float t) {
 
 /**
  * The core's color at a direction from the center: cyan and blue across most of it, turning
- * through violet to magenta-red on one side, which grows with stress. The glass uses it too, to
- * show the core's colors through its curves.
+ * through violet to magenta-red on one side, which grows with stress.
  */
 const CORE_COLOR = /* glsl */ `
 // The cool ramp the core moves along with mood: cyan, blue, violet, cool magenta.
@@ -49,10 +58,12 @@ uniform float uStress;
 varying vec3 vObj;
 varying vec3 vViewPos;
 ${NOISE}
+${RIPPLE}
 ${BLOB}
 void main() {
   float t = uTime * mix(0.32, 1.0, uStress);
-  vec3 pos = position + normal * blob(normal, t) * mix(0.3, 0.4, uStress);
+  // Smaller lobes than the shell's, so the core stays well inside it and the glass's outline reads.
+  vec3 pos = position + normal * (blob(normal, t) * mix(0.22, 0.3, uStress) + 0.1 * ripple(normal));
   vObj = pos;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
   vViewPos = view.xyz;
@@ -81,98 +92,163 @@ void main() {
   float key = pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 90.0);
   float fill = pow(max(dot(r, normalize(vec3(-0.6, 0.25, 0.7))), 0.0), 20.0) * 0.45;
   float fres = pow(1.0 - max(dot(n, v), 0.0), 2.5);
-  vec3 lit = color * (0.1 + 1.05 * sky + 0.55 * horizon) + (key * 1.3 + fill) * vec3(0.92, 0.97, 1.0) + fres * mix(color, vec3(1.0), 0.4) * 0.7;
+  // Kept below white: seen through the frosted shell, any blown-out highlight spreads into a big
+  // white patch.
+  vec3 lit = color * (0.12 + 0.8 * sky + 0.45 * horizon) + (key * 0.7 + fill * 0.6) * vec3(0.92, 0.97, 1.0) + fres * mix(color, vec3(1.0), 0.2) * 0.45;
+  lit = min(lit, vec3(0.92));
   gl_FragColor = vec4(lit, 1.0);
 }
 `;
 
-const SHELL_VERTEX = /* glsl */ `
+/**
+ * The shell's molten shape, injected into MeshPhysicalMaterial's vertex shader: it hugs the core's
+ * lobes and adds broad folds of its own. Normals come from the displaced surface (by finite
+ * differences), so reflections and refraction follow the folds.
+ */
+const SHELL_SHAPE = /* glsl */ `
 uniform float uTime;
 uniform float uStress;
 uniform float uRadius;
 uniform float uSeed;
-varying vec3 vObj;
-varying vec3 vViewPos;
 ${NOISE}
+${RIPPLE}
 ${BLOB}
-void main() {
-  float t = uTime * mix(0.32, 1.0, uStress);
-  // Follow the core's molten shape, so the glass hugs it, then add soft folds of its own.
-  float lobe = blob(normal, t) * mix(0.3, 0.4, uStress) * 1.1;
-  // Broad, slow folds, like sheets of soft glass draped over the core.
-  float drift = snoise(normal * 0.75 + vec3(uSeed) + t * 0.22);
-  float folds = sin(dot(normal, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
-  vec3 pos = normal * (uRadius + lobe + folds * 0.07 + drift * 0.1);
-  vObj = pos;
-  vec4 view = modelViewMatrix * vec4(pos, 1.0);
-  vViewPos = view.xyz;
-  gl_Position = projectionMatrix * view;
+float shellRadius(vec3 n, float t) {
+  float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
+  float drift = snoise(n * 0.75 + vec3(uSeed) + t * 0.22);
+  float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + uSeed * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
+  return uRadius + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n);
+}
+vec3 shellPoint(vec3 n, float t) {
+  n = normalize(n);
+  return n * shellRadius(n, t);
 }
 `;
 
-const SHELL_FRAGMENT = /* glsl */ `
-uniform float uTime;
-uniform float uStress;
-uniform float uOpacity;
-varying vec3 vObj;
-varying vec3 vViewPos;
-${NOISE}
-${CORE_COLOR}
-void main() {
-  vec3 n = normalize(cross(dFdx(vViewPos), dFdy(vViewPos)));
-  vec3 v = normalize(-vViewPos);
-  float facing = abs(dot(n, v));
-  float fres = pow(1.0 - facing, 2.0);
-  // How sharply the glass bends here: folds pick up more of the core's color and a brighter edge.
-  float curve = clamp(length(fwidth(n)) * 16.0, 0.0, 1.0);
-
-  // What the glass shows of the core: its color along a direction bent by the glass's shape,
-  // so the colors slide and stretch across the folds instead of sitting straight behind them.
-  vec3 bend = vec3(snoise(vObj * 1.6), snoise(vObj * 1.6 + 4.1), snoise(vObj * 1.6 + 8.3));
-  vec3 inner = coreColor(vObj + bend * 0.45 + n * 0.25, uTime, uStress);
-
-  // Milky glass tinted by the core: clearest face-on, frostier and brighter toward the edges.
-  vec3 frost = vec3(0.86, 0.9, 0.97);
-  vec3 color = mix(frost, inner * 1.1, clamp(0.5 * facing + 0.45 * curve, 0.0, 0.85));
-  vec3 r = reflect(-v, n);
-  float key = pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.5))), 0.0), 40.0);
-  color += fres * 0.3 + curve * 0.12 + key * 0.6;
-
-  float alpha = clamp(mix(0.4, 0.88, fres) + curve * 0.15, 0.0, 0.95) * uOpacity;
-  // The canvas uses premultiplied alpha.
-  gl_FragColor = vec4(color * alpha, alpha);
-}
+const SHELL_NORMAL = /* glsl */ `
+float shellT = uTime * mix(0.32, 1.0, uStress);
+vec3 shellN = normalize(normal);
+vec3 shellA = normalize(cross(shellN, abs(shellN.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+vec3 shellB = cross(shellN, shellA);
+vec3 shellPos = shellPoint(shellN, shellT);
+vec3 shellDu = shellPoint(shellN + shellA * 0.01, shellT) - shellPos;
+vec3 shellDv = shellPoint(shellN + shellB * 0.01, shellT) - shellPos;
+vec3 objectNormal = normalize(cross(shellDu, shellDv));
+if (dot(objectNormal, shellN) < 0.0) objectNormal = -objectNormal;
+#ifdef USE_TANGENT
+  vec3 objectTangent = vec3(tangent.xyz);
+#endif
 `;
 
-/** Builds the Glass orb's meshes. Uniforms uTime and uStress are shared with the caller's loop. */
-export function buildGlassOrb(uniforms: { uTime: { value: number }; uStress: { value: number } }) {
+/**
+ * A black studio with a few bright softbox strips and two faint colored lights. Clear glass mirrors
+ * its surroundings, so this keeps it dark and see-through with crisp white streaks along its edges
+ * and folds, and a hint of color in the glints.
+ */
+function darkStudio(): THREE.Scene {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0.02, 0.02, 0.03);
+  const strip = (w: number, h: number, color: THREE.Color, pos: [number, number, number]) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+    mesh.position.set(...pos);
+    mesh.lookAt(0, 0, 0);
+    scene.add(mesh);
+  };
+  const white = (k: number) => new THREE.Color(k, k, k);
+  strip(6, 1.2, white(6), [0, 6, 2]); // overhead softbox
+  strip(1, 7, white(4), [-6, 0, 3]); // left strip
+  strip(1, 7, white(3), [6, 1, 1]); // right strip
+  strip(5, 0.6, white(2.5), [0, -1, -6]); // rim light behind
+  strip(2, 2, new THREE.Color(0.4, 1.6, 3), [-4, -4, 4]); // cool glint
+  strip(2, 2, new THREE.Color(3, 2.2, 0.4), [4, 4, -3]); // warm glint
+  return scene;
+}
+
+/** The two glass shells: frosted (the Glass orb) and clear (the Crystal orb). */
+export type GlassVariant = "frosted" | "clear";
+
+const SHELLS: Record<GlassVariant, THREE.MeshPhysicalMaterialParameters> = {
+  frosted: {
+    // Frost: roughness blurs what's seen through the glass; thickness bends and spreads it.
+    roughness: 0.52,
+    thickness: 1.7,
+    ior: 1.45,
+    // A faint cool tint deepening with the glass's thickness, like real glass.
+    attenuationColor: new THREE.Color(0.86, 0.92, 1.0),
+    attenuationDistance: 4,
+    specularIntensity: 0.6,
+    envMapIntensity: 0.45,
+  },
+  clear: {
+    // Polished: a sharp view of the core, magnified and bent by a thick, dense volume.
+    roughness: 0.03,
+    thickness: 2.6,
+    ior: 1.52,
+    // Rainbow fringes where the glass bends light hardest, at the edges and folds.
+    dispersion: 5,
+    // A faint oil-slick sheen that shifts with the viewing angle.
+    iridescence: 0.35,
+    iridescenceIOR: 1.3,
+    iridescenceThicknessRange: [200, 600],
+    attenuationColor: new THREE.Color(0.92, 0.95, 1.0),
+    attenuationDistance: 6,
+    specularIntensity: 1,
+    // Crisp reflections of the dark studio's light strips give it the hard white rim of solid glass.
+    envMapIntensity: 1.6,
+  },
+};
+
+/**
+ * Builds the Glass or Crystal orb's meshes and the environment its glass reflects (set it as the
+ * scene's environment). Uniforms uTime and uStress are shared with the caller's loop.
+ */
+export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRenderer, variant: GlassVariant = "frosted") {
   const group = new THREE.Group();
   const disposables: { dispose(): void }[] = [];
 
-  const coreGeometry = new THREE.IcosahedronGeometry(0.82, 64);
+  const coreGeometry = new THREE.IcosahedronGeometry(0.66, 64);
   const coreMaterial = new THREE.ShaderMaterial({ vertexShader: CORE_VERTEX, fragmentShader: CORE_FRAGMENT, uniforms });
-  group.add(new THREE.Mesh(coreGeometry, coreMaterial));
+  const core = new THREE.Mesh(coreGeometry, coreMaterial);
+  // In clear glass the core floats well inside, with plenty of glass around it.
+  if (variant === "clear") core.scale.setScalar(0.72);
+  group.add(core);
   disposables.push(coreGeometry, coreMaterial);
 
-  // One layer of glass over the core, drawn after it.
-  for (const [radius, seed, opacity, order] of [[1.1, 1.7, 1.0, 1]] as const) {
-    const geometry = new THREE.IcosahedronGeometry(1, 72);
-    const material = new THREE.ShaderMaterial({
-      vertexShader: SHELL_VERTEX,
-      fragmentShader: SHELL_FRAGMENT,
-      uniforms: { ...uniforms, uRadius: { value: radius }, uSeed: { value: seed }, uOpacity: { value: opacity } },
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      blending: THREE.CustomBlending,
-      blendSrc: THREE.OneFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
+  // One glass shell over the core. Transmission renders after opaque objects, so it sees the core.
+  const shellGeometry = new THREE.IcosahedronGeometry(1, 72);
+  const shell = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, transmission: 1, ...SHELLS[variant] });
+  shell.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, {
+      uTime: uniforms.uTime,
+      uStress: uniforms.uStress,
+      uRippleAge: uniforms.uRippleAge,
+      uRippleOrigin: uniforms.uRippleOrigin,
+      uRadius: { value: 1.1 },
+      uSeed: { value: 1.7 },
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.renderOrder = order;
-    group.add(mesh);
-    disposables.push(geometry, material);
-  }
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>\n${SHELL_SHAPE}`)
+      .replace("#include <beginnormal_vertex>", SHELL_NORMAL)
+      .replace("#include <begin_vertex>", "vec3 transformed = shellPos;");
+  };
+  const shellMesh = new THREE.Mesh(shellGeometry, shell);
+  shellMesh.renderOrder = 1;
+  group.add(shellMesh);
+  disposables.push(shellGeometry, shell);
 
-  return { group, dispose: () => disposables.forEach((d) => d.dispose()) };
+  // Reflections and the rim come from a studio environment: a soft, bright room for frosted glass;
+  // a dark one with a few light strips for clear glass, which mirrors it sharply.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = variant === "clear" ? darkStudio() : new RoomEnvironment();
+  const environment = pmrem.fromScene(room, 0.04).texture;
+  pmrem.dispose();
+  room.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  });
+  disposables.push(environment);
+
+  return { group, environment, dispose: () => disposables.forEach((d) => d.dispose()) };
 }

@@ -40,6 +40,19 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [0.95, 0.66, 0.9],
     ],
   },
+  // The Glass core's ramp, a little brighter through clear glass.
+  crystal: {
+    deep: [
+      [0.15, 0.5, 0.98],
+      [0.32, 0.34, 0.95],
+      [0.75, 0.3, 0.72],
+    ],
+    wisp: [
+      [0.65, 0.92, 1.0],
+      [0.76, 0.74, 1.0],
+      [0.98, 0.72, 0.9],
+    ],
+  },
   // Soap-film pastels that warm toward pink and gold.
   iridescent: {
     deep: [

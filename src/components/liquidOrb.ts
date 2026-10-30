@@ -6,6 +6,7 @@
  */
 import * as THREE from "three";
 import { NOISE } from "./orbNoise";
+import { RIPPLE, type OrbUniforms } from "./orbRipple";
 
 const VERTEX = /* glsl */ `
 uniform float uTime;
@@ -14,6 +15,7 @@ varying vec3 vObj;
 varying vec3 vViewPos;
 varying float vDisp;
 ${NOISE}
+${RIPPLE}
 // Liquid motion: twist the surface around the vertical axis by a slowly varying angle, then
 // warp it, so dents swirl and flow like a disturbed liquid surface instead of bobbing in place.
 float liquid(vec3 p, float t) {
@@ -27,7 +29,7 @@ float liquid(vec3 p, float t) {
 }
 void main() {
   float t = uTime * mix(0.35, 1.1, uStress);
-  float d = liquid(normal, t) * mix(0.08, 0.15, uStress);
+  float d = liquid(normal, t) * mix(0.08, 0.15, uStress) + 0.12 * ripple(normal);
   vec3 pos = position + normal * d;
   vObj = pos;
   vDisp = d;
@@ -85,7 +87,7 @@ void main() {
 `;
 
 /** Builds the Iridescent orb's mesh. Uniforms uTime and uStress are shared with the caller's loop. */
-export function buildLiquidOrb(uniforms: { uTime: { value: number }; uStress: { value: number } }) {
+export function buildLiquidOrb(uniforms: OrbUniforms) {
   const geometry = new THREE.IcosahedronGeometry(1, 80);
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,

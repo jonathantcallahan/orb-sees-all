@@ -3,6 +3,7 @@ import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import type { DiscoveryPlan, ProjectChannel } from "./projects";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
+import { announceTaskDone } from "./orbEvents";
 
 let conn: Promise<Database> | null = null;
 const db = () => (conn ??= Database.load("sqlite:dayplanner.db"));
@@ -473,6 +474,7 @@ export async function setTaskState(taskId: string, patch: Partial<Pick<TaskState
        today_on = excluded.today_on, updated_at = excluded.updated_at`,
     [taskId, next.status, next.status === "done" ? 1 : 0, next.dismissed ? 1 : 0, next.todayOn, nowIso()],
   );
+  if (next.status === "done" && current.status !== "done") announceTaskDone();
 }
 
 // ---- refresh log

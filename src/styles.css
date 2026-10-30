@@ -662,7 +662,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-modal section h4 { margin-top: 0; }
 .plan-modal-actions { display: flex; gap: 14px; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
 /* The orb's stats line: a step fainter than other gray text */
-.pressure-stats { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); text-align: center; }
+/* What feeds the orb: open tasks by priority, then deadlines, side by side. A task's width each; a
+   dot when empty. Each segment's hover area is taller than its 6px stripe, so it's easy to point at. */
+.pressure-bars { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 0 8px; cursor: default; }
+.pressure-bar { display: flex; }
+.pressure-seg { position: relative; display: block; min-width: 3px; height: 16px; --seg: var(--muted); }
+.pressure-seg::before { content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 6px; background: var(--seg); }
+.pressure-bar > .pressure-seg:first-child::before { border-radius: 3px 0 0 3px; }
+.pressure-bar > .pressure-seg:last-child::before { border-radius: 0 3px 3px 0; }
+.pressure-bar > .pressure-seg:only-child::before { border-radius: 3px; }
+.pressure-seg:hover::before { filter: brightness(1.15); }
+.pressure-bar-empty { width: 6px; height: 6px; margin: 5px 0; border-radius: 50%; background: color-mix(in srgb, var(--muted) 40%, var(--bg)); }
+/* Solid grays, darkest for the most urgent, stepping lighter toward low priority. */
+.pressure-seg.blocking { --seg: color-mix(in srgb, var(--text) 85%, var(--bg)); }
+.pressure-seg.critical, .pressure-seg.overdue { --seg: color-mix(in srgb, var(--text) 65%, var(--bg)); }
+.pressure-seg.high, .pressure-seg.due-soon { --seg: color-mix(in srgb, var(--text) 45%, var(--bg)); }
+.pressure-seg.medium { --seg: color-mix(in srgb, var(--text) 28%, var(--bg)); }
+.pressure-seg.low { --seg: color-mix(in srgb, var(--text) 16%, var(--bg)); }
+.pressure-tip { transform: translateX(-50%); padding: 4px 8px; white-space: nowrap; }
 
 /* Relevant links on a task, as Google Docs–style smart chips */
 .link-chips { display: flex; flex-wrap: wrap; gap: 4px; }
