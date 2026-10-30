@@ -509,3 +509,13 @@ describe("slack threads", () => {
     expect(p).toContain("Sounds good, shipping Friday.");
   });
 });
+
+describe("blocker status check", () => {
+  it("starts from the reminder when one was sent", async () => {
+    const { checkBlockerPrompt } = await import("./prompts");
+    const blocker = { id: "b1", what: "Refund codes", owners: [], since: null, link: null };
+    const withReminder = checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null, reminder: { at: "2026-10-29T10:00:00Z", link: "https://unity.slack.com/archives/C1/p1" } });
+    expect(withReminder).toContain("posted a reminder about it on 2026-10-29T10:00:00Z (https://unity.slack.com/archives/C1/p1)");
+    expect(checkBlockerPrompt({ projectName: "Refunds", channelId: "C1", blocker, userId: null })).not.toContain("reminder");
+  });
+});

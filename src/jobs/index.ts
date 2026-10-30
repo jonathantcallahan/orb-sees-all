@@ -280,12 +280,17 @@ export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTas
 }
 
 /** Has Claude dig into whether a blocker is real and whether it was already solved somewhere else. */
-export function checkBlocker(projectName: string, channelId: string, blocker: Blocker): Promise<void> {
+export function checkBlocker(
+  projectName: string,
+  channelId: string,
+  blocker: Blocker,
+  reminder?: { at: string; link: string | null } | null,
+): Promise<void> {
   return track(`check:${blocker.id}`, (status) =>
     logged("check", blocker.id, async () => {
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: checkBlockerPrompt({ projectName, channelId, blocker, userId: await db.getSetting("slack_user_id") }),
+        prompt: checkBlockerPrompt({ projectName, channelId, blocker, reminder, userId: await db.getSetting("slack_user_id") }),
         schema: BlockerCheck,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead, ...TOOLS.driveRead],
         model: await model(),

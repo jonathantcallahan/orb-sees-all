@@ -73,7 +73,7 @@ const VERDICT_LABEL: Record<BlockerCheck["verdict"], string> = {
 };
 
 /** "Double check": Claude looks for whether a blocker is real and already solved elsewhere. */
-function CheckAction({ checking, onCheck }: { checking: string | undefined; onCheck: () => void }) {
+function CheckAction({ checking, onCheck, label = "Double check" }: { checking: string | undefined; onCheck: () => void; label?: string }) {
   if (checking) {
     return (
       <span className="muted small checking" title={checking}>
@@ -83,7 +83,7 @@ function CheckAction({ checking, onCheck }: { checking: string | undefined; onCh
   }
   return (
     <button className="link-button small more-link" onClick={onCheck}>
-      Double check
+      {label}
     </button>
   );
 }
@@ -231,9 +231,10 @@ function WorkItem({
         {(check || remind) && (
           // Slides open on hover; stays open while a double check runs so its status shows.
           <span className={`work-actions${checking ? " open" : ""}`}>
-            {/* Once you've nudged the owner, there's no more to check: the reminder is the next step. */}
-            {check && !remind?.reminder && (
+            {/* After a reminder, the same check looks for replies to it: Check status. */}
+            {check && (
               <CheckAction
+                label={remind?.reminder ? "Check status" : "Double check"}
                 checking={checking}
                 onCheck={() => {
                   setHideResult(false);
@@ -242,6 +243,12 @@ function WorkItem({
               />
             )}
             {remind && <RemindAction item={item} ask={kind === "active" ? "update" : "reminder"} {...remind} />}
+            {/* Someone else's blocker that's been handled: clear it by hand, as a double check's Mark resolved does. */}
+            {check && !item.owners.some((o) => o.is_me) && (
+              <button className="link-button small more-link" onClick={check.onResolve} title="They've done it: stop listing this as blocking">
+                Mark done
+              </button>
+            )}
           </span>
         )}
       </div>
@@ -363,7 +370,7 @@ export function ProjectCard({
                   remind={{ channelId: project.channel_id, reminder: reminders[b.id], onSent: onChange }}
                   check={{
                     result: blockerChecks[b.id],
-                    onCheck: () => checkBlocker(projectName(project), project.channel_id, b).then(onChange, () => {}),
+                    onCheck: () => checkBlocker(projectName(project), project.channel_id, b, reminders[b.id]).then(onChange, () => {}),
                     onResolve: async () => {
                       await setTaskState(blockerKey(b.id), { dismissed: true });
                       onChange();

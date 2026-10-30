@@ -284,12 +284,14 @@ export interface CheckBlockerInput {
   channelId: string;
   blocker: Blocker;
   userId: string | null;
+  /** A reminder the user already posted about it, so the check looks for replies. */
+  reminder?: { at: string; link: string | null } | null;
 }
 
 export function checkBlockerPrompt(p: CheckBlockerInput): string {
   return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}a product manager on Unity's Asset Store) has this item listed as blocking the "${p.projectName}" project (Slack channel ${p.channelId}):
 ${JSON.stringify(p.blocker)}
-
+${p.reminder ? `\nThe user posted a reminder about it on ${p.reminder.at}${p.reminder.link ? ` (${p.reminder.link})` : ""}. Start there: read the replies to it and anything the owners said since.\n` : ""}
 Double check it. Dig deeper than the project channel:
 1. Read the message that raised it and its thread (the link), and the latest messages in ${p.channelId}.
 2. Search for anything that resolved it elsewhere: Slack across channels and DMs (slack_search_public_and_private, using the key terms and the owners' names, since the date it was raised), email (search_threads), Jira (jira_search for related tickets and their status) and Google Drive (search_files for a doc it asked for).
