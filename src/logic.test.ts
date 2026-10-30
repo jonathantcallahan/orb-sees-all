@@ -407,18 +407,12 @@ describe("task filters", () => {
 });
 
 describe("project filters", () => {
-  const p = { status: "at_risk" as const, priority: "P0" as const, taskIds: ["t1", "t2"] };
+  const p = { status: "at_risk" as const, priority: "P0" as const };
 
   it("requires every filter that's set", () => {
-    expect(matchesProjectFilter(p, NO_PROJECT_FILTER, new Set())).toBe(true);
-    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, statuses: ["at_risk"], priorities: ["P0"] }, new Set())).toBe(true);
-    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priorities: ["P1"] }, new Set())).toBe(false);
-  });
-
-  it("keeps projects with a recommended task when asked", () => {
-    const f = { ...NO_PROJECT_FILTER, recommendedOnly: true };
-    expect(matchesProjectFilter(p, f, new Set(["t2"]))).toBe(true);
-    expect(matchesProjectFilter(p, f, new Set(["other"]))).toBe(false);
+    expect(matchesProjectFilter(p, NO_PROJECT_FILTER)).toBe(true);
+    expect(matchesProjectFilter(p, { statuses: ["at_risk"], priorities: ["P0"] })).toBe(true);
+    expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priorities: ["P1"] })).toBe(false);
   });
 });
 

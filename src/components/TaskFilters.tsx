@@ -125,13 +125,12 @@ const PROJECT_PRIORITIES: [ProjectPriority, string][] = [
   ["P4", "P4"],
 ];
 
-/** Status, priority and Recommended filters for the Projects column. */
+/** Status and priority filters for the Projects column. */
 export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; onChange: (f: ProjectFilter) => void }) {
   return (
     <div className="task-filters">
       <MultiFilter label="Filter projects by status" anyLabel="Any status" values={filter.statuses} options={PROJECT_STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
       <MultiFilter label="Filter projects by priority" anyLabel="Any priority" values={filter.priorities} options={PROJECT_PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
-      <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>
   );
 }

@@ -219,25 +219,18 @@ export interface ProjectFilter {
   statuses: ProjectStatus[];
   /** Empty means any priority. */
   priorities: ProjectPriority[];
-  /** Only projects with a task the Orb recommends today. */
-  recommendedOnly: boolean;
 }
 
-export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [], recommendedOnly: false };
+export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [] };
 
 export function isFilteringProjects(f: ProjectFilter): boolean {
-  return f.statuses.length > 0 || f.priorities.length > 0 || f.recommendedOnly;
+  return f.statuses.length > 0 || f.priorities.length > 0;
 }
 
 /** Whether a project passes every filter that's set. */
-export function matchesProjectFilter(
-  p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined; taskIds: string[] },
-  f: ProjectFilter,
-  recommended: Set<string>,
-): boolean {
+export function matchesProjectFilter(p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined }, f: ProjectFilter): boolean {
   if (f.statuses.length && (!p.status || !f.statuses.includes(p.status))) return false;
   if (f.priorities.length && (!p.priority || !f.priorities.includes(p.priority))) return false;
-  if (f.recommendedOnly && !p.taskIds.some((id) => recommended.has(id))) return false;
   return true;
 }
 
