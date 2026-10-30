@@ -720,5 +720,5 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .orb-mood { animation: mood-in 0.8s ease; }
 @keyframes mood-in { from { opacity: 0; } }
 
-/* On project cards, "updated …" stays gray even when it's from an earlier day. */
-.project .timestamp.stale { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
+/* "updated …" stays gray even when it's from an earlier day. */
+.timestamp.stale { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }

@@ -23,11 +23,13 @@ export interface AppData {
   taskChecks: Record<string, db.StoredTaskCheck>;
   sessionLinks: Record<string, SessionLink>;
   priorityOverrides: Record<string, Priority>;
+  /** Other ids for the same tasks, mapped to their canonical ids. */
+  taskAliases: Map<string, string>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -43,9 +45,10 @@ async function loadAll(): Promise<AppData> {
     db.getTaskChecks(),
     db.getSessionLinks(),
     db.getPriorityOverrides(),
+    db.getTaskAliases(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

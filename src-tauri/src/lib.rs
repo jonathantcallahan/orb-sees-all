@@ -207,6 +207,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/005_reply_drafts.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "task registry and per-row task data",
+            sql: include_str!("../migrations/006_task_registry.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

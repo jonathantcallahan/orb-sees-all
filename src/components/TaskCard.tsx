@@ -37,6 +37,8 @@ export interface CardTask {
   repoFolder?: string | null;
   /** Priority of the project the task belongs to; tasks in P0 projects are critical. */
   projectPriority?: ProjectPriority | null;
+  /** Links from other sources of the same task, folded into this card. */
+  aliasLinks?: string[];
   /** From the refresh that found the task; the user's own tasks are assessed separately. */
   assessment?: Assessment | null;
   done: boolean;
@@ -738,6 +740,8 @@ export function TaskCard({
   const links = collectLinks(
     [
       { url: task.link, title: task.requester ? `${task.requester.split(" ")[0]}'s ${task.source === "email" ? "email" : "message"}` : "Original message" },
+      // The same task's other sources (a later message, another channel, a merged task).
+      ...(task.aliasLinks ?? []).map((url) => ({ url, title: null })),
       ...(plan?.plan.sources ?? []).map((src) => ({ url: src.link, title: src.title })),
       ...(plan?.plan.steps ?? []).map((st) => ({ url: st.link, title: null })),
       ...(check?.evidence ?? []).map((e) => ({ url: e.link, title: e.title })),

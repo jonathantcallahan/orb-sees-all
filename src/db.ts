@@ -129,19 +129,41 @@ export async function saveReading(reading: StoredReading) {
   await setSetting("daily_reading", JSON.stringify(reading));
 }
 
+// ---- per-task data: one row per item in task_data, so concurrent saves can't clobber each other
+
+type Store = "description_overrides" | "priority_overrides" | "session_links" | "task_checks" | "blocker_checks" | "reminders" | "not_duplicates";
+
+async function getRows<T>(store: Store): Promise<Record<string, T>> {
+  const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
+  const out: Record<string, T> = {};
+  for (const r of rows) {
+    const v = json<T>(r.value);
+    if (v !== null) out[r.task_id] = v;
+  }
+  return out;
+}
+
+async function putRow(store: Store, id: string, value: unknown) {
+  await (await db()).execute(
+    `INSERT INTO task_data (store, task_id, value, updated_at) VALUES ($1, $2, $3, $4)
+     ON CONFLICT(store, task_id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [store, id, JSON.stringify(value), nowIso()],
+  );
+}
+
+async function deleteRow(store: Store, id: string) {
+  await (await db()).execute("DELETE FROM task_data WHERE store = $1 AND task_id = $2", [store, id]);
+}
+
 /**
  * Descriptions the user edited on Slack, email and project tasks, by task id.
  * Those tasks are rewritten on each refresh, so the edits live here.
  */
-export async function getDescriptionOverrides(): Promise<Record<string, string>> {
-  return json<Record<string, string>>(await getSetting("description_overrides")) ?? {};
-}
+export const getDescriptionOverrides = () => getRows<string>("description_overrides");
 
 export async function saveDescriptionOverride(taskId: string, text: string | null) {
-  const all = await getDescriptionOverrides();
-  if (text) all[taskId] = text;
-  else delete all[taskId];
-  await setSetting("description_overrides", JSON.stringify(all));
+  if (text) await putRow("description_overrides", taskId, text);
+  else await deleteRow("description_overrides", taskId);
 }
 
 export interface StoredTaskCheck extends TaskCheck {
@@ -149,76 +171,75 @@ export interface StoredTaskCheck extends TaskCheck {
 }
 
 /** Priorities the user set by hand, keyed by task id. */
-export async function getPriorityOverrides(): Promise<Record<string, Priority>> {
-  return json<Record<string, Priority>>(await getSetting("priority_overrides")) ?? {};
-}
+export const getPriorityOverrides = () => getRows<Priority>("priority_overrides");
 
 /** Sets a task's priority by hand, or with null goes back to the automatic one. */
 export async function setPriorityOverride(taskId: string, priority: Priority | null) {
-  const all = await getPriorityOverrides();
-  if (priority) all[taskId] = priority;
-  else delete all[taskId];
-  await setSetting("priority_overrides", JSON.stringify(all));
+  if (priority) await putRow("priority_overrides", taskId, priority);
+  else await deleteRow("priority_overrides", taskId);
 }
 
 /** Claude Code sessions Orb opened for tasks, keyed by task id. */
-export async function getSessionLinks(): Promise<Record<string, SessionLink>> {
-  return json<Record<string, SessionLink>>(await getSetting("session_links")) ?? {};
-}
+export const getSessionLinks = () => getRows<SessionLink>("session_links");
 
-export async function saveSessionLink(taskId: string, link: SessionLink) {
-  const all = await getSessionLinks();
-  all[taskId] = link;
-  await setSetting("session_links", JSON.stringify(all));
-}
+export const saveSessionLink = (taskId: string, link: SessionLink) => putRow("session_links", taskId, link);
 
 /** Double checks of tasks, keyed by task id. */
-export async function getTaskChecks(): Promise<Record<string, StoredTaskCheck>> {
-  return json<Record<string, StoredTaskCheck>>(await getSetting("task_checks")) ?? {};
-}
+export const getTaskChecks = () => getRows<StoredTaskCheck>("task_checks");
 
-export async function clearTaskCheck(taskId: string) {
-  const all = await getTaskChecks();
-  delete all[taskId];
-  await setSetting("task_checks", JSON.stringify(all));
-}
+export const clearTaskCheck = (taskId: string) => deleteRow("task_checks", taskId);
 
-export async function saveTaskCheck(taskId: string, check: TaskCheck) {
-  const all = await getTaskChecks();
-  all[taskId] = { ...check, at: new Date().toISOString() };
-  await setSetting("task_checks", JSON.stringify(all));
-}
+export const saveTaskCheck = (taskId: string, check: TaskCheck) => putRow("task_checks", taskId, { ...check, at: nowIso() });
 
 export interface StoredBlockerCheck extends BlockerCheck {
   at: string;
 }
 
 /** Double checks of blockers, keyed by blocker id. */
-export async function getBlockerChecks(): Promise<Record<string, StoredBlockerCheck>> {
-  return json<Record<string, StoredBlockerCheck>>(await getSetting("blocker_checks")) ?? {};
-}
+export const getBlockerChecks = () => getRows<StoredBlockerCheck>("blocker_checks");
 
-export async function saveBlockerCheck(blockerId: string, check: BlockerCheck) {
-  const all = await getBlockerChecks();
-  all[blockerId] = { ...check, at: new Date().toISOString() };
-  await setSetting("blocker_checks", JSON.stringify(all));
-}
+export const saveBlockerCheck = (blockerId: string, check: BlockerCheck) => putRow("blocker_checks", blockerId, { ...check, at: nowIso() });
 
 export interface Reminder {
   at: string;
   link: string | null;
 }
 
-/** Reminders sent about blockers, keyed by blocker id. */
-export async function getReminders(): Promise<Record<string, Reminder>> {
-  return json<Record<string, Reminder>>(await getSetting("reminders")) ?? {};
+/** Reminders and update requests sent about blockers and active work, keyed by item id. */
+export const getReminders = () => getRows<Reminder>("reminders");
+
+export const saveReminder = (blockerId: string, reminder: Reminder) => putRow("reminders", blockerId, reminder);
+
+// ---- task registry: which refs (message permalinks, thread ids, other task ids) are the same task
+
+/** Every alias ref and the canonical task id it belongs to. */
+export async function getTaskAliases(): Promise<Map<string, string>> {
+  const rows = await (await db()).select<{ ref: string; task_id: string }[]>("SELECT ref, task_id FROM task_sources");
+  return new Map(rows.map((r) => [r.ref, r.task_id]));
 }
 
-export async function saveReminder(blockerId: string, reminder: Reminder) {
-  const all = await getReminders();
-  all[blockerId] = reminder;
-  await setSetting("reminders", JSON.stringify(all));
+/**
+ * Records that `ref` is the same task as `taskId` (itself resolved to its canonical id), and moves
+ * anything already aliased to `ref` along with it, so chains always end at one canonical task.
+ */
+export async function addTaskAlias(ref: string, taskId: string, how: "refined" | "merged") {
+  const conn = await db();
+  const canonical = (await getTaskAliases()).get(taskId) ?? taskId;
+  if (ref === canonical) return;
+  await conn.execute(
+    `INSERT INTO task_sources (ref, task_id, added_at, how) VALUES ($1, $2, $3, $4)
+     ON CONFLICT(ref) DO UPDATE SET task_id = excluded.task_id, how = excluded.how`,
+    [ref, canonical, nowIso(), how],
+  );
+  await conn.execute("UPDATE task_sources SET task_id = $1 WHERE task_id = $2", [canonical, ref]);
 }
+
+/** Pairs the user said aren't duplicates, as "a|b" with a < b. */
+export const getNotDuplicates = async () => new Set(Object.keys(await getRows<true>("not_duplicates")));
+
+export const notDuplicateKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+export const markNotDuplicate = (a: string, b: string) => putRow("not_duplicates", notDuplicateKey(a, b), true);
 
 export async function getReplyDrafts(): Promise<Map<string, { text: string; created_at: string }>> {
   const rows = await (await db()).select<{ reply_id: string; text: string; created_at: string }[]>("SELECT * FROM reply_drafts");

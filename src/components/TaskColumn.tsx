@@ -8,6 +8,7 @@ import { projectName } from "../projects";
 import { CloseIcon, RefreshButton, Updated } from "./common";
 import { setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
+import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
 import { Inbox } from "./Inbox";
 import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
@@ -88,6 +89,7 @@ export function TaskColumn({
   taskChecks,
   sessionLinks,
   priorityOverrides,
+  taskAliases,
   running,
   onChange,
 }: {
@@ -112,6 +114,8 @@ export function TaskColumn({
   sessionLinks: Record<string, SessionLink>;
   /** Priorities the user set by hand, by task id. */
   priorityOverrides: Record<string, Priority>;
+  /** Other ids for the same tasks, mapped to their canonical ids. */
+  taskAliases: Aliases;
   running: string[];
   onChange: () => void;
 }) {
@@ -145,43 +149,44 @@ export function TaskColumn({
   const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const today = localDate(new Date());
 
+  // Edits and Recommended may be keyed by any of a task's ids; the canonical one wins.
+  const editedDescription = (id: string) => descriptionOverrides[canonicalId(id, taskAliases)] ?? descriptionOverrides[id];
+  const isRecommended = (id: string) => recommended.has(id) || recommended.has(canonicalId(id, taskAliases));
+
   // Slack and email items share one inbox; dated items first, soonest first.
-  const inbox = splitToday(
-    applyTaskState(
-      [...adhoc.tasks]
-        .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
-        .map((t) => ({ ...t, description: descriptionOverrides[t.id] ?? t.description, recommended: recommended.has(t.id) })),
-      taskStates,
-    ),
-    today,
-  );
+  const rawInbox = [...adhoc.tasks]
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
+    .map((t) => ({ ...t, description: editedDescription(t.id) ?? t.description, recommended: isRecommended(t.id) }));
 
   // The user's tasks from project snapshots: blockers first, then by due date.
-  const fromProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
+  const rawProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
     const blocking = new Set(myBlockingIds(p.snapshot?.blockers, taskStates));
     return (p.snapshot?.my_tasks ?? []).map((t) => ({
       ...t,
       source: "project" as const,
       project: { id: p.channel_id, name: projectName(p) },
-      description: descriptionOverrides[t.id] ?? t.description,
+      description: editedDescription(t.id) ?? t.description,
       blocking: blocking.has(t.id),
-      recommended: recommended.has(t.id),
+      recommended: isRecommended(t.id),
       projectPriority: p.snapshot?.priority?.level,
       repoFolder: p.local_repos[0] ?? null,
     }));
   });
-  fromProjects.sort(
-    (a, b) => Number(b.blocking) - Number(a.blocking) || (a.due ?? "9999").localeCompare(b.due ?? "9999"),
-  );
-  const projectTasks = splitToday(applyTaskState(fromProjects, taskStates), today);
+  rawProjects.sort((a, b) => Number(b.blocking) - Number(a.blocking) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
-  const mine = splitToday(
-    applyTaskState(
-      manual.filter((t) => !filterProject || t.project_id === filterProject.channel_id),
-      taskStates,
-    ).map((t) => ({ ...t, source: "manual" as const, recommended: recommended.has(t.id) })),
-    today,
-  );
+  const rawMine = manual
+    .filter((t) => !filterProject || t.project_id === filterProject.channel_id)
+    .map((t) => ({ ...t, source: "manual" as const, recommended: isRecommended(t.id) }));
+
+  // The same work from several sources (or merged by hand) shows once, under its canonical id.
+  type Raw = (typeof rawMine)[number] | (typeof rawProjects)[number] | (typeof rawInbox)[number];
+  const folded = foldTasks<Raw>([rawMine, rawProjects, rawInbox], taskAliases);
+  const foldedMine = folded[0] as Folded<(typeof rawMine)[number]>[];
+  const foldedProjects = folded[1] as Folded<(typeof rawProjects)[number]>[];
+  const foldedInbox = folded[2] as Folded<(typeof rawInbox)[number]>[];
+  const inbox = splitToday(applyTaskState(foldedInbox, taskStates), today);
+  const projectTasks = splitToday(applyTaskState(foldedProjects, taskStates), today);
+  const mine = splitToday(applyTaskState(foldedMine, taskStates), today);
 
   // Every open task's title, so a double check can spot duplicates.
   const openTitles = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest]

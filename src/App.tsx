@@ -10,7 +10,8 @@ import { TodayColumn } from "./components/TodayColumn";
 import { markInterruptedJobs } from "./db";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
-import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, taskPriority } from "./tasks";
+import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
+import { canonicalId } from "./registry";
 import { isDark, useTheme } from "./theme";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
 
@@ -40,6 +41,25 @@ function useScheduler() {
       unlisteners.forEach((p) => p.then((un) => un()));
     };
   }, []);
+}
+
+/** One entry per canonical task, keeping the most urgent priority and earliest due date among its ids. */
+function onePerTask(tasks: PressureTask[], aliases: Map<string, string>): PressureTask[] {
+  const byId = new Map<string, PressureTask>();
+  for (const t of tasks) {
+    const id = canonicalId(t.id, aliases);
+    const seen = byId.get(id);
+    const rank = (p: PressureTask["priority"]) => (p ? PRIORITY_RANK[p] : 5);
+    if (!seen) byId.set(id, { ...t, id });
+    else
+      byId.set(id, {
+        ...seen,
+        priority: rank(t.priority) < rank(seen.priority) ? t.priority : seen.priority,
+        due: [seen.due, t.due].filter(Boolean).sort()[0] ?? null,
+        projectId: seen.projectId ?? t.projectId,
+      });
+  }
+  return [...byId.values()];
 }
 
 export default function App() {
@@ -81,8 +101,9 @@ export default function App() {
     ),
   );
   // Every open task the user owns, at the priority its card shows, so the orb weighs what you see.
+  // The same work from several sources counts once, under its canonical id, at its highest priority.
   const load = pressure(
-    [
+    onePerTask([
       ...projects.flatMap((p) => {
         const blocking = new Set(myBlockingIds(p.snapshot?.blockers, data.taskStates));
         return (p.snapshot?.my_tasks ?? []).map((t) => ({
@@ -102,7 +123,7 @@ export default function App() {
         projectId: t.project_id,
         priority: taskPriority(data.assessments.get(t.id)?.priority, null, false, data.priorityOverrides[t.id]),
       })),
-    ],
+    ], data.taskAliases),
     data.taskStates,
   );
 
@@ -191,6 +212,7 @@ export default function App() {
           taskChecks={data.taskChecks}
           sessionLinks={data.sessionLinks}
           priorityOverrides={data.priorityOverrides}
+          taskAliases={data.taskAliases}
           running={running}
           onChange={reload}
         />
