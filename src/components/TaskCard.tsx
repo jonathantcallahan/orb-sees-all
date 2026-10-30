@@ -400,12 +400,12 @@ function AssessmentView({
         </div>
       )}
       <div className={`automation ${assessment.automation}`}>
-        <div className="automation-head">
+        <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className="automation-kind">{AUTOMATION_LABEL[assessment.automation]}</span>
-          <button className="link-button small more-link" onClick={() => setOpen(!open)} aria-expanded={open}>
-            {open ? "Hide" : "Show"}
-          </button>
-        </div>
+          <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+            <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
         {open && (
           <>
             <span className="small">{assessment.suggestion}</span>

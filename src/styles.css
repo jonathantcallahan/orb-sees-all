@@ -287,9 +287,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Claude's assessment of a task */
 .automation { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
-.automation-head { display: flex; align-items: baseline; gap: 8px; }
-.automation-head .automation-kind, .automation-head .link-button { font-size: 12px; }
-.automation-head .link-button { margin-left: auto; }
+/* The whole title row toggles the section; the arrow turns down when open. */
+.automation-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.automation-head .automation-kind { font-size: 12px; }
+.automation-head:hover .automation-kind { color: var(--text); }
+.disclosure { margin-left: auto; flex-shrink: 0; color: var(--muted); transition: transform 0.15s ease; }
+.disclosure.open { transform: rotate(90deg); }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .needs-details .link-button { color: inherit; text-decoration: underline; }
 
