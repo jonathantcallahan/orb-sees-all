@@ -63,28 +63,33 @@ ${NOISE}
 // height scaled by a slow noise envelope (seeded) so it swells in some places and fades in others.
 float wave(vec3 n, vec3 d, float freq, float phase, float seed) {
   float bend = 1.2 * snoise(n * (freq * 0.3) + vec3(seed) + phase * 0.3);
-  float height = 0.25 + 0.75 * (0.5 + 0.5 * snoise(n * 0.8 + vec3(seed * 1.3) + phase * 0.08));
+  // Squared envelope: long stretches where the wave nearly vanishes, with sharper tall peaks.
+  float env = 0.5 + 0.5 * snoise(n * 0.8 + vec3(seed * 1.3) + phase * 0.08);
+  float height = 0.08 + 0.92 * env * env * 1.6;
   return height * sin(dot(n, normalize(d)) * freq + phase + bend);
 }
 void main() {
   // Calm: slow, irregular swells. Stressed: high-frequency ridged noise, i.e. spikes.
   float flow = uTime * mix(0.125, 0.9, uStress);
   vec3 n = normal;
-  // Six gentle wave trains of different sizes, directions and speeds. Each has its own slowly
-  // drifting height envelope, so some swells rise tall while others nearly flatten.
+  // Nine wave trains of different sizes, directions and speeds, from a broad swell that lifts
+  // whole regions to quick small ripples. Each has its own slowly drifting height envelope, so
+  // waves rise tall in some places and all but vanish in others.
   float swell =
-      0.30 * wave(n, vec3(0.80, 0.30, 0.52), 3.0, flow * 1.3, 0.0)
+      0.34 * wave(n, vec3(0.30, 0.95, 0.10), 1.8, flow * 0.7, 9.4)
+    + 0.30 * wave(n, vec3(0.80, 0.30, 0.52), 3.0, flow * 1.3, 0.0)
     + 0.24 * wave(n, vec3(-0.40, 0.88, 0.25), 4.2, -flow * 1.1, 1.7)
+    + 0.20 * wave(n, vec3(0.65, -0.70, 0.30), 4.9, -flow * 0.9, 11.2)
     + 0.18 * wave(n, vec3(0.20, -0.50, 0.84), 5.5, flow * 1.7, 3.1)
+    + 0.14 * wave(n, vec3(-0.90, 0.10, -0.42), 6.3, flow * 1.2, 13.5)
     + 0.13 * wave(n, vec3(-0.75, -0.35, 0.56), 7.0, -flow * 1.4, 4.6)
     + 0.09 * wave(n, vec3(0.55, 0.75, -0.37), 8.5, flow * 2.0, 6.2)
     + 0.06 * wave(n, vec3(-0.10, 0.25, -0.96), 10.5, -flow * 2.3, 7.9);
-  swell *= 1.15;
   // Spikes grow with the square of stress: faint until the orb is genuinely overloaded.
   float sharp = uStress * uStress;
   float ridge = 1.0 - abs(snoise(normal * mix(2.0, 4.5, sharp) + flow * 1.3));
   float spikes = pow(ridge, mix(2.0, 6.0, sharp));
-  float disp = mix(0.08, 0.07, uStress) * swell + 0.55 * spikes * sharp;
+  float disp = mix(0.1, 0.085, uStress) * swell + 0.55 * spikes * sharp;
   vec3 pos = position + normal * disp;
   vPos = pos;
   vDisp = disp;
