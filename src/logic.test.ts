@@ -610,3 +610,23 @@ describe("due filter", () => {
     expect(matchesFilter({ ...base, due: "2026-11-20" }, f(["overdue", "soon"]), now)).toBe(false);
   });
 });
+
+describe("task order", () => {
+  const t = (...ids: string[]) => ids.map((id) => ({ id }));
+  it("rearranges saved tasks within their own slots, leaving new ones where they'd normally be", async () => {
+    const { applyOrder } = await import("./tasks");
+    expect(applyOrder(t("a", "b", "c"), []).map((x) => x.id)).toEqual(["a", "b", "c"]);
+    expect(applyOrder(t("a", "b", "c"), ["c", "a", "b"]).map((x) => x.id)).toEqual(["c", "a", "b"]);
+    // "new" is new and urgent: it keeps its default first place.
+    expect(applyOrder(t("new", "a", "b", "c"), ["c", "a", "b"]).map((x) => x.id)).toEqual(["new", "c", "a", "b"]);
+    // Saved ids that are gone are ignored.
+    expect(applyOrder(t("a", "b"), ["gone", "b", "a"]).map((x) => x.id)).toEqual(["b", "a"]);
+  });
+
+  it("moves an id before another, or to the end", async () => {
+    const { reorder } = await import("./tasks");
+    expect(reorder(["a", "b", "c"], "c", "a")).toEqual(["c", "a", "b"]);
+    expect(reorder(["a", "b", "c"], "a", null)).toEqual(["b", "c", "a"]);
+    expect(reorder(["a", "b"], "x", "b")).toEqual(["a", "x", "b"]);
+  });
+});

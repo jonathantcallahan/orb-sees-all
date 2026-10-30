@@ -183,7 +183,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
 
-.task-card { display: flex; flex-direction: column; gap: 6px; }
+.task-card { display: flex; flex-direction: column; }
 .task-card.done { opacity: 0.6; }
 .task-card.done .task-title { text-decoration: line-through; }
 .task-card-header { display: flex; gap: 8px; align-items: flex-start; }
@@ -213,11 +213,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 :root { --mist-height: 75px; }
 .mist { position: fixed; left: 0; right: 0; bottom: 0; height: var(--mist-height); pointer-events: none; z-index: 5; }
 .mist canvas { display: block; width: 100%; height: 100%; }
-.column { padding-bottom: calc(var(--mist-height) - 20px); }
+/* Room under the last card for it to scroll clear above the fog. */
+.column { padding-bottom: calc(var(--mist-height) + 24px); }
 .modal-backdrop { z-index: 10; }
 /* The briefing and header stay put; only the project cards scroll. */
 .projects-column { overflow: hidden; padding-bottom: 0; }
-.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) - 20px); }
+.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
    starts above the mist and runs under it to the bottom edge. */
@@ -292,7 +293,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .add-description { align-self: flex-start; font-style: italic; }
 
 /* Claude's assessment of a task */
-.automation { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
+.automation { display: flex; flex-direction: column; gap: 0; padding: 6px 8px; border-radius: 6px; border: 1px dashed var(--border); }
 /* The whole title row toggles the section; the arrow turns down when open. */
 .automation-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .automation-head .automation-kind { font-size: 12px; }
@@ -321,18 +322,50 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
 
 /* Drag and drop into and out of Today */
-.task-card[draggable="true"] { cursor: grab; }
-.task-card[draggable="true"]:active { cursor: grabbing; }
+.task-card { cursor: grab; }
+.task-card :is(button, a, select, input, textarea, .task-title) { cursor: auto; }
+.task-card :is(button, a, select) { cursor: pointer; }
 .today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
 .today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
 .today-plan.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 10%, transparent); }
+.column.drop { box-shadow: inset 0 0 0 1px var(--border); border-radius: 12px; transition: box-shadow 0.15s; }
 
 /* Tasks outside Today: one row until clicked */
-.task-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; }
-.task-row .task-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-row.done { opacity: 0.6; }
-.task-row.done .task-title { text-decoration: line-through; }
-.task-row .badge, .task-row .estimate { flex-shrink: 0; }
+/*
+ * Opening and closing a task. The header never moves; the body below it grows and shrinks.
+ * Height animates through a one-row grid (0fr to 1fr), which animates to the content's natural
+ * height in every engine, so the cards below glide instead of jumping. Opening is a little slower
+ * and decelerates (arrives fast, settles gently, no overshoot); closing is quicker and accelerates
+ * away. The content follows the frame in (fading and rising a few pixels just after the height
+ * starts) and leads it out (fading first), so text is never seen being sliced by the edge.
+ */
+/* Shared by everything that opens and closes in place (task cards, Reveal). */
+:root { --open-ease: cubic-bezier(0.16, 1, 0.3, 1); --close-ease: cubic-bezier(0.4, 0, 1, 1); }
+.task-card.collapsed { cursor: pointer; }
+.task-card.collapsed.done { opacity: 0.6; transition: opacity 0.2s ease; }
+.task-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 280ms var(--open-ease); }
+.task-card.collapsed .task-body { grid-template-rows: 0fr; transition: grid-template-rows 190ms var(--close-ease); }
+.task-body-inner {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: opacity 220ms ease-out 50ms, transform 280ms var(--open-ease) 30ms;
+}
+/* The space under the header is a margin inside the clipped area (padding wouldn't shrink to zero). */
+.task-body-inner > :first-child { margin-top: 6px; }
+.task-card.collapsed .task-body-inner { opacity: 0; transform: translateY(-4px); transition: opacity 110ms ease-in, transform 190ms var(--close-ease); }
+/* Clip only while collapsed or moving, so focus rings and shadows inside an open card aren't cut off. */
+.task-card.collapsed .task-body-inner, .task-card.animating .task-body-inner { overflow: hidden; }
+.task-toggle .disclosure { transition: transform 280ms var(--open-ease); }
+.task-card.collapsed .task-toggle .disclosure { transition: transform 190ms var(--close-ease); }
+.task-toggle { transition: transform 90ms ease; }
+.task-toggle:active { transform: scale(0.88); }
+/* Reduced motion: no sliding or growing, just a quick fade. */
+@media (prefers-reduced-motion: reduce) {
+  .task-body, .task-card.collapsed .task-body, .task-toggle .disclosure, .task-card.collapsed .task-toggle .disclosure { transition: none; }
+  .task-body-inner, .task-card.collapsed .task-body-inner { transform: none; transition: opacity 120ms linear; }
+}
 .badge.priority.medium { color: var(--muted); }
 .badge.priority.low { color: var(--muted); opacity: 0.8; }
 
@@ -410,6 +443,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
 .reading h4 { margin: 0; }
 .reading h4.section-title:not(:first-child) { margin-top: 8px; }
+.reading-body .reading-inner, .reading-body > .reveal-inner { gap: 4px; }
+.reading-body .reveal-inner > :first-child { margin-top: 0; }
+.reading-header-actions { gap: 2px; }
 .reading-text { margin: 0; line-height: 1.55; color: var(--muted); }
 .update-label { color: var(--muted); margin-right: 6px; }
 
@@ -530,7 +566,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
 .check-result .corrected { color: var(--text); }
 /* Action links everywhere are 11px, the size of the small age and time labels. */
-.link-button, .link-button.small, .reminded, .work-actions .checking { font-size: 11px; }
+.link-button, .link-button.small, .reminded, .checking { font-size: 11px; }
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
@@ -564,7 +600,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   background: transparent;
   cursor: pointer;
 }
-.filter-select.on { color: var(--text); background: var(--grey-bg); border-color: var(--muted); }
+.filter-select { gap: 4px; border: 1px solid var(--border); transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+.filter-select:hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 25%, var(--border)); }
+.filter-select.open { color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.filter-select.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.filter-chevron { flex-shrink: 0; opacity: 0.7; transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.filter-select.open .filter-chevron { transform: rotate(180deg); }
 .filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 /* Three ~36px rows and their two 6px gaps, plus a few px so the third row's border isn't cut
@@ -710,23 +751,63 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .multi-filter { position: relative; }
 .multi-filter-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   right: 0;
   z-index: 20;
-  min-width: 140px;
-  padding: 6px;
-  border-radius: 8px;
+  min-width: 160px;
+  padding: 5px;
+  border-radius: 10px;
   border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.1);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  transform-origin: top right;
+  animation: filter-menu-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.multi-filter-option { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.multi-filter-option:hover { background: var(--grey-bg); }
-.multi-filter-option input { margin: 0; }
-.multi-filter-clear { align-self: flex-start; margin: 2px 6px 0; }
+@keyframes filter-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+}
+.multi-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.multi-filter-option:hover, .multi-filter-option:focus-visible { background: var(--grey-bg); outline: none; }
+.multi-filter-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--text) 25%, transparent);
+  color: transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.multi-filter-check svg { transform: scale(0.4); transition: transform 180ms cubic-bezier(0.3, 1.5, 0.5, 1); }
+.multi-filter-option.on .multi-filter-check { background: var(--accent); border-color: var(--accent); color: white; }
+.multi-filter-option.on .multi-filter-check svg { transform: scale(1); }
+.multi-filter-footer { margin-top: 3px; padding: 5px 8px 1px; border-top: 1px solid var(--border); }
+@media (prefers-reduced-motion: reduce) {
+  .multi-filter-menu { animation: none; }
+}
 
 /* Placeholder plan rows before a plan exists */
 .plan-outline-steps.skeleton li { align-items: center; }
@@ -751,7 +832,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Task title with the Claude icon right after it; the title truncates, the icon stays. */
 .task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
-.task-row .task-title-wrap { align-items: center; }
 /* One line, cut with an ellipsis; hovering shows the full title. */
 .task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .claude-link { flex: none; display: inline-grid; place-items: center; padding: 0; border: none; background: none; line-height: 0; opacity: 0.85; cursor: pointer; }
@@ -874,3 +954,45 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .session-reply { align-self: stretch; display: flex; gap: 8px; align-items: flex-end; }
 .session-reply textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; font-size: 12px; }
 .plan-actions > .handoff, .plan-actions > .session-reply, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
+
+/* The arrow at the end of a task's header row, after its badges, that opens and closes the card */
+.task-toggle { display: inline-flex; align-items: center; align-self: center; flex-shrink: 0; padding: 2px; margin-left: -2px; border: none; background: none; cursor: pointer; color: var(--muted); }
+.task-toggle:hover { color: var(--text); }
+.task-toggle .disclosure { margin-left: 0; }
+
+/*
+ * Dragging a task (taskDrag.tsx). The lifted copy follows the pointer above everything; it eases up
+ * into its lifted pose (slightly larger, tilted a hair, deep shadow) and back down when it returns
+ * home. The other cards make room for it as it moves.
+ */
+body.task-dragging, body.task-dragging * { cursor: grabbing !important; user-select: none; }
+.task-drag-preview { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; will-change: transform; }
+.task-card.drag-lifted {
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.22), 0 4px 10px rgb(0 0 0 / 0.12);
+  transform: scale(1.03) rotate(-1deg);
+  animation: task-lift 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.task-card.drag-lifted.returning { transform: none; box-shadow: none; }
+.task-card.drag-lifted.still { transform: none; animation: none; }
+@keyframes task-lift {
+  from { transform: none; box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
+}
+/* While lifted, the card's own spot is the gap the others opened, so the card itself is hidden. */
+.task-card.drag-source { opacity: 0; }
+/* The other cards slide apart to open the gap where the dragged card would land. */
+body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Reveal (common.tsx): content that opens and closes in place, timed like the task cards. */
+.reveal { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 260ms var(--open-ease); }
+.reveal.closed { grid-template-rows: 0fr; transition: grid-template-rows 180ms var(--close-ease); }
+.reveal-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; transition: opacity 200ms ease-out 40ms, transform 260ms var(--open-ease) 20ms; }
+.reveal.closed .reveal-inner { opacity: 0; transform: translateY(-3px); transition: opacity 100ms ease-in, transform 180ms var(--close-ease); }
+/* The assessment's suggestion and steps keep the gap they had under the heading. */
+.automation-body .reveal-inner { gap: 2px; }
+.automation-body .reveal-inner > :first-child { margin-top: 2px; }
+.automation .disclosure { transition: transform 260ms var(--open-ease); }
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal.closed { transition: none; }
+  .reveal-inner, .reveal.closed .reveal-inner { transform: none; transition: opacity 120ms linear; }
+}

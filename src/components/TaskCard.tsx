@@ -9,11 +9,12 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ComposeModal, ExternalLink, Spinner } from "./common";
+import { CloseIcon, ComposeModal, ExternalLink, Reveal, Spinner } from "./common";
 import { GIVE_UP_MS, linkSession, markStepDone, stepState, unsentMessages, useSessionProgress, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
+import { useTaskDrag } from "./taskDrag";
 import { CLAUDE_ICON } from "../linkIcons";
-import { collectLinks } from "../links";
+import { collectLinks, linkKind } from "../links";
 import type { DuplicateCandidate } from "../duplicates";
 
 export interface CardTask {
@@ -278,7 +279,6 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 const DISMISS = "dismiss";
 
 /** Drag-and-drop payload type for moving tasks in and out of Today. */
-export const TASK_DRAG_TYPE = "application/x-orb-task";
 
 const PICKABLE: Priority[] = ["critical", "high", "medium", "low"];
 const AUTO = "__auto";
@@ -376,6 +376,9 @@ const AUTOMATION_LABEL: Record<Automation, string> = {
  * Approve & start) sits inside, under the steps.
  */
 /** A small dashed ring marking a plan step. */
+/** Whether the user asked for reduced motion; checked on each use, so a change in System Settings applies at once. */
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /** A plan step's marker: dashed when not started, turning while in progress, checked when done. */
 function StepCircle({ state }: { state?: StepState }) {
   return (
@@ -491,12 +494,10 @@ function AssessmentView({
             <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        {open && (
-          <>
-            <span className="small suggestion">{assessment.suggestion}</span>
-            <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} />
-          </>
-        )}
+        <Reveal open={open} className="automation-body">
+          <span className="small suggestion">{assessment.suggestion}</span>
+          <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} />
+        </Reveal>
       </div>
     </>
   );
@@ -689,11 +690,7 @@ function TaskCheckResult({
       )}
       {corrected && <p className="small corrected">Suggested description: {corrected}</p>}
       <div className="check-actions small">
-        {check.evidence.map((e) => (
-          <ExternalLink key={e.link} href={e.link} className="chip">
-            {e.title}
-          </ExternalLink>
-        ))}
+        <LinkChips links={check.evidence.map((e) => ({ url: e.link, title: e.title, kind: linkKind(e.link) }))} />
         <span className="check-buttons">
           {corrected && (
             <button className="link-button small" onClick={() => onApply(corrected)} title="Use this description and plan again">
@@ -767,7 +764,27 @@ export function TaskCard({
   const linked = !!sessionLink?.sessionId;
   /** Started, and Orb is still looking for the session (it gives up after a while, so the task can be started again). */
   const awaitingSession = !!sessionLink && !linked && Date.now() - sessionLink.startedAt < GIVE_UP_MS;
-  const [expanded, setExpanded] = useState(false);
+  // Collapsed cards show one line; the arrow after the badges opens and closes them. Compact cards
+  // (finished tasks in Today, other groups' rows) start collapsed, and collapse again when they become compact.
+  const [collapsed, setCollapsed] = useState(compact);
+  /** The body's content is only rendered once the card has been opened, then kept for the close animation. */
+  const [bodyMounted, setBodyMounted] = useState(!compact);
+  /** True while the height animates; the body clips its content only then (and while collapsed). */
+  const [animating, setAnimating] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
+  const setOpen = (open: boolean) => {
+    if (open === !collapsed) return;
+    setAnimating(!reducedMotion());
+    if (open && !bodyMounted) {
+      // Mount the content collapsed first, then open on the next frame, so the height has a starting point to animate from.
+      setBodyMounted(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setCollapsed(false)));
+    } else setCollapsed(!open);
+  };
+  // A card that becomes compact (a task just marked done in Today) closes itself.
+  useEffect(() => {
+    if (compact) setOpen(false);
+  }, [compact]);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const manual = task.source === "manual";
@@ -976,167 +993,182 @@ export function TaskCard({
     </button>
   );
 
-  const drag = {
-    draggable: true,
-    onDragStart: (e: React.DragEvent) => {
-      e.dataTransfer.setData(TASK_DRAG_TYPE, task.id);
-      e.dataTransfer.effectAllowed = "move";
-    },
-  };
+  const drag = useTaskDrag(task.id, cardRef);
 
-  if (compact && !expanded) {
-    return (
-      <article
-        className={`card task-row status-${task.status}${task.done ? " done" : ""}`}
-        {...drag}
-        onClick={(e) => {
-          if (!(e.target as HTMLElement).closest("select")) setExpanded(true);
-        }}
-        title="Click for details"
-      >
-        <span className="task-title-wrap">
-          <span className="task-title" title={task.title}>
-            {task.title}
-          </span>
+  const toggle = (
+    <button
+      className="task-toggle"
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Show details" : "Hide details"}
+      onClick={(e) => {
+        e.stopPropagation();
+        setOpen(collapsed);
+      }}
+    >
+      <svg className={`disclosure${collapsed ? "" : " open"}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+
+  // One header for both states, so the title row stays exactly where it is when the card opens or closes.
+  const header = (
+    <header className="task-card-header">
+      <span className="task-title-wrap">
+        <span className="task-title" title={task.title}>
+          {task.title}
         </span>
-        {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
-        {task.recommended && <RecommendedBadge />}
-        <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
-        <StatusSelect task={task} onChange={onChange} />
-      </article>
-    );
-  }
+        {claudeIcon}
+      </span>
+      {assessment?.estimate_minutes != null && (
+        <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
+          ~{formatMinutes(assessment.estimate_minutes)}
+        </span>
+      )}
+      {task.recommended && <RecommendedBadge />}
+      <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
+      <StatusSelect task={task} onChange={onChange} />
+      {toggle}
+    </header>
+  );
 
   return (
-    <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`} {...drag}>
-      <header className="task-card-header">
-        <span className="task-title-wrap">
-          <span className="task-title" title={task.title}>
-            {task.title}
-          </span>
-          {claudeIcon}
-        </span>
-        {assessment?.estimate_minutes != null && (
-          <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
-            ~{formatMinutes(assessment.estimate_minutes)}
-          </span>
-        )}
-        {task.recommended && <RecommendedBadge />}
-        <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
-        <StatusSelect task={task} onChange={onChange} />
-      </header>
+    <article
+      ref={cardRef}
+      className={`card task-card${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
+      {...drag.attrs}
+      onClick={
+        collapsed
+          ? (e) => {
+              if (!(e.target as HTMLElement).closest("select, button")) setOpen(true);
+            }
+          : undefined
+      }
+    >
+      {header}
 
-      {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
-        <div className="muted small task-meta">
-          {task.project && <span className="task-project">{task.project.name}</span>}
-          {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
-          {task.requester && <span>{task.requester}</span>}
-          {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
-        </div>
-      )}
+      {/* The body stays mounted once shown, so collapsing can animate; while collapsed it's inert (no tabbing in). */}
+      <div
+        className="task-body"
+        inert={collapsed}
+        aria-hidden={collapsed}
+        onTransitionEnd={(e) => {
+          if (e.target !== e.currentTarget || e.propertyName !== "grid-template-rows") return;
+          setAnimating(false);
+          // A card opened near the bottom of the column scrolls just enough to show what it revealed.
+          if (!collapsed) cardRef.current?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+        }}
+      >
+        <div className="task-body-inner">
+          {bodyMounted && (
+            <>
+              {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
+                <div className="muted small task-meta">
+                  {task.project && <span className="task-project">{task.project.name}</span>}
+                  {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
+                  {task.requester && <span>{task.requester}</span>}
+                  {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
+                </div>
+              )}
 
-      {task.carriedFrom && (
-        <div className="task-controls">
-          <span className="carried">{carriedLabel(task.carriedFrom)}</span>
-        </div>
-      )}
+              {task.carriedFrom && (
+                <div className="task-controls">
+                  <span className="carried">{carriedLabel(task.carriedFrom)}</span>
+                </div>
+              )}
 
-      {editing && (
-        <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
-      )}
-      {description ? (
-        <Description text={description} onEdit={() => setEditing(true)} actions={descriptionActions} />
-      ) : (
-        manual && (
-          <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
-            Add a description…
-          </button>
-        )
-      )}
+              {editing && (
+                <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
+              )}
+              {description ? (
+                <Description text={description} onEdit={() => setEditing(true)} actions={descriptionActions} />
+              ) : (
+                manual && (
+                  <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
+                    Add a description…
+                  </button>
+                )
+              )}
 
-      {!description && (linksToggle || checkAction) && <div className="description-actions small">{descriptionActions}</div>}
-      {linksOpen && <LinkChips links={links} />}
+              {!description && (linksToggle || checkAction) && <div className="description-actions small">{descriptionActions}</div>}
+              {linksOpen && <LinkChips links={links} />}
 
-      {duplicateOf && !linked && (
-        <div className="duplicate-note small">
-          <span className="duplicate-text">
-            Possible duplicate of <span className="duplicate-title">"{duplicateOf.title}"</span>
-          </span>
-          <span className="duplicate-actions">
-            <button
-              className="link-button small"
-              onClick={async () => {
-                await mergeTasks(task.id, duplicateOf.id);
-                onChange();
-              }}
-              title="Keep this task and fold the other into it, with its sources, links and anything this one lacks"
-            >
-              Merge
-            </button>
-            <button
-              className="link-button small more-link"
-              onClick={async () => {
-                await markNotDuplicate(task.id, duplicateOf.id);
-                onChange();
-              }}
-            >
-              Not a duplicate
-            </button>
-          </span>
-        </div>
-      )}
+              {duplicateOf && !linked && (
+                <div className="duplicate-note small">
+                  <span className="duplicate-text">
+                    Possible duplicate of <span className="duplicate-title">"{duplicateOf.title}"</span>
+                  </span>
+                  <span className="duplicate-actions">
+                    <button
+                      className="link-button small"
+                      onClick={async () => {
+                        await mergeTasks(task.id, duplicateOf.id);
+                        onChange();
+                      }}
+                      title="Keep this task and fold the other into it, with its sources, links and anything this one lacks"
+                    >
+                      Merge
+                    </button>
+                    <button
+                      className="link-button small more-link"
+                      onClick={async () => {
+                        await markNotDuplicate(task.id, duplicateOf.id);
+                        onChange();
+                      }}
+                    >
+                      Not a duplicate
+                    </button>
+                  </span>
+                </div>
+              )}
 
-      {assessment ? (
-        <AssessmentView
-          assessment={assessment}
-          steps={outlineSteps}
-          onAddDetails={!editing ? () => setEditing(true) : undefined}
-          actions={planActions}
-          planning={planning}
-          onMarkDone={markDone}
-        />
-      ) : (
-        <>
-          {manual && assessing && (
-            <div className="muted small">
-              <Spinner /> Claude is reviewing this task…
-            </div>
+              {assessment ? (
+                <AssessmentView
+                  assessment={assessment}
+                  steps={outlineSteps}
+                  onAddDetails={!editing ? () => setEditing(true) : undefined}
+                  actions={planActions}
+                  planning={planning}
+                  onMarkDone={markDone}
+                />
+              ) : (
+                <>
+                  {manual && assessing && (
+                    <div className="muted small">
+                      <Spinner /> Claude is reviewing this task…
+                    </div>
+                  )}
+                  {/* No assessment to nest it in yet. */}
+                  <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} />
+                </>
+              )}
+
+              {check && !checkStatus && (
+                <TaskCheckResult
+                  check={check}
+                  duplicateTitle={duplicateTarget?.title}
+                  onMerge={
+                    duplicateTarget
+                      ? async () => {
+                          await mergeTasks(duplicateTarget.id, task.id);
+                          await clearTaskCheck(task.id);
+                          onChange();
+                        }
+                      : undefined
+                  }
+                  onDone={() => setStateAndRefresh({ status: "done" })}
+                  onDismiss={() => setStateAndRefresh({ dismissed: true })}
+                  onApply={(text) => saveDescription(text)}
+                  onHide={async () => {
+                    await clearTaskCheck(task.id);
+                    onChange();
+                  }}
+                />
+              )}
+            </>
           )}
-          {/* No assessment to nest it in yet. */}
-          <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} />
-        </>
-      )}
-
-      {check && !checkStatus && (
-        <TaskCheckResult
-          check={check}
-          duplicateTitle={duplicateTarget?.title}
-          onMerge={
-            duplicateTarget
-              ? async () => {
-                  await mergeTasks(duplicateTarget.id, task.id);
-                  await clearTaskCheck(task.id);
-                  onChange();
-                }
-              : undefined
-          }
-          onDone={() => setStateAndRefresh({ status: "done" })}
-          onDismiss={() => setStateAndRefresh({ dismissed: true })}
-          onApply={(text) => saveDescription(text)}
-          onHide={async () => {
-            await clearTaskCheck(task.id);
-            onChange();
-          }}
-        />
-      )}
-
-      {compact && (
-        <footer className="task-card-actions">
-          <button className="link-button small muted" onClick={() => setExpanded(false)}>
-            Collapse
-          </button>
-        </footer>
-      )}
+        </div>
+      </div>
 
       {showPlan && plan && !planning && (
         <PlanModal

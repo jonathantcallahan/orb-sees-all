@@ -351,3 +351,23 @@ export function matchesProjectFilter(
 export function myBlockingIds(blockers: { id: string; owners: { is_me: boolean }[] }[] | undefined, states: Map<string, TaskState>): string[] {
   return (blockers ?? []).filter((b) => b.owners.some((o) => o.is_me) && !stateOf(states, blockerKey(b.id)).dismissed).map((b) => b.id);
 }
+
+/**
+ * A list in the user's own order: tasks they've arranged take the slots those tasks occupy in the
+ * default order, rearranged as saved; tasks they haven't touched (new ones) keep their default slot,
+ * so a new urgent task still shows near the top.
+ */
+export function applyOrder<T extends { id: string }>(list: T[], saved: string[]): T[] {
+  if (!saved.length) return list;
+  const pos = new Map(saved.map((id, i) => [id, i]));
+  const arranged = list.filter((t) => pos.has(t.id)).sort((a, b) => pos.get(a.id)! - pos.get(b.id)!);
+  let k = 0;
+  return list.map((t) => (pos.has(t.id) ? arranged[k++] : t));
+}
+
+/** `ids` with `id` moved (or added) just before `before`, or to the end. */
+export function reorder(ids: string[], id: string, before: string | null): string[] {
+  const rest = ids.filter((x) => x !== id);
+  const at = before ? rest.indexOf(before) : -1;
+  return at < 0 ? [...rest, id] : [...rest.slice(0, at), id, ...rest.slice(at)];
+}

@@ -217,3 +217,25 @@ export function CloseIcon({ size = 10 }: { size?: number }) {
     </svg>
   );
 }
+
+/**
+ * Content that opens and closes smoothly, the same way task cards do: its height animates through a
+ * one-row grid, its content fades in just after and out just before. The content is rendered once
+ * it's first opened, then kept so closing can animate; while closed it's inert.
+ */
+export function Reveal({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(open);
+  useEffect(() => {
+    if (open && !mounted) {
+      // Mount closed first, then open on the next frame, so the height has somewhere to animate from.
+      setMounted(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+    } else setShown(open);
+  }, [open]);
+  return (
+    <div className={`reveal${shown ? "" : " closed"}${className ? ` ${className}` : ""}`} inert={!shown} aria-hidden={!shown}>
+      <div className="reveal-inner">{mounted && children}</div>
+    </div>
+  );
+}

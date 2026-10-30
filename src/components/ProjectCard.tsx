@@ -228,11 +228,7 @@ function CheckResult({ check, onResolve, onDismiss }: { check: StoredBlockerChec
       <p className="small">{check.summary}</p>
       {check.next_step && <p className="small muted">Next: {check.next_step}</p>}
       <div className="check-actions small">
-        {check.evidence.map((e) => (
-          <ExternalLink key={e.link} href={e.link} className="chip">
-            {e.title}
-          </ExternalLink>
-        ))}
+        <LinkChips links={check.evidence.map((e) => ({ url: e.link, title: e.title, kind: linkKind(e.link) }))} />
         <span className="check-buttons">
           {clearable && (
             <button className="link-button small" onClick={onResolve}>

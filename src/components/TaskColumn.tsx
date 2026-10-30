@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { ManualAssessment, Priority } from "../schema";
-import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
+import { applyOrder, applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { CloseIcon, RefreshButton, Updated } from "./common";
@@ -13,7 +13,8 @@ import { findDuplicates, type DuplicateCandidate } from "../duplicates";
 import { Inbox } from "./Inbox";
 import { TaskFilters, useTaskFilter } from "./TaskFilters";
 import { useJobStatus } from "../useAppData";
-import { TaskCard, TASK_DRAG_TYPE, type CardTask } from "./TaskCard";
+import { TaskCard, type CardTask } from "./TaskCard";
+import { DropZone, TaskDragProvider, type DropZoneId, type Flip } from "./taskDrag";
 
 function Group({
   title,
@@ -77,6 +78,32 @@ function Group({
     </>
   );
 }
+
+/** The order you've arranged each list in, by task id. Kept in localStorage like the filters. */
+interface TaskOrder {
+  today: string[];
+  all: string[];
+}
+const ORDER_KEY = "task-order";
+function useTaskOrder(): [TaskOrder, (list: keyof TaskOrder, ids: string[]) => void] {
+  const [order, setOrder] = useState<TaskOrder>(() => {
+    try {
+      return { today: [], all: [], ...JSON.parse(localStorage.getItem(ORDER_KEY) ?? "{}") };
+    } catch {
+      return { today: [], all: [] };
+    }
+  });
+  const save = (list: keyof TaskOrder, ids: string[]) =>
+    setOrder((cur) => {
+      const next = { ...cur, [list]: ids };
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+      return next;
+    });
+  return [order, save];
+}
+
+/** How long a task dropped among finished ones stays put before it moves up to the open ones. */
+const SETTLE_BEFORE_SORT_MS = 450;
 
 export function TaskColumn({
   adhoc,
@@ -158,8 +185,12 @@ export function TaskColumn({
     };
     return list.map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map(({ t }) => t);
   };
-  const [dropTarget, setDropTarget] = useState<"today" | "rest" | null>(null);
   const today = localDate(new Date());
+  const [order, saveOrder] = useTaskOrder();
+  /** Where a just-dropped task now belongs, until its saved state catches up (so it moves at once). */
+  const [pendingZone, setPendingZone] = useState<Record<string, DropZoneId>>({});
+  /** An open task just dropped among finished ones in Today: it stays there a moment before moving up. */
+  const [heldAmongDone, setHeldAmongDone] = useState<string | null>(null);
 
   // Edits and Recommended may be keyed by any of a task's ids; the canonical one wins. A description
   // you edited beats one a refresh brought up to date with new information.
@@ -206,9 +237,18 @@ export function TaskColumn({
   const foldedMine = folded[0] as Folded<(typeof rawMine)[number]>[];
   const foldedProjects = folded[1] as Folded<(typeof rawProjects)[number]>[];
   const foldedInbox = folded[2] as Folded<(typeof rawInbox)[number]>[];
-  const inbox = splitToday(applyTaskState(foldedInbox, taskStates), today);
-  const projectTasks = splitToday(applyTaskState(foldedProjects, taskStates), today);
-  const mine = splitToday(applyTaskState(foldedMine, taskStates), today);
+  // A task just dragged into or out of Today shows in its new place right away.
+  const split = <T extends { id: string; todayOn: string | null; done: boolean }>(list: T[]) => {
+    const { planned, rest } = splitToday(list, today);
+    const movedIn = rest.filter((t) => pendingZone[t.id] === "today").map((t) => ({ ...t, carriedFrom: null }));
+    return {
+      planned: [...planned.filter((t) => pendingZone[t.id] !== "rest"), ...movedIn],
+      rest: [...rest.filter((t) => pendingZone[t.id] !== "today"), ...planned.filter((t) => pendingZone[t.id] === "rest")],
+    };
+  };
+  const inbox = split(applyTaskState(foldedInbox, taskStates));
+  const projectTasks = split(applyTaskState(foldedProjects, taskStates));
+  const mine = split(applyTaskState(foldedMine, taskStates));
 
   // Every open task's title, so a double check can spot duplicates.
   const openList = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest].filter((t) => !t.done);
@@ -217,15 +257,17 @@ export function TaskColumn({
   const duplicates = findDuplicates(openList, notDuplicates);
   const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, running, onChange };
 
-  // Today's plan pulls from every group; open tasks first.
-  const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
-    (a, b) => Number(a.done) - Number(b.done),
+  // Today's plan pulls from every group, in the order you arranged it, open tasks first (a task
+  // just dropped among the finished ones waits there a moment before moving up).
+  const doneish = (t: { id: string; done: boolean }) => t.done || t.id === heldAmongDone;
+  const planned = applyOrder([...mine.planned, ...projectTasks.planned, ...inbox.planned], order.today).sort(
+    (a, b) => Number(doneish(a)) - Number(doneish(b)),
   );
   const estimate = (t: (typeof planned)[number]) =>
     (t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null)?.estimate_minutes ?? 0;
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
   const todayGroup = (
-    <section className={`today-plan${planned.length ? "" : " empty"}${dropTarget === "today" ? " drop" : ""}`}>
+    <DropZone zone="today" className={`today-plan${planned.length ? "" : " empty"}`}>
       <h4 className="section-title today-heading">
         Today's tasks
         {planned.length > 0 && (
@@ -256,37 +298,46 @@ export function TaskColumn({
           />
         ))
       )}
-    </section>
+    </DropZone>
   );
 
-  // Dropping a task on Today plans it; dropping it anywhere else in the column unplans it.
-  const zoneOf = (e: React.DragEvent) => ((e.target as HTMLElement).closest(".today-plan") ? "today" : "rest");
-  const plannedIds = new Set(planned.map((t) => t.id));
+  // All tasks, in your order (priority order for anything you haven't arranged).
+  const allTasks = applyOrder(byPriority(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest]), order.all);
+
+  // Dropping a task puts it where you let go: in Today or All tasks, before the card it landed above.
+  // Dropping on Today plans it; dropping it in All tasks unplans it.
+  const moveTask = async (id: string, to: DropZoneId, before: string | null, flip: Flip) => {
+    const list = to === "today" ? "today" : "all";
+    const ids = (to === "today" ? planned : allTasks).map((t) => t.id);
+    const next = reorder(ids, id, before);
+    saveOrder(list, next);
+    // An open task dropped among finished ones in Today lands there, then glides up to the open ones.
+    const task = [...planned, ...allTasks].find((t) => t.id === id);
+    if (to === "today" && task && !task.done) {
+      const doneAt = next.findIndex((x) => x !== id && planned.find((t) => t.id === x)?.done);
+      if (doneAt >= 0 && next.indexOf(id) > doneAt) {
+        setHeldAmongDone(id);
+        setTimeout(() => flip(() => setHeldAmongDone(null)), SETTLE_BEFORE_SORT_MS);
+      }
+    }
+    const inToday = planned.some((t) => t.id === id);
+    if ((to === "today") === inToday) return;
+    setPendingZone((cur) => ({ ...cur, [id]: to }));
+    await setTaskState(id, { todayOn: to === "today" ? today : null });
+    onChange();
+  };
+  // Drop the instant-move override once the saved state agrees.
+  useEffect(() => {
+    const settled = Object.keys(pendingZone).filter((id) => {
+      const on = taskStates.get(id)?.todayOn ?? null;
+      return (pendingZone[id] === "today") === (on === today);
+    });
+    if (settled.length) setPendingZone((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !settled.includes(id))));
+  }, [taskStates]);
 
   return (
-    <section
-      className={`column${dropTarget === "rest" ? " drop" : ""}`}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setDropTarget(zoneOf(e));
-      }}
-      onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null);
-      }}
-      onDrop={async (e) => {
-        const id = e.dataTransfer.getData(TASK_DRAG_TYPE);
-        setDropTarget(null);
-        if (!id) return;
-        e.preventDefault();
-        const toToday = zoneOf(e) === "today";
-        if (toToday === plannedIds.has(id)) return;
-        await setTaskState(id, { todayOn: toToday ? today : null });
-        onChange();
-      }}
-      onDragEnd={() => setDropTarget(null)}
-    >
+    <TaskDragProvider onDrop={moveTask}>
+    <DropZone zone="rest" className="column">
       <Inbox replies={adhoc.replies} states={taskStates} drafts={drafts} running={running} onChange={onChange} />
       <header className="column-header">
         <div className="title-line">
@@ -326,7 +377,7 @@ export function TaskColumn({
           {todayGroup}
           <Group
             title="All tasks"
-            tasks={keep(byPriority([...projectTasks.rest, ...mine.rest]), { ...filter, sources: [] })}
+            tasks={keep(applyOrder(byPriority([...projectTasks.rest, ...mine.rest]), order.all), { ...filter, sources: [] })}
             empty={filterProject.snapshot ? "Nothing on you for this project." : "Refresh this project to find your tasks."}
             filtered={isFiltering({ ...filter, sources: [] })}
             controls={filters}
@@ -338,7 +389,7 @@ export function TaskColumn({
           {todayGroup}
           <Group
             title="All tasks"
-            tasks={keep(byPriority([...projectTasks.rest, ...mine.rest, ...inbox.rest]))}
+            tasks={keep(allTasks)}
             empty="No tasks yet. Add one above, or refresh to find them in your projects, Slack and email."
             filtered={filtering}
             controls={filters}
@@ -346,6 +397,7 @@ export function TaskColumn({
           />
         </>
       )}
-    </section>
+    </DropZone>
+    </TaskDragProvider>
   );
 }

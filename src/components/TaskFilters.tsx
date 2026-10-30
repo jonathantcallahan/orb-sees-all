@@ -88,12 +88,13 @@ function MultiFilter<V extends string>({
   }, [open]);
 
   const names = options.filter(([v]) => values.includes(v)).map(([, l]) => l);
-  const text = names.length === 0 ? anyLabel : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
+  // One pick shows its name; several show the category and how many ("Priority · 2").
+  const text = names.length === 0 ? anyLabel : names.length === 1 ? names[0] : `${anyLabel.replace(/^Any /, "")} · ${names.length}`;
   const toggle = (v: V) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
   return (
     <div className="multi-filter" ref={ref}>
       <button
-        className={`filter-select${values.length ? " on" : ""}`}
+        className={`filter-select${values.length ? " on" : ""}${open ? " open" : ""}`}
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -101,19 +102,31 @@ function MultiFilter<V extends string>({
         onClick={() => setOpen(!open)}
       >
         {text}
+        <svg className="filter-chevron" width="8" height="8" viewBox="0 0 8 8" aria-hidden>
+          <path d="M1.5 3 4 5.5 6.5 3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
       {open && (
         <div className="multi-filter-menu" role="listbox" aria-multiselectable aria-label={label}>
-          {options.map(([v, l]) => (
-            <label key={v} className="multi-filter-option">
-              <input type="checkbox" checked={values.includes(v)} onChange={() => toggle(v)} />
-              {l}
-            </label>
-          ))}
+          {options.map(([v, l]) => {
+            const on = values.includes(v);
+            return (
+              <button key={v} role="option" aria-selected={on} className={`multi-filter-option${on ? " on" : ""}`} onClick={() => toggle(v)}>
+                <span className="multi-filter-check" aria-hidden>
+                  <svg width="10" height="10" viewBox="0 0 10 10">
+                    <path d="M2.2 5.2 4.2 7.2 7.8 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                {l}
+              </button>
+            );
+          })}
           {values.length > 0 && (
-            <button className="link-button small more-link multi-filter-clear" onClick={() => onChange([])}>
-              Clear
-            </button>
+            <div className="multi-filter-footer">
+              <button className="link-button small more-link" onClick={() => onChange([])}>
+                Clear
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -169,11 +182,11 @@ export function TaskFilters({ filter, onChange, showSource = true }: { filter: T
   return (
     <div className="task-filters">
       {showSource && (
-        <MultiFilter label="Filter by source" anyLabel="Any source" values={filter.sources} options={SOURCES} onChange={(sources) => onChange({ ...filter, sources })} />
+        <MultiFilter label="Filter by source" anyLabel="Source" values={filter.sources} options={SOURCES} onChange={(sources) => onChange({ ...filter, sources })} />
       )}
-      <MultiFilter label="Filter by status" anyLabel="Any status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
-      <MultiFilter label="Filter by priority" anyLabel="Any priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
-      <MultiFilter label="Filter by due date" anyLabel="Any due date" values={filter.dues} options={DUES} onChange={(dues) => onChange({ ...filter, dues })} />
+      <MultiFilter label="Filter by status" anyLabel="Status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
+      <MultiFilter label="Filter by priority" anyLabel="Priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
+      <MultiFilter label="Filter by due date" anyLabel="Due" values={filter.dues} options={DUES} onChange={(dues) => onChange({ ...filter, dues })} />
       <MultiFilter label="Filter by what Orb can do" anyLabel="Orb" values={filter.assistance} options={ASSISTANCE} onChange={(assistance) => onChange({ ...filter, assistance })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>

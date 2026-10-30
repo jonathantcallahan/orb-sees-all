@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { NewsItem } from "../schema";
 import { setTaskState, type Project, type StoredReading } from "../db";
 import { stateOf, type TaskState } from "../tasks";
@@ -6,7 +6,7 @@ import { refreshReading } from "../jobs";
 import { projectName } from "../projects";
 import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
-import { ExternalLink, RefreshButton } from "./common";
+import { ExternalLink, RefreshButton, Reveal } from "./common";
 
 interface Update {
   key: string;
@@ -105,6 +105,9 @@ export function DailyReading({
   busy: boolean;
   onChange: () => void;
 }) {
+  // Open or folded away, remembered between launches.
+  const [open, setOpen] = useState(() => localStorage.getItem("briefing-open") !== "0");
+  useEffect(() => localStorage.setItem("briefing-open", open ? "1" : "0"), [open]);
   const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
   const updates = collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed);
@@ -113,26 +116,35 @@ export function DailyReading({
     <section className="reading">
       <header className="column-header">
         <h4 className="section-title">Daily briefing</h4>
-        <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
+        <div className="row reading-header-actions">
+          <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
+          <button className="task-toggle" aria-expanded={open} aria-label={open ? "Hide the briefing" : "Show the briefing"} onClick={() => setOpen(!open)}>
+            <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+              <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
       </header>
-      {current ? (
-        <p className="reading-text">{current.text}</p>
-      ) : (
-        <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
-      )}
+      <Reveal open={open} className="reading-body">
+        {current ? (
+          <p className="reading-text">{current.text}</p>
+        ) : (
+          <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
+        )}
 
-      {updates.length > 0 && (
-        <>
-          <h4 className="section-title">Updates</h4>
-          <UpdateStack
-            updates={updates}
-            onRead={async (u) => {
-              await setTaskState(u.key, { dismissed: true });
-              onChange();
-            }}
-          />
-        </>
-      )}
+        {updates.length > 0 && (
+          <>
+            <h4 className="section-title">Updates</h4>
+            <UpdateStack
+              updates={updates}
+              onRead={async (u) => {
+                await setTaskState(u.key, { dismissed: true });
+                onChange();
+              }}
+            />
+          </>
+        )}
+      </Reveal>
     </section>
   );
 }
