@@ -1,6 +1,6 @@
 import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 
 let conn: Promise<Database> | null = null;
@@ -146,6 +146,19 @@ export async function saveDescriptionOverride(taskId: string, text: string | nul
 
 export interface StoredTaskCheck extends TaskCheck {
   at: string;
+}
+
+/** Priorities the user set by hand, keyed by task id. */
+export async function getPriorityOverrides(): Promise<Record<string, Priority>> {
+  return json<Record<string, Priority>>(await getSetting("priority_overrides")) ?? {};
+}
+
+/** Sets a task's priority by hand, or with null goes back to the automatic one. */
+export async function setPriorityOverride(taskId: string, priority: Priority | null) {
+  const all = await getPriorityOverrides();
+  if (priority) all[taskId] = priority;
+  else delete all[taskId];
+  await setSetting("priority_overrides", JSON.stringify(all));
 }
 
 /** Claude Code sessions Orb opened for tasks, keyed by task id. */

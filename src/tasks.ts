@@ -168,12 +168,18 @@ export type EffectivePriority = Priority | "blocking";
  * "blocking"; anything else in a P0 project is critical; otherwise Claude's
  * assessment stands (null until assessed).
  */
+/**
+ * A task's priority: Blocking always wins; then one the user set by hand; then
+ * critical for tasks in P0 projects; then Claude's assessment.
+ */
 export function taskPriority(
   assessed: Priority | null | undefined,
   projectPriority?: ProjectPriority | null,
   blocking = false,
+  manual?: Priority | null,
 ): EffectivePriority | null {
   if (blocking) return "blocking";
+  if (manual) return manual;
   if (projectPriority === "P0") return "critical";
   return assessed ?? null;
 }

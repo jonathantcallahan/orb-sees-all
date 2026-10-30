@@ -2,15 +2,16 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, clearTaskCheck, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { clearAssessment, clearTaskCheck, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, planTask } from "../jobs";
-import type { Assessment, Automation, FollowUp, ManualAssessment, ProjectPriority } from "../schema";
+import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { localDate } from "../scheduler";
 import { ExternalLink } from "./common";
 import { linkSession, useSessionProgress, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
+import { CLAUDE_ICON } from "../linkIcons";
 import { collectLinks } from "../links";
 
 export interface CardTask {
@@ -275,6 +276,59 @@ const DISMISS = "dismiss";
 /** Drag-and-drop payload type for moving tasks in and out of Today. */
 export const TASK_DRAG_TYPE = "application/x-orb-task";
 
+const PICKABLE: Priority[] = ["critical", "high", "medium", "low"];
+const AUTO = "__auto";
+
+/**
+ * The priority badge, with a menu laid over it to set the priority by hand.
+ * Blocking can't be overridden, so it stays a plain badge.
+ */
+function PriorityBadge({
+  task,
+  priority,
+  manual,
+  automatic,
+  onChange,
+}: {
+  task: CardTask;
+  priority: EffectivePriority | null;
+  manual: Priority | undefined;
+  automatic: EffectivePriority | null;
+  onChange: () => void;
+}) {
+  if (priority === "blocking") {
+    return (
+      <span className="badge priority blocking" title="This task is holding its project up, so it's always top priority">
+        {PRIORITY_LABEL.blocking}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`badge priority menu-badge ${priority ?? "unset hover-only"}${manual ? " manual" : ""}`}
+      title={manual ? "Priority set by you" : "Set the priority"}
+    >
+      {priority ? PRIORITY_LABEL[priority] : "Priority"}
+      <select
+        value={manual ?? AUTO}
+        aria-label="Priority"
+        onChange={async (e) => {
+          await setPriorityOverride(task.id, e.target.value === AUTO ? null : (e.target.value as Priority));
+          onChange();
+        }}
+      >
+        {PICKABLE.map((p) => (
+          <option key={p} value={p}>
+            {PRIORITY_LABEL[p]}
+          </option>
+        ))}
+        <option disabled>──────</option>
+        <option value={AUTO}>Automatic{automatic ? ` (${PRIORITY_LABEL[automatic]})` : ""}</option>
+      </select>
+    </span>
+  );
+}
+
 function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
   // A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
   return (
@@ -523,6 +577,7 @@ export function TaskCard({
   assessing,
   check,
   sessionLink,
+  manualPriority,
   openTitles = [],
   compact = false,
   onChange,
@@ -538,6 +593,8 @@ export function TaskCard({
   check?: StoredTaskCheck;
   /** The Claude Code session Orb opened for this task, if any. */
   sessionLink?: SessionLink;
+  /** A priority the user set by hand, overriding Claude's. */
+  manualPriority?: Priority;
   /** Titles of the user's other open tasks, for spotting duplicates. */
   openTitles?: string[];
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
@@ -555,7 +612,9 @@ export function TaskCard({
   const [linksOpen, setLinksOpen] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
-  const priority = taskPriority(assessment?.priority, task.projectPriority, task.blocking);
+  const priority = taskPriority(assessment?.priority, task.projectPriority, task.blocking, manualPriority);
+  /** What the priority would be without the user's pick. */
+  const automaticPriority = taskPriority(assessment?.priority, task.projectPriority, task.blocking);
   // Show the user's own words when there are any; otherwise Claude's draft.
   const draft = manual && !task.description ? manualAssessment?.description : null;
   const description = task.description || draft;
@@ -685,16 +744,51 @@ export function TaskCard({
     ],
     [description],
   );
+  // Double check sits at the right end of the More / Edit row, shown on hover (and while it runs).
+  const checkAction = linked ? null : checkStatus ? (
+    <span className="muted small checking row-end" title={checkStatus}>
+      <span className="spin">✦</span> {checkStatus}…
+    </span>
+  ) : (
+    <button
+      className="link-button small more-link row-end hover-only"
+      onClick={runCheck}
+      title="Have Claude check the task was captured right, is still needed, and isn't a duplicate"
+    >
+      Double check
+    </button>
+  );
   const linksToggle =
     links.length > 0 ? (
       <button className="link-button small more-link" onClick={() => setLinksOpen(!linksOpen)} aria-expanded={linksOpen}>
         {linksOpen ? "Hide links" : `Show links (${links.length})`}
       </button>
     ) : null;
+  const descriptionActions = (
+    <>
+      {linksToggle}
+      {checkAction}
+    </>
+  );
   const setStateAndRefresh = async (patch: Parameters<typeof setTaskState>[1]) => {
     await setTaskState(task.id, patch);
     onChange();
   };
+
+  // Opens the task in Claude, like the Slack icon next to a project's name opens its channel.
+  const claudeIcon = (
+    <button
+      className="claude-link"
+      onClick={(e) => {
+        e.stopPropagation();
+        openInClaude();
+      }}
+      title={linked ? "Open the Claude Code session working on this task" : "Open this task in a new Claude Code session"}
+      aria-label="Open in Claude"
+    >
+      <img src={CLAUDE_ICON} width={12} height={12} alt="" />
+    </button>
+  );
 
   const drag = {
     draggable: true,
@@ -714,10 +808,13 @@ export function TaskCard({
         }}
         title="Click for details"
       >
-        <span className="task-title">{task.title}</span>
+        <span className="task-title-wrap">
+          <span className="task-title">{task.title}</span>
+          {claudeIcon}
+        </span>
         {assessment?.estimate_minutes != null && <span className="estimate">~{formatMinutes(assessment.estimate_minutes)}</span>}
         {task.recommended && <RecommendedBadge />}
-        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
+        <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
         <StatusSelect task={task} onChange={onChange} />
       </article>
     );
@@ -726,16 +823,19 @@ export function TaskCard({
   return (
     <article className={`card task-card status-${task.status}${task.done ? " done" : ""}`} {...drag}>
       <header className="task-card-header">
-        <ExternalLink href={task.link} className="task-title">
-          {task.title}
-        </ExternalLink>
+        <span className="task-title-wrap">
+          <ExternalLink href={task.link} className="task-title">
+            {task.title}
+          </ExternalLink>
+          {claudeIcon}
+        </span>
         {assessment?.estimate_minutes != null && (
           <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
             ~{formatMinutes(assessment.estimate_minutes)}
           </span>
         )}
         {task.recommended && <RecommendedBadge />}
-        {priority && <span className={`badge priority ${priority}`}>{PRIORITY_LABEL[priority]}</span>}
+        <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
         <StatusSelect task={task} onChange={onChange} />
       </header>
 
@@ -758,7 +858,7 @@ export function TaskCard({
         <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
       )}
       {description ? (
-        <Description text={description} onEdit={() => setEditing(true)} actions={linksToggle} />
+        <Description text={description} onEdit={() => setEditing(true)} actions={descriptionActions} />
       ) : (
         manual && (
           <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
@@ -767,7 +867,7 @@ export function TaskCard({
         )
       )}
 
-      {!description && linksToggle && <div className="description-actions small">{linksToggle}</div>}
+      {!description && (linksToggle || checkAction) && <div className="description-actions small">{descriptionActions}</div>}
       {linksOpen && <LinkChips links={links} />}
 
       {assessment ? (
@@ -803,33 +903,13 @@ export function TaskCard({
         />
       )}
 
-      <footer className="task-card-actions">
-        {compact && (
+      {compact && (
+        <footer className="task-card-actions">
           <button className="link-button small muted" onClick={() => setExpanded(false)}>
             Collapse
           </button>
-        )}
-        <button
-          className="link-button small"
-          onClick={openInClaude}
-          title={linked ? "Open the Claude Code session working on this task" : "Open a new Claude Code session with this task filled in"}
-        >
-          Open in Claude
-        </button>
-        {linked ? null : checkStatus ? (
-          <span className="muted small checking footer-end" title={checkStatus}>
-            <span className="spin">✦</span> {checkStatus}…
-          </span>
-        ) : (
-          <button
-            className="link-button small more-link footer-end hover-only"
-            onClick={runCheck}
-            title="Have Claude check the task was captured right, is still needed, and isn't a duplicate"
-          >
-            Double check
-          </button>
-        )}
-      </footer>
+        </footer>
+      )}
 
       {showPlan && plan && !planning && (
         <PlanModal

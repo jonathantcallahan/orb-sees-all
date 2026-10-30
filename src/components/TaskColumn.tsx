@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
-import type { ManualAssessment } from "../schema";
+import type { ManualAssessment, Priority } from "../schema";
 import { applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, splitToday, taskPriority, type TaskState } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
@@ -21,6 +21,7 @@ function Group({
   assessments,
   checks,
   sessionLinks,
+  priorityOverrides,
   openTitles,
   running,
   filtered = false,
@@ -38,6 +39,7 @@ function Group({
   assessments: Map<string, ManualAssessment>;
   checks: Record<string, StoredTaskCheck>;
   sessionLinks: Record<string, SessionLink>;
+  priorityOverrides: Record<string, Priority>;
   openTitles: string[];
   running: string[];
   onChange: () => void;
@@ -61,6 +63,7 @@ function Group({
           assessing={running.includes("assess")}
           check={checks[t.id]}
           sessionLink={sessionLinks[t.id]}
+          manualPriority={priorityOverrides[t.id]}
           openTitles={openTitles}
           compact
           onChange={onChange}
@@ -84,6 +87,7 @@ export function TaskColumn({
   descriptionOverrides,
   taskChecks,
   sessionLinks,
+  priorityOverrides,
   running,
   onChange,
 }: {
@@ -106,6 +110,8 @@ export function TaskColumn({
   taskChecks: Record<string, StoredTaskCheck>;
   /** Claude Code sessions opened for tasks, by task id. */
   sessionLinks: Record<string, SessionLink>;
+  /** Priorities the user set by hand, by task id. */
+  priorityOverrides: Record<string, Priority>;
   running: string[];
   onChange: () => void;
 }) {
@@ -115,7 +121,12 @@ export function TaskColumn({
   const filtering = isFiltering(filter);
   /** Effective priority, matching the card's badge: tasks in P0 projects are critical. */
   const priorityOf = (t: CardTask) =>
-    taskPriority((t.source === "manual" ? assessments.get(t.id) : t.assessment)?.priority, t.projectPriority, t.blocking);
+    taskPriority(
+      (t.source === "manual" ? assessments.get(t.id) : t.assessment)?.priority,
+      t.projectPriority,
+      t.blocking,
+      priorityOverrides[t.id],
+    );
   const filters = <TaskFilters filter={filter} onChange={setFilter} />;
   const keep = <T extends CardTask>(list: T[]) =>
     filtering ? list.filter((t) => matchesFilter({ status: t.status, priority: priorityOf(t), recommended: t.recommended }, filter)) : list;
@@ -164,7 +175,7 @@ export function TaskColumn({
   const openTitles = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest]
     .filter((t) => !t.done)
     .map((t) => t.title);
-  const shared = { plans, assessments, checks: taskChecks, sessionLinks, openTitles, running, onChange };
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTitles, running, onChange };
 
   // Today's plan pulls from every group; open tasks first.
   const planned = [...mine.planned, ...projectTasks.planned, ...inbox.planned].sort(
@@ -196,6 +207,7 @@ export function TaskColumn({
             assessing={running.includes("assess")}
             check={taskChecks[t.id]}
             sessionLink={sessionLinks[t.id]}
+            manualPriority={priorityOverrides[t.id]}
             openTitles={openTitles}
             onChange={onChange}
           />

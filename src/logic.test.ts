@@ -466,3 +466,12 @@ describe("open in Claude", () => {
     expect(url).not.toContain("+");
   });
 });
+
+describe("manual priority", () => {
+  it("beats Claude's rating and P0, but never Blocking", () => {
+    expect(taskPriority("low", null, false, "critical")).toBe("critical");
+    expect(taskPriority("high", "P0", false, "low")).toBe("low");
+    expect(taskPriority("high", "P0", true, "low")).toBe("blocking");
+    expect(taskPriority("high", "P0", false, undefined)).toBe("critical");
+  });
+});

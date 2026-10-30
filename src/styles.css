@@ -299,9 +299,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Task status, estimate and Today controls */
 .task-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 /* The status badge; an invisible native menu covers it, so clicking opens the usual list. */
-.status-badge { position: relative; flex-shrink: 0; cursor: pointer; }
-.status-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
-.status-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status-badge, .menu-badge { position: relative; flex-shrink: 0; cursor: pointer; }
+.status-badge select, .menu-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.status-badge:focus-within, .menu-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 .status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 .status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
@@ -594,7 +594,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .cta-primary:hover { opacity: 0.88; }
 
 /* Description: cut to two lines with "…" and a gray More at the end */
-.description-actions { display: flex; gap: 10px; align-items: baseline; }
+.description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; }
 .link-button.more-link { color: var(--muted); }
 
 /* Plan details modal, centered */
@@ -668,7 +668,19 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { transition: filter 0.15s ease; }
 .card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { filter: grayscale(1); }
 
-/* Double check sits at the footer's right edge and appears when you hover the card. */
-.task-card-actions .footer-end { margin-left: auto; }
+/* Double check sits at the right end of the More / Edit row and appears when you hover the card. */
+.description-actions .row-end { margin-left: auto; }
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }
 .card:hover .hover-only, .card .hover-only:focus-visible { opacity: 1; }
+
+/* A priority you set by hand gets a thin outline; an unrated task offers "Priority" on hover. */
+.badge.priority.manual { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 45%, transparent); }
+.badge.priority.unset { color: var(--muted); }
+
+/* Task title with the Claude icon right after it; the title truncates, the icon stays. */
+.task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.task-row .task-title-wrap { align-items: center; }
+.task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; }
+.claude-link { flex: none; display: inline-grid; place-items: center; padding: 0; border: none; background: none; line-height: 0; opacity: 0.85; cursor: pointer; }
+.claude-link:hover { opacity: 1; }
+.task-card-header .claude-link { align-self: center; }

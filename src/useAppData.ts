@@ -1,3 +1,4 @@
+import type { Priority } from "./schema";
 import type { SessionLink } from "./sessions";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as db from "./db";
@@ -21,11 +22,12 @@ export interface AppData {
   descriptionOverrides: Record<string, string>;
   taskChecks: Record<string, db.StoredTaskCheck>;
   sessionLinks: Record<string, SessionLink>;
+  priorityOverrides: Record<string, Priority>;
   lastFullRefresh: string | null;
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -40,9 +42,10 @@ async function loadAll(): Promise<AppData> {
     db.getDescriptionOverrides(),
     db.getTaskChecks(),
     db.getSessionLinks(),
+    db.getPriorityOverrides(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */
