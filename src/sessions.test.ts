@@ -150,3 +150,17 @@ describe("re-checked steps", () => {
     });
   });
 });
+
+describe("discussing the plan", () => {
+  it("opens the session with the plan and holds the work until it's approved", async () => {
+    const { discussPrompt, approvedPlanMessage } = await import("./openInClaude");
+    const p = discussPrompt({ id: "t-1", title: "Confirm refunds" }, "Draft the summary", [
+      { title: "Draft the summary", by: "claude" },
+      { title: "Post it", by: "you" },
+    ]);
+    expect(p).toMatch(/^Orb task: t-1\n/);
+    expect(p).toContain("2. [Me] Post it");
+    expect(p).toContain("Don't start the work yet.");
+    expect(approvedPlanMessage()).toMatch(/^The plan's agreed\./);
+  });
+});

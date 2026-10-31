@@ -120,9 +120,9 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
 
   return createPortal(
     <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
-      <div className="modal plan-modal setup-modal" role="dialog" aria-label="Set up Orb Sees All" onClick={(e) => e.stopPropagation()}>
+      <div className="modal plan-modal setup-modal" role="dialog" aria-label="Set up Demian" onClick={(e) => e.stopPropagation()}>
         <header className="column-header">
-          <h2>Set up Orb Sees All</h2>
+          <h2>Set up Demian</h2>
           <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
             <CloseIcon />
           </button>

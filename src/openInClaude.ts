@@ -119,16 +119,50 @@ export function startPrompt(task: SessionTask, suggestion: string, steps: StartS
   lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
   steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
   if (task.id) lines.push(...progressInstructions());
-  lines.push(
-    "",
+  lines.push("", ...workInstructions());
+  const prompt = lines.join("\n");
+  return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
+}
+
+/** How a session carries out an approved plan in the background. */
+function workInstructions(): string[] {
+  return [
     "You're running in the background: I'm not watching this conversation, and my planner tells me when you need me. So keep going on your own through your steps in order, and stop only when you need something from me.",
     "Don't do the steps marked [Me]. When one of your steps depends on an earlier step of mine, prepare everything you can without it, then ask me for that step's result (as a waiting report) and stop.",
     "When you stop for me, put everything I need to answer in the waiting report and the message just before it: the question, the options, and any draft I'm approving, since I'll read it in my planner rather than here. Ask one clear thing at a time.",
     "You can read Slack, email, Google Drive, Jira and the calendar. Don't send email, file tickets or change anything outside this session, and don't make decisions for me; ask me instead. Slack messages go to my planner as described above.",
     "When all your steps are done, write a short summary of what you did and what's left for me.",
+  ];
+}
+
+/**
+ * The prompt behind "Discuss plan": the same session Approve & start would open, but it talks the
+ * plan through with the user first and doesn't start the work until they approve it (approvedPlan).
+ */
+export function discussPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
+  const lines = [
+    ...(task.id ? [sessionMarker(task.id), ""] : []),
+    "Before you start on this task from my day planner, I'd like to talk through your suggested plan with you.",
+    "",
+    ...taskLines(task),
+  ];
+  lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
+  steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
+  if (task.id) lines.push(...progressInstructions());
+  lines.push(
+    "",
+    "Don't start the work yet. Look things up only as far as you need to answer my questions about the plan.",
+    "Open with a short take on the plan, a few sentences, and ask what I'd like to change. Then answer my questions and suggest changes where they'd help.",
+    "Whenever we agree a change to the steps (added, dropped, reworded, reordered, or moved between you and me), restate the whole plan as an [orb] plan block, with [Me] in front of my steps, so my planner shows it.",
+    "I'll tell you when the plan's agreed and you can start.",
   );
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
+}
+
+/** What the user's approval says to a session that's been discussing the plan: go, as agreed. */
+export function approvedPlanMessage(): string {
+  return ["The plan's agreed. Please carry it out now, as we last stated it.", "", ...workInstructions()].join("\n");
 }
 
 /** A link that opens a new Claude Code session in Claude Desktop with `prompt` filled in (not sent). */

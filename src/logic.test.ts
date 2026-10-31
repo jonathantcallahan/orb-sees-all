@@ -559,6 +559,8 @@ describe("slack threads", () => {
   it("finds the channel and thread a permalink points at", async () => {
     const { slackThread } = await import("./projects");
     expect(slackThread("https://example.slack.com/archives/D0ABC/p1700000000000100")).toEqual({ channelId: "D0ABC", threadTs: "1700000000.000100" });
+    // Enterprise Grid addresses have an extra part.
+    expect(slackThread("https://example.enterprise.slack.com/archives/C9/p1700000000000100")).toEqual({ channelId: "C9", threadTs: "1700000000.000100" });
     expect(slackThread("https://example.slack.com/archives/C1/p1700000000000100?thread_ts=1699999999.000200&cid=C1")).toEqual({
       channelId: "C1",
       threadTs: "1699999999.000200",

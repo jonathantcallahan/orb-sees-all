@@ -5,7 +5,6 @@ import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
 import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
-import { COLORED_ICONS } from "../linkIcons";
 import { linkKind } from "../links";
 import { LinkChips } from "./LinkChips";
 import { TrackingFeed } from "./TrackingFeed";
@@ -27,11 +26,6 @@ const RACI_LABEL: Record<Raci, string> = {
   consulted: "Consulted",
   informed: "Informed",
 };
-
-/** Slack's mark, the same icon the link chips use. */
-function SlackIcon() {
-  return <img src={COLORED_ICONS.slack} width={12} height={12} alt="" />;
-}
 
 /** Message links from the project's snapshot, which carry its Slack workspace's domain. */
 function channelPermalinks(project: Project): (string | null | undefined)[] {
@@ -90,7 +84,7 @@ function ProfileModal({ project, onClose }: { project: Project; onClose: () => v
         onClose();
       }}
     >
-      <div className="modal plan-modal profile-modal" role="dialog" aria-label={`About ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
+      <div className="modal plan-modal profile-modal" role="dialog" aria-label={`Project details for ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
         <header className="column-header">
           <h2>{projectName(project)}</h2>
           <button className="icon-button" title="Close" onClick={onClose}>
@@ -455,13 +449,6 @@ export function ProjectCard({
               </span>
             )}
             {projectName(project)}
-            <ExternalLink
-              href={slackChannelUrl(project.channel_id, channelPermalinks(project))}
-              className="slack-link"
-              title={`Open #${project.name} in Slack${channelCount > 1 ? ` (${channelCount - 1} more channel${channelCount > 2 ? "s" : ""} in About)` : ""}`}
-            >
-              <SlackIcon />
-            </ExternalLink>
           </h3>
         </div>
         <div className="row project-header-right">
@@ -494,7 +481,7 @@ export function ProjectCard({
                 </button>
               )}
               <button className="work-tab about-tab" onClick={() => setAboutOpen(true)}>
-                About
+                Project details
                 {channelCount > 1 && <span className="muted"> · {channelCount} channels</span>}
               </button>
             </div>

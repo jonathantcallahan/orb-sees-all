@@ -2,14 +2,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
-import { claudeSessionUrl, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
+import { claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
-import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
+import { approveDiscussedPlan, assessPendingTasks, checkTask, continueTaskSession, discussTaskPlan, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ExternalLink, Reveal, Spinner } from "./common";
+import { CloseIcon, Reveal, Spinner } from "./common";
 import { SlackSendModal } from "./SlackPreview";
 import { GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
@@ -49,69 +49,6 @@ export interface CardTask {
 }
 
 const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null } as const;
-
-/** The full plan in a centered modal; long plans scroll inside it. Esc or the backdrop closes it. */
-function PlanModal({ title, stored, actions, onClose }: { title: string; stored: StoredPlan; actions?: ReactNode; onClose: () => void }) {
-  const { plan } = stored;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  // Rendered into <body> so the scrolling column can't clip or offset it.
-  return createPortal(
-    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
-      <div className="modal plan-modal" role="dialog" aria-label={`Plan for ${title}`} onClick={(e) => e.stopPropagation()}>
-        <header className="column-header">
-          <h2>{title}</h2>
-          <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
-            <CloseIcon />
-          </button>
-        </header>
-        <p className="plan-approach">{plan.approach}</p>
-        <ol className="plan-modal-steps">
-          {plan.steps.map((step, i) => (
-            <li key={i}>
-              <StepCircle />
-              <div>
-                <ExternalLink href={step.link} className="plan-step-title">
-                  {step.title}
-                </ExternalLink>
-                {step.by === "you" && <span className="step-by you">Human input needed</span>}
-                {step.detail && <div className="muted small">{step.detail}</div>}
-              </div>
-            </li>
-          ))}
-        </ol>
-        {plan.open_questions.length > 0 && (
-          <section>
-            <h4>Open questions</h4>
-            <ul className="small plan-list">
-              {plan.open_questions.map((q, i) => (
-                <li key={i}>{q}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {plan.sources.length > 0 && (
-          <section>
-            <h4>Sources</h4>
-            <div className="chips">
-              {plan.sources.map((src) => (
-                <ExternalLink key={src.link} href={src.link} className="chip">
-                  {src.title}
-                </ExternalLink>
-              ))}
-            </div>
-          </section>
-        )}
-        {actions && <footer className="plan-modal-actions">{actions}</footer>}
-      </div>
-    </div>,
-    document.body,
-  );
-}
 
 /** A description cut to two lines with "…" and More when it runs longer; Less and Edit follow inline. */
 /**
@@ -173,17 +110,17 @@ function Description({ text, onEdit, actions }: { text: string; onEdit?: () => v
       <div className="description-actions small">
         {truncated && (
           <button className="link-button small more-link" onClick={() => setExpanded(true)}>
-            More
+            Show more
           </button>
         )}
         {expanded && (
           <button className="link-button small more-link" onClick={() => setExpanded(false)}>
-            Less
+            Show less
           </button>
         )}
         {onEdit && (
           <button className="link-button small more-link" onClick={onEdit}>
-            Edit
+            Edit description
           </button>
         )}
         {actions}
@@ -490,7 +427,7 @@ function PlanOutline({
                 <span className="small">
                   {step.title}
                   {step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked" && (
-                    <span className="step-by you">Human input needed</span>
+                    <span className="step-by you">Human</span>
                   )}
                 </span>
               </HoverTip>
@@ -520,7 +457,7 @@ function AssessmentView({
   assessment: Assessment;
   /** Plan steps tagged by who does them, shown inside the assessment. */
   steps: OutlineStep[];
-  /** Approve & start and Show plan details, under the steps. */
+  /** Approve & start and Open in Claude, under the steps. */
   actions?: ReactNode;
   /** A plan is being written. */
   planning: boolean;
@@ -550,7 +487,6 @@ function AssessmentView({
           </svg>
         </button>
         <Reveal open={open} className="automation-body">
-          <span className="small suggestion">{assessment.suggestion}</span>
           <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} onRemind={onRemind} />
         </Reveal>
       </div>
@@ -697,6 +633,9 @@ function ClaudeSpark() {
   );
 }
 
+/** chatFor's value while the chat is open to talk the plan through. */
+const DISCUSS = -1;
+
 /** What the session is waiting on you for: the step it stopped at and what it asked. */
 interface SessionAsk {
   /** 1-based step number, or null when the only thing waiting is a message to send. */
@@ -719,12 +658,15 @@ function SessionChat({
   working,
   toSend,
   canReply,
+  askAction,
   onClose,
   onChange,
 }: {
   taskId: string;
   title: string;
   ask: SessionAsk | null;
+  /** A button in the ask box (Approve & start while discussing the plan). */
+  askAction?: ReactNode;
   messages: ChatMessage[];
   working: string | undefined;
   toSend: PendingSend[];
@@ -774,6 +716,7 @@ function SessionChat({
                 {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
               </span>
               {ask.note && <p className="chat-ask-note">{ask.note}</p>}
+              {askAction && <div className="chat-ask-action">{askAction}</div>}
             </div>
           )}
         </div>
@@ -1022,7 +965,6 @@ export function TaskCard({
   compact?: boolean;
   onChange: () => void;
 }) {
-  const [showPlan, setShowPlan] = useState(false);
   const planStatus = useJobStatus(`plan:${task.id}`);
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
   const progress = useSessionProgress(task.id, sessionLink, onChange);
@@ -1127,6 +1069,8 @@ export function TaskCard({
     onChange();
   };
   const sessionWorking = useJobStatus(`session:${task.id}`);
+  /** The session is talking the plan through (Discuss plan) and hasn't started the work. */
+  const discussing = !!sessionLink?.discussing;
   // A blocked step's Remind: the session drafts a nudge where the step was asked and hands it over
   // to review and send, like any message. It isn't tied to the step, so sending it doesn't finish it.
   const remind =
@@ -1147,7 +1091,7 @@ export function TaskCard({
   const recheckSteps = () => progress && recheckSessionSteps(task.id, task.title, outlineSteps, progress).then(onChange, onChange);
   const transcriptKey = progress ? `${progress.reports ?? 0}:${progress.messages?.length ?? 0}` : null;
   useEffect(() => {
-    if (!sessionLink?.sessionId || !progress?.found || sessionWorking || recheckStatus) return;
+    if (!sessionLink?.sessionId || discussing || !progress?.found || sessionWorking || recheckStatus) return;
     if (transcriptKey === sessionLink.recheckedKey) return;
     if (looksOutOfSync(outlineSteps.map((st) => st.progress))) recheckSteps();
   }, [transcriptKey, sessionWorking]);
@@ -1157,29 +1101,60 @@ export function TaskCard({
   useEffect(() => {
     const changed = anyBlocked !== wasBlocked.current;
     wasBlocked.current = anyBlocked;
-    if (!sessionLink) return;
+    if (!sessionLink || discussing) return;
     if (anyBlocked && task.status !== "blocked" && task.status !== "done") setTaskState(task.id, { status: "blocked" }).then(onChange);
     else if (!anyBlocked && changed && task.status === "blocked") setTaskState(task.id, { status: "in_progress" }).then(onChange);
   }, [anyBlocked]);
   const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
   const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
   const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];
-  const needsInput = !!sessionLink?.sessionId && (!!waitingStep || toSend.length > 0);
-  /** The step the chat was opened for (0 when only a message to send was waiting), or null when it's closed. */
+  const needsInput = !!sessionLink?.sessionId && !discussing && (!!waitingStep || toSend.length > 0);
+  /**
+   * What the chat was opened for: a step (its number), a message to send (0), talking the plan
+   * through (DISCUSS), or null when it's closed.
+   */
   const [chatFor, setChatFor] = useState<number | null>(null);
   const openChat = () => setChatFor(waitingIndex >= 0 ? waitingIndex + 1 : 0);
   // The chat closes once its step is resolved: Claude has moved on from it, or it's been marked done.
   const chatStepState = chatFor ? outlineSteps[chatFor - 1]?.progress?.state : undefined;
   useEffect(() => {
-    if (chatFor === null) return;
+    if (chatFor === null || chatFor === DISCUSS) return;
     if (chatFor > 0 ? chatStepState === "done" || chatStepState === "started" : toSend.length === 0 && !sessionWorking) setChatFor(null);
   }, [chatFor, chatStepState, toSend.length, sessionWorking]);
   const chatAsk: SessionAsk | null =
     chatFor === null
       ? null
-      : chatFor > 0
+      : chatFor === DISCUSS
+        ? {
+            step: null,
+            title: "Talking through the plan",
+            note: discussing
+              ? "Ask about any step or change it. The steps on the card follow what you agree; approve when you're happy."
+              : "The plan's approved and Claude is carrying it out.",
+          }
+        : chatFor > 0
         ? { step: chatFor, title: outlineSteps[chatFor - 1]?.title ?? "", note: outlineSteps[chatFor - 1]?.progress?.note }
         : { step: null, title: "Review and send the message Claude wrote" };
+  // Discuss plan opens the session in a talk-it-through mode and the chat with it; Approve & start
+  // then tells that same session to begin, with the plan as agreed.
+  const discussPlan = async () => {
+    if (!discussing && assessment) {
+      const prompt = discussPrompt(
+        { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+        assessment.suggestion,
+        outlineSteps,
+      );
+      await discussTaskPlan(task.id, prompt, onChange);
+      onChange();
+    }
+    setChatFor(DISCUSS);
+  };
+  const approvePlan = async () => {
+    await setTaskState(task.id, { status: "in_progress" });
+    approveDiscussedPlan(task.id).then(onChange, onChange);
+    onChange();
+    setChatFor(null);
+  };
   // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
   // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
   const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
@@ -1191,19 +1166,18 @@ export function TaskCard({
             Plan steps
           </button>
         )}
-        {hasClaudeSteps && assessment && !linked && !awaitingSession && (
+        {hasClaudeSteps && assessment && ((!linked && !awaitingSession) || discussing) && (
           <button
             className={canPlan ? "cta-ghost" : "cta-primary"}
-            onClick={approveAndStart}
+            onClick={discussing ? approvePlan : approveAndStart}
             title="Mark this in progress and open a Claude Code session with the whole plan; Claude does its steps and asks you for yours"
           >
             Approve & start
           </button>
         )}
-        {/* Once a session is under way, the steps and the conversation are the plan. */}
-        {plan && !planning && !sessionLink && (
-          <button className="cta-ghost" onClick={() => setShowPlan(true)}>
-            Show plan details
+        {hasClaudeSteps && assessment && ((!linked && !awaitingSession) || discussing) && (
+          <button className="cta-ghost" onClick={discussPlan} title="Talk the plan through with Claude and change its steps before it starts">
+            Discuss plan
           </button>
         )}
         {planning && (
@@ -1211,7 +1185,7 @@ export function TaskCard({
             <Spinner /> {planStatus ?? "Researching a plan"}…
           </span>
         )}
-        {sessionLink && (
+        {sessionLink && !discussing && (
           <SessionPanel
             taskId={task.id}
             link={sessionLink}
@@ -1221,13 +1195,14 @@ export function TaskCard({
             onChange={onChange}
           />
         )}
-        {sessionLink && !sessionWorking && !needsInput && !recheckStatus && <SessionStatus progress={progress} steps={outlineSteps} />}
+        {sessionLink && !discussing && !sessionWorking && !needsInput && !recheckStatus && <SessionStatus progress={progress} steps={outlineSteps} />}
         {recheckStatus ? (
           <span className="muted small session-working">
             <Spinner /> Re-checking the steps against the conversation…
           </span>
         ) : (
           sessionLink?.sessionId &&
+          !discussing &&
           progress?.found &&
           !sessionWorking && (
             <button className="link-button small more-link" onClick={recheckSteps} title="Have Orb check each step against the conversation">
@@ -1244,6 +1219,13 @@ export function TaskCard({
             working={sessionWorking}
             toSend={toSend}
             canReply={!!sessionLink.sessionId}
+            askAction={
+              chatFor === DISCUSS && discussing ? (
+                <button className="cta-primary" disabled={!!sessionWorking} onClick={approvePlan}>
+                  Approve & start
+                </button>
+              ) : undefined
+            }
             onClose={() => setChatFor(null)}
             onChange={onChange}
           />
@@ -1349,9 +1331,24 @@ export function TaskCard({
         {linksOpen ? "Hide links" : `Show links (${links.length})`}
       </button>
     ) : null;
+  // Opens the task in Claude (its session, once it has one), beside Show links.
+  const claudeLink = (
+    <button
+      className="link-button small more-link claude-link"
+      onClick={(e) => {
+        e.stopPropagation();
+        openInClaude();
+      }}
+      title={linked ? "Open the Claude Code session working on this task" : "Open this task in a new Claude Code session"}
+    >
+      <img src={CLAUDE_ICON} width={11} height={11} alt="" />
+      Open in Claude
+    </button>
+  );
   const descriptionActions = (
     <>
       {linksToggle}
+      {claudeLink}
       {checkAction}
     </>
   );
@@ -1362,20 +1359,6 @@ export function TaskCard({
     onChange();
   };
 
-  // Opens the task in Claude, like the Slack icon next to a project's name opens its channel.
-  const claudeIcon = (
-    <button
-      className="claude-link"
-      onClick={(e) => {
-        e.stopPropagation();
-        openInClaude();
-      }}
-      title={linked ? "Open the Claude Code session working on this task" : "Open this task in a new Claude Code session"}
-      aria-label="Open in Claude"
-    >
-      <img src={CLAUDE_ICON} width={12} height={12} alt="" />
-    </button>
-  );
 
   const drag = useTaskDrag(task.id, cardRef);
 
@@ -1402,7 +1385,6 @@ export function TaskCard({
         <span className="task-title" title={task.title}>
           {task.title}
         </span>
-        {claudeIcon}
       </span>
       {assessment?.estimate_minutes != null && (
         <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
@@ -1552,25 +1534,6 @@ export function TaskCard({
         </div>
       </div>
 
-      {showPlan && plan && !planning && (
-        <PlanModal
-          title={task.title}
-          stored={plan}
-          onClose={() => setShowPlan(false)}
-          actions={
-            <>
-              {hasClaudeSteps && assessment && !linked && !awaitingSession && (
-                <button className="cta-primary" onClick={() => { setShowPlan(false); approveAndStart(); }}>
-                  Approve & start
-                </button>
-              )}
-              <button className="link-button small" onClick={openInClaude}>
-                Open in Claude
-              </button>
-            </>
-          }
-        />
-      )}
     </article>
   );
 }

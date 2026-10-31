@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Orb Sees All",
+  "productName": "Demian",
   "version": "0.3.1",
   "identifier": "com.orb.app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Orb Sees All",
+        "title": "Demian",
         "width": 1440,
         "height": 920,
         "minWidth": 1000,

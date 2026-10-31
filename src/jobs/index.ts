@@ -2,7 +2,8 @@ import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackTh
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { epicCheckPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
+import { epicCheckPrompt, findAndReplyPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
+import { approvedPlanMessage } from "../openInClaude";
 import { linkSession, type PendingSend, type PlanStep, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
@@ -402,19 +403,20 @@ export function sendReminder(blockerId: string, channelId: string, text: string)
 }
 
 /** Posts the user's reply in a Slack message's thread, then marks the message handled. */
-export function sendSlackReply(replyId: string, link: string, text: string): Promise<void> {
+export function sendSlackReply(reply: QuickReply, text: string): Promise<void> {
+  const replyId = reply.id;
   return track(`reply:${replyId}`, (status) =>
     logged("reply", replyId, async () => {
-      const thread = slackThread(link);
-      if (!thread) throw new Error("Couldn't tell which Slack thread this is");
+      // The message's permalink names its thread; without one, Claude finds the message first.
+      const thread = slackThread(reply.link) ?? slackThread(reply.id);
       const { data, costUsd } = await runClaude({
         onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
-        prompt: sendReplyPrompt(thread.channelId, thread.threadTs, text),
+        prompt: thread ? sendReplyPrompt(thread.channelId, thread.threadTs, text) : findAndReplyPrompt(reply, text),
         schema: SentMessage,
-        tools: TOOLS.slackSend,
+        tools: thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
         // A mechanical post; the cheaper model is plenty.
         model: "sonnet",
-        maxTurns: 3,
+        maxTurns: thread ? 3 : 10,
       });
       if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
       await db.setTaskState(replyId, { status: "done" });
@@ -508,6 +510,24 @@ export async function startTaskSession(taskId: string, prompt: string): Promise<
   await linkSession(taskId);
   bump();
   return runTaskSession(taskId, prompt);
+}
+
+/**
+ * Opens a task's session to talk the plan through first (Discuss plan). Resolves once the task is
+ * linked, while Claude's opening turn runs on; `onTurn` hears when that turn ends.
+ */
+export async function discussTaskPlan(taskId: string, prompt: string, onTurn: () => void): Promise<void> {
+  await linkSession(taskId);
+  await db.updateSessionLink(taskId, { discussing: true });
+  bump();
+  runTaskSession(taskId, prompt).then(onTurn, onTurn);
+}
+
+/** The user approved the plan they discussed: the same session starts the work, as agreed. */
+export async function approveDiscussedPlan(taskId: string): Promise<void> {
+  await db.updateSessionLink(taskId, { discussing: false });
+  bump();
+  return continueTaskSession(taskId, approvedPlanMessage());
 }
 
 /** Continues a task's working session with the user's answer to what it asked. */

@@ -1,4 +1,4 @@
-# Orb Sees All
+# Demian
 
 A macOS desktop app that pulls your day together from Slack, Gmail, Google Calendar, Google Drive and Jira. Each project gets a status, blockers and your tasks. It also keeps a task list built from DMs, mentions and email, plus today's meetings with prep. Every weekday morning it refreshes itself.
 
@@ -39,11 +39,11 @@ If that reports no tools, run `claude` interactively, use `/login` to sign in wi
 ## 2. Install
 
 1. Download `Orb.Sees.All_<version>_universal.dmg` from the [latest release](https://github.com/jonathantcallahan/orb-sees-all/releases/latest).
-2. Open the `.dmg` and drag **Orb Sees All** into **Applications**.
+2. Open the `.dmg` and drag **Demian** into **Applications**.
 3. The app isn't signed by Apple yet, so the first time, **right-click it in Applications and choose Open**, then **Open** again in the dialog. After that it opens normally. If macOS says the app "is damaged", run this once and open it again:
 
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Orb Sees All.app"
+   xattr -dr com.apple.quarantine "/Applications/Demian.app"
    ```
 
 **Updates:** the app checks GitHub for a new version at launch and every few hours. When one is out, an **Update to x.y.z** button appears in the header. Click it, and the app downloads the update and restarts.
@@ -94,7 +94,7 @@ pnpm install-app
 
 `pnpm install-app` does four things:
 
-- builds `Orb Sees All.app`;
+- builds `Demian.app`;
 - copies it to `/Applications`, replacing any older copy;
 - quits the version that's running;
 - opens the new one.

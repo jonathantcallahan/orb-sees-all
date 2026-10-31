@@ -105,7 +105,8 @@ export function slackChannelUrl(channelId: string, permalinks: (string | null | 
  * its thread: https://x.slack.com/archives/C123/p1700000000000100?thread_ts=1699999999.000200
  */
 export function slackThread(link: string | null | undefined): { channelId: string; threadTs: string } | null {
-  const m = link?.match(/^https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/);
+  // Any Slack address: workspace.slack.com, or workspace.enterprise.slack.com on Enterprise Grid.
+  const m = link?.match(/^https:\/\/[a-z0-9.-]+\.slack\.com\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})/);
   if (!m) return null;
   const parent = link!.match(/[?&]thread_ts=(\d+\.\d+)/)?.[1];
   return { channelId: m[1], threadTs: parent ?? `${m[2]}.${m[3]}` };

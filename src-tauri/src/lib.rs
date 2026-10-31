@@ -296,13 +296,13 @@ pub fn run() {
             sessions::read_session_progress
         ])
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "Open Orb Sees All", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Demian", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &refresh, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Orb Sees All")
+                .tooltip("Demian")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -337,7 +337,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Orb Sees All");
+        .expect("error while building Demian");
 
     app.run(|_app, _event| {
         // Clicking the Dock icon while the window is hidden brings it back (macOS only).

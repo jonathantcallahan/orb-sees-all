@@ -374,6 +374,22 @@ MESSAGE>>>
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
 }
 
+/** A reply to a Slack message with no usable permalink: find the message first, then reply in its thread. */
+export function findAndReplyPrompt(r: { from: string; summary: string; where?: string | null; received?: string | null }, text: string): string {
+  return `Find this Slack message to the user and post the reply below in its thread.
+
+The message: from ${r.from}${r.where ? `, in ${r.where}` : ""}${r.received ? `, sent ${r.received}` : ""}, asking: ${r.summary}
+
+Use the Slack search and read tools to find it (search by the sender and the words they'd have used). Then call slack_send_message exactly once, with the message's channel_id and its ts as thread_ts, and the reply text exactly as written: do not reword, shorten, add to, or reformat it. If you can't find the message with confidence, don't post anything.
+
+Reply (between the markers):
+<<<MESSAGE
+${text}
+MESSAGE>>>
+
+After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one; error says why if nothing was posted.`;
+}
+
 export interface CheckBlockerInput {
   projectName: string;
   channelId: string;

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Orb Sees All.app, replaces the copy in /Applications and reopens it.
+# Builds Demian.app, replaces the copy in /Applications and reopens it.
 # If local/icons exists (your own icon art, kept out of git), the build uses it instead of the
 # repo's default icon. Make it with: pnpm tauri icon local/app-icon.png --output local/icons
 set -e
@@ -21,9 +21,15 @@ if [ -d local/icons ]; then
 else
   pnpm tauri build --bundles app --config "$UPDATER"
 fi
+osascript -e 'quit app "Demian"' 2>/dev/null || true
+# The app was called Orb Sees All before; quit that copy too and move it to the Trash.
 osascript -e 'quit app "Orb Sees All"' 2>/dev/null || true
 sleep 2
+pkill -f "Demian.app/Contents/MacOS" 2>/dev/null || true
 pkill -f "Orb Sees All.app/Contents/MacOS" 2>/dev/null || true
+if [ -d "/Applications/Orb Sees All.app" ]; then
+  osascript -e 'tell application "Finder" to delete POSIX file "/Applications/Orb Sees All.app"' >/dev/null 2>&1 || true
+fi
 sleep 1
-ditto "src-tauri/target/release/bundle/macos/Orb Sees All.app" "/Applications/Orb Sees All.app"
-open "/Applications/Orb Sees All.app"
+ditto "src-tauri/target/release/bundle/macos/Demian.app" "/Applications/Demian.app"
+open "/Applications/Demian.app"

@@ -72,7 +72,7 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
               </ExternalLink>
             )}
             <button
-              className="link-button small"
+              className="link-button small mark-read"
               disabled={leaving}
               onClick={() => {
                 setLeaving(true);

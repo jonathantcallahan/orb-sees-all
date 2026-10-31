@@ -167,9 +167,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; margin-bottom: 16px; }
 /* The orb's center sits halfway between the bottom of the window's close/minimize/zoom buttons
    (31px down: 19px plus their 12px) and the top of the stats bars. The orb is centered in its
-   285px box, with the mood line (12px × 1.45) between the box and the bars, so the box starts
-   below the column's top (16px down) by 31 − 16 + 17.4 ≈ 32px. */
-.today-column .pressure { margin-top: 32px; }
+   285px box, with the bars right under it, so the box starts below the column's top (16px down)
+   by 31 − 16 = 15px; it sits 20px lower than that, by choice. */
+.today-column .pressure { margin-top: 35px; }
 .pressure-blob { width: 100%; height: 285px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
@@ -211,10 +211,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .projects-column { overflow: hidden; padding-bottom: 0; }
 /* Likewise in Tasks: the inbox, header and add box stay put; the task groups scroll under them. */
 .tasks-column { overflow: hidden; padding-bottom: 0; }
-.task-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
+.task-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-bottom: calc(var(--mist-height) + 24px); }
 /* Its sections keep their full height and the list scrolls, rather than squeezing them. */
 .task-list > * { flex-shrink: 0; }
-.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
+.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-bottom: calc(var(--mist-height) + 24px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
    starts above the mist and runs under it to the bottom edge. */
@@ -313,7 +313,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .carried { font-size: 11px; color: var(--muted); }
 
 /* Today's plan at the top of Tasks */
-.today-plan { display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.today-plan { display: flex; flex-direction: column; gap: 7px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .today-plan.empty { background: none; padding: 0 10px; }
 .today-plan h4 { margin: 0; color: var(--text); display: flex; justify-content: space-between; }
 .today-total { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
@@ -534,10 +534,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .update-text { font-size: 13px; margin: 0; }
 .update-links { display: flex; gap: 12px; }
 .update-links .source-link { color: var(--muted); }
+/* Mark read stays gray until the pointer is over the update. */
+.update-card .mark-read { color: var(--muted); transition: color 0.15s ease; }
+.update-card:hover .mark-read { color: var(--accent); }
 .update-actions { display: flex; justify-content: space-between; align-items: center; }
 
-.slack-link { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -1px; line-height: 0; opacity: 0.85; }
-.slack-link:hover { opacity: 1; }
 .project .untrack .link-button.muted { color: var(--muted); }
 
 /* The RACI letter matches the P0-P4 badge beside it. */
@@ -627,9 +628,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .filter-select.open .filter-chevron { transform: rotate(180deg); }
 .filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
-/* Three ~36px rows and their two 6px gaps, plus a few px so the third row's border isn't cut
+/* Three ~36px rows and their two 4px gaps, plus a few px so the third row's border isn't cut
    (rows can render a pixel taller); the fourth starts below that. The count says how many scroll. */
-.inbox-list { display: flex; flex-direction: column; gap: 6px; max-height: 124px; overflow-y: auto; }
+.inbox-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; }
 .inbox-item { flex-shrink: 0; }
 
 /* A column title with its "updated" time on the same line */
@@ -685,7 +686,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
 /* High-level plan inside the assessment: numbered circles, then Approve & start */
-.plan-outline { margin-top: 4px; padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); display: flex; flex-direction: column; gap: 6px; }
+.plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
@@ -845,8 +846,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .automation .suggestion { color: var(--muted); }
 
 /* Badges stay gray until you hover their card, so color draws the eye only where you're looking. */
-.card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { transition: filter 0.15s ease; }
-.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon) { filter: grayscale(1); }
+.card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { transition: filter 0.15s ease; }
+.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { filter: grayscale(1); }
 
 /* Double check follows More / Edit / Show links on the left, and appears when you hover the card. */
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }
@@ -860,9 +861,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 /* One line, cut with an ellipsis; hovering shows the full title. */
 .task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.claude-link { flex: none; display: inline-grid; place-items: center; padding: 0; border: none; background: none; line-height: 0; opacity: 0.85; cursor: pointer; }
-.claude-link:hover { opacity: 1; }
-.task-card-header .claude-link { align-self: center; }
+/* Open in Claude beside Show links: the same small link, with Claude's mark before the words. */
+.claude-link { display: inline-flex; align-items: center; gap: 4px; }
 .tab-close { color: var(--muted); }
 .work-tab:hover .tab-close { color: var(--text); }
 
@@ -872,8 +872,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .tab-close { display: inline-grid; place-items: center; margin-left: 2px; }
 
 /* The mood word fades in when it changes, as the orb glides to its new state. */
-.orb-mood { animation: mood-in 0.8s ease; }
-@keyframes mood-in { from { opacity: 0; } }
 
 /* "updated …" stays gray even when it's from an earlier day. */
 .timestamp.stale { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
@@ -1102,6 +1100,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 }
 .chat-ask-step { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .chat-ask-step .step-circle { margin-top: 0; }
+.chat-ask-action { margin-top: 6px; }
 .chat-ask-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
 .chat-turn { font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }

@@ -30,6 +30,8 @@ export interface SessionLink {
   recheck?: StepRecheckResult;
   /** The transcript state ("reports:messages") last re-checked, so the same drift isn't re-checked twice. */
   recheckedKey?: string;
+  /** The session is talking the plan through with the user (Discuss plan) and hasn't started the work. */
+  discussing?: boolean;
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */
   lastError?: string | null;
 }

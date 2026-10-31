@@ -49,7 +49,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event_name == 'push' && github.ref_name || format('windows-test-{0}', github.run_number) }}
-          releaseName: ${{ github.event_name == 'push' && format('Orb Sees All {0}', github.ref_name) || format('Windows test build {0}', github.run_number) }}
+          releaseName: ${{ github.event_name == 'push' && format('Demian {0}', github.ref_name) || format('Windows test build {0}', github.run_number) }}
           releaseBody: "See the README for setup. First launch on a new Mac: right-click the app and choose Open. On Windows: if SmartScreen warns you, choose More info, then Run anyway."
           releaseDraft: ${{ github.event_name != 'push' }}
           args: ${{ matrix.args }}

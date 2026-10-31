@@ -188,10 +188,6 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
   return (
     <div className={`pressure mood-${mood}`}>
       <div ref={mount} className="pressure-blob" aria-hidden />
-      {/* Keyed by mood so each change fades in. */}
-      <div key={mood} className="muted small orb-mood">
-        Orb is {mood}
-      </div>
       <PressureBars pressure={pressure} />
     </div>
   );

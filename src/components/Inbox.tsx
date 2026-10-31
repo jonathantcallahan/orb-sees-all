@@ -35,12 +35,15 @@ function ResponseModal({
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sending = useJobStatus(`reply:${reply.id}`);
-  const canSend = reply.source === "slack" && !!slackThread(reply.link);
+  // Any Slack message can be answered from here: in its thread when its link names one, otherwise
+  // Claude finds the message first.
+  const canSend = reply.source === "slack";
+  const threaded = !!(slackThread(reply.link) ?? slackThread(reply.id));
   const send = async () => {
-    if (!text.trim() || !reply.link) return;
+    if (!text.trim()) return;
     try {
       setError(null);
-      await sendSlackReply(reply.id, reply.link, text.trim());
+      await sendSlackReply(reply, text.trim());
       onClose();
       onSent();
     } catch (e) {
@@ -50,7 +53,13 @@ function ResponseModal({
   return (
     <ComposeModal
       heading={`Reply to ${reply.from}`}
-      note={canSend ? `Replies in the ${reply.where ?? "Slack"} thread, as you.` : `Copy it into your reply${reply.where ? ` to "${reply.where}"` : ""}.`}
+      note={
+        canSend
+          ? threaded
+            ? `Replies in the ${reply.where ?? "Slack"} thread, as you.`
+            : `Finds ${reply.from}'s message and replies in its thread, as you.`
+          : `Copy it into your reply${reply.where ? ` to "${reply.where}"` : ""}.`
+      }
       text={text}
       status={sending ? `${sending}…` : regenerating ? "Drafting a new version…" : error ? `Couldn't send: ${error}` : null}
       failed={!!error && !sending}
