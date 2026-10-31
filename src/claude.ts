@@ -280,6 +280,8 @@ export async function runSessionTurn(
     /** More for the system prompt this turn, after SESSION_DISPLAY (e.g. the steps as Orb shows them). */
     context?: string;
     onStatus?: (s: string) => void;
+    /** Claude's text so far this turn, as it's written (streamed), each time it grows. */
+    onText?: (text: string) => void;
   },
   run: StreamingCliRunner = runCliStreaming,
 ): Promise<SessionTurn> {
@@ -303,9 +305,26 @@ export async function runSessionTurn(
     "--disallowedTools",
     ...DISALLOWED,
     ...SESSION_DISALLOWED,
+    // Text arrives as it's written, so the chat can show the reply forming.
+    ...(opts.onText ? ["--include-partial-messages"] : []),
   ];
-  const onStatus = opts.onStatus;
-  const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
+  const { onStatus, onText } = opts;
+  let text = "";
+  const out = await run("claude", args, (line) => {
+    if (onStatus) reportLine(line, onStatus);
+    if (!onText) return;
+    try {
+      const event = JSON.parse(line).event;
+      // Each of Claude's messages this turn starts a new paragraph; text deltas grow it.
+      if (event?.type === "message_start" && text) text += "\n\n";
+      else if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        text += event.delta.text;
+        onText(text);
+      }
+    } catch {
+      // Not a JSON line.
+    }
+  });
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   return {

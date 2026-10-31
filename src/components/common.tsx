@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
 import { formatWhen } from "../scheduler";
@@ -238,4 +238,53 @@ export function Reveal({ open, children, className }: { open: boolean; children:
       <div className="reveal-inner">{mounted && children}</div>
     </div>
   );
+}
+
+/** Characters a scrambling letter flips through: punctuation and a few funky ones. */
+const SCRAMBLE_GLYPHS = "!<>-_/\\[]{}=+*^?#%&$@░▒▓◆◇○●◎※¤§¶∆∑∂ƒ≈≠∞λΩ";
+const SCRAMBLE_MS = 500;
+
+/**
+ * Text that, when it changes, morphs from the old string into the new one: each letter flips
+ * through random characters (some funky) and lands on its new letter at its own random moment,
+ * all within half a second. With reduced motion it just changes.
+ */
+export function ScrambleText({ text }: { text: string }) {
+  const [shown, setShown] = useState(text);
+  const current = useRef(text);
+  useEffect(() => {
+    const from = current.current;
+    if (from === text) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      current.current = text;
+      setShown(text);
+      return;
+    }
+    const length = Math.max(from.length, text.length);
+    // Each position starts scrambling and settles at its own moment within the half second.
+    const starts = Array.from({ length }, () => Math.random() * SCRAMBLE_MS * 0.4);
+    const ends = starts.map((s) => s + SCRAMBLE_MS * 0.3 + Math.random() * (SCRAMBLE_MS * 0.6 - s));
+    const begin = performance.now();
+    let frame = 0;
+    const glyph = () => SCRAMBLE_GLYPHS[Math.floor(Math.random() * SCRAMBLE_GLYPHS.length)];
+    const step = (now: number) => {
+      const t = now - begin;
+      let out = "";
+      for (let i = 0; i < length; i++) {
+        if (t >= ends[i]) out += text[i] ?? "";
+        else if (t >= starts[i]) out += glyph();
+        else out += from[i] ?? "";
+      }
+      current.current = out;
+      setShown(out);
+      if (t < SCRAMBLE_MS) frame = requestAnimationFrame(step);
+      else {
+        current.current = text;
+        setShown(text);
+      }
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [text]);
+  return <span className="scramble">{shown}</span>;
 }

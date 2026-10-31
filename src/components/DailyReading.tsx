@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { shockOrb } from "../orbEvents";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NewsItem } from "../schema";
 import { setTaskState, type Project, type StoredReading } from "../db";
 import { stateOf, type TaskState } from "../tasks";
@@ -7,6 +8,7 @@ import { projectName } from "../projects";
 import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
 import { ExternalLink, RefreshButton, Reveal } from "./common";
+import { ExplainChat } from "./ExplainChat";
 
 interface Update {
   key: string;
@@ -42,22 +44,77 @@ function sourceLabel(link: string): string {
 }
 
 /** Stack of update cards, newest on top; marking one read reveals the next. */
+/** How long marking an update read takes: the top card leaving and the stack moving up. */
+const ADVANCE_MS = 230;
+
+/**
+ * Updates as a stack of cards, the newest on top. Marking one read slides it off to the right,
+ * fading, its button turning to "✓ Read"; the cards behind glide forward into place, one a hair
+ * after the other, and the new update's text fades in on the card that rose.
+ */
 function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Update) => Promise<void> }) {
   const [leaving, setLeaving] = useState(false);
+  /** The update whose Explain this chat is open. */
+  const [explaining, setExplaining] = useState<Update | null>(null);
+  /** The top card arrived by the stack moving up, so it doesn't also slide in. */
+  const [advanced, setAdvanced] = useState(false);
   const top = updates[0];
   // Up to two cards peek out behind the top one, as plain edges the same size as it.
   const behind = Math.min(updates.length - 1, 2);
+  // While the top card leaves, each card behind moves a step forward.
+  const place = (depth: number) => (leaving ? depth - 1 : depth);
+  // The stack holds one height while there are updates, so the page below never jumps: the tallest
+  // of the updates, measured off-screen at the stack's width, and never shrinking until they're all read.
+  const measure = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  const keys = updates.map((u) => u.key).join("|");
+  useLayoutEffect(() => {
+    const el = measure.current;
+    if (!el) return;
+    const read = () => {
+      const tallest = Math.max(0, ...[...el.children].map((c) => (c as HTMLElement).offsetHeight));
+      setHeight((h) => Math.max(h, tallest));
+    };
+    read();
+    const observer = new ResizeObserver(() => {
+      // A new width can make every update taller or shorter: measure afresh.
+      setHeight(0);
+      read();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [keys]);
   return (
-    <div className="update-stack" style={{ marginBottom: behind * 8 }}>
+    // The gap the cards behind peek into stays as long as there are updates, even once fewer are left.
+    <div className={`update-stack${leaving ? " advancing" : ""}`} style={{ marginBottom: 16, height: height || undefined }}>
+      <div ref={measure} className="update-measure" aria-hidden>
+        {updates.map((u) => (
+          <div key={u.key} className="card update-card">
+            <div className="update-meta small">
+              <span className="update-label">{u.label}</span>
+              {u.date && <span className="timestamp">{formatWhen(u.date)}</span>}
+            </div>
+            <p className="update-text">{u.text}</p>
+            <div className="update-actions small">
+              <span>&nbsp;</span>
+            </div>
+          </div>
+        ))}
+      </div>
       {Array.from({ length: behind }, (_, i) => behind - i).map((depth) => (
         <div
           key={depth}
           className="card update-card-behind"
-          style={{ transform: `translateY(${depth * 8}px) scale(${1 - depth * 0.04})`, opacity: 1 - depth * 0.3 }}
+          style={{
+            transform: `translateY(${place(depth) * 8}px) scale(${1 - place(depth) * 0.04})`,
+            opacity: 1 - place(depth) * 0.3,
+            // The nearer card springs forward first, the one behind it a beat later.
+            transitionDelay: leaving ? `${30 + (depth - 1) * 30}ms` : "0ms",
+          }}
           aria-hidden
         />
       ))}
-      <div key={top.key} className={`card update-card${leaving ? " leaving" : ""}`}>
+      <div key={top.key} className={`card update-card${leaving ? " leaving" : ""}${advanced ? " advanced" : ""}`}>
         <div className="update-meta small">
           <span className="update-label">{top.label}</span>
           {top.date && <span className="timestamp">{formatWhen(top.date)}</span>}
@@ -71,20 +128,32 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
                 {sourceLabel(top.link)}
               </ExternalLink>
             )}
+            <button className="link-button small source-link" onClick={() => setExplaining(top)}>
+              Explain
+            </button>
             <button
               className="link-button small mark-read"
               disabled={leaving}
               onClick={() => {
                 setLeaving(true);
-                // Let the card slide away before it's removed.
-                setTimeout(() => onRead(top).finally(() => setLeaving(false)), 220);
+                shockOrb();
+                // The stack moves up before the read update is removed; the card that rose is the next one.
+                setTimeout(
+                  () =>
+                    onRead(top).finally(() => {
+                      setAdvanced(true);
+                      setLeaving(false);
+                    }),
+                  ADVANCE_MS,
+                );
               }}
             >
-              Mark read
+              {leaving ? <span className="read-tick">✓ Read</span> : "Mark read"}
             </button>
           </span>
         </div>
       </div>
+      {explaining && <ExplainChat update={explaining} onClose={() => setExplaining(null)} />}
     </div>
   );
 }

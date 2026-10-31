@@ -11,7 +11,8 @@
  * through, in light theme or dark, and it shows more toward the edges, where it reflects more
  * (Fresnel), with a faint edge so it still reads against a white page.
  *
- * Its shape is a near-sphere that wobbles gently, more so under stress, and still takes the shared
+ * Its shape is a rounded bubble that swells and wobbles, more so under stress (about halfway
+ * between a real bubble's gentle wobble and the other orbs' molten lobes), and still takes the shared
  * ripples and ferrofluid spikes, so it reacts like the other orbs.
  */
 import * as THREE from "three";
@@ -23,9 +24,10 @@ import { isDark, type Theme } from "../theme";
 /** The bubble's radius at a direction: round, with a slow wobble, ripples and spikes. Also the particles' surface. */
 export const BUBBLE_SURFACE = /* glsl */ `
 float bubbleRadius(vec3 n, float t) {
-  float wobble = snoise(n * 0.9 + vec3(t * 0.35, t * 0.22, -t * 0.28)) * mix(0.045, 0.12, uStress);
-  float sway = sin(dot(n, vec3(0.0, 1.0, 0.3)) * 2.0 + t * 0.9) * 0.025;
-  return 1.12 + wobble + sway + 0.14 * ripple(n) + 0.6 * ferro(n);
+  // About halfway between a bubble's gentle wobble and the other orbs' molten lobes.
+  float wobble = snoise(n * 0.75 + vec3(t * 0.3, t * 0.2, -t * 0.25)) * mix(0.15, 0.23, uStress);
+  float sway = sin(dot(n, vec3(0.0, 1.0, 0.3)) * 2.0 + t * 0.9) * 0.045;
+  return (1.12 + wobble + sway + 0.14 * ripple(n) + 0.1 * shock(n) + 0.6 * ferro(n)) * squash(n);
 }
 float orbSurface(vec3 n) {
   return bubbleRadius(normalize(n), uTime);
@@ -151,6 +153,9 @@ export function buildOrenOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRendere
       uTime: uniforms.uTime,
       uStress: uniforms.uStress,
       uRippleAge: uniforms.uRippleAge,
+      uShockAge: uniforms.uShockAge,
+      uShockDir: uniforms.uShockDir,
+      uSquash: uniforms.uSquash,
       uRippleOrigin: uniforms.uRippleOrigin,
       uSpike: uniforms.uSpike,
       uSpikeDir: uniforms.uSpikeDir,

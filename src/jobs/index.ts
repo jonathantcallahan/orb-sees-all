@@ -453,7 +453,17 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
           })
           .join("\n");
         const context = steps ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}` : undefined;
-        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context });
+        // The reply as it's written, for the chat to show live (a few times a second at most).
+        let last = 0;
+        const onText = (text: string) => {
+          const now = Date.now();
+          if (now - last < 80) return;
+          last = now;
+          setStatus(`live:${taskId}`, text);
+        };
+        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText }).finally(
+          () => setStatus(`live:${taskId}`, null),
+        );
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
         if (turn.error) throw new Error(turn.error);
         return { value: undefined, costUsd: turn.costUsd };
@@ -521,6 +531,16 @@ export async function discussTaskPlan(taskId: string, prompt: string, onTurn: ()
   await db.updateSessionLink(taskId, { discussing: true });
   bump();
   runTaskSession(taskId, prompt).then(onTurn, onTurn);
+}
+
+/**
+ * Opens a chat explaining an update from the briefing (Explain this). It's a session like a task's,
+ * keyed by the update; resolves once it's linked, while Claude's first answer is written.
+ */
+export async function explainUpdate(key: string, prompt: string, onTurn: () => void): Promise<void> {
+  await linkSession(key);
+  bump();
+  runTaskSession(key, prompt).then(onTurn, onTurn);
 }
 
 /** The user approved the plan they discussed: the same session starts the work, as agreed. */

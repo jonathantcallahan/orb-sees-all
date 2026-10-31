@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { orbMood, type Pressure } from "../tasks";
 import { PressureBars } from "./PressureBars";
 import { NO_RIPPLE } from "./orbEffects";
-import { ORB_AGITATE_EVENT, TASK_DONE_EVENT } from "../orbEvents";
+import { ORB_AGITATE_EVENT, ORB_SHOCK_EVENT, TASK_DONE_EVENT } from "../orbEvents";
 import { buildParticles } from "./orbParticles";
 import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
@@ -67,6 +67,9 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uStress: { value: target.current },
       uRippleAge: { value: NO_RIPPLE },
       uRippleOrigin: { value: new THREE.Vector3(0, 0, 1) },
+      uShockAge: { value: NO_RIPPLE },
+      uShockDir: { value: new THREE.Vector3(1, 0, 0) },
+      uSquash: { value: 0 },
       uSpike: { value: 0 },
       uSpikeDir: { value: new THREE.Vector3(0, 0, 1) },
       uClock: { value: 0 },
@@ -115,6 +118,21 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uniforms.uRippleAge.value = 0;
     };
     window.addEventListener(TASK_DONE_EVENT, onTaskDone);
+    // An update read: a shockwave runs through the orb the way the card flew, right and a little up
+    // on screen (turned into the orb's own frame, since it spins).
+    const onShock = () => {
+      blob.updateWorldMatrix(true, false);
+      const way = new THREE.Vector3(1, 0.3, 0).normalize().applyQuaternion(blob.getWorldQuaternion(new THREE.Quaternion()).invert());
+      uniforms.uShockDir.value.copy(way.normalize());
+      uniforms.uShockAge.value = 0;
+      // The hit: a kick to the squash spring (added, so hits in quick succession stack).
+      squashVelocity += 0.45;
+    };
+    // The soft body's give: a slow, well-damped spring (about one sway a second, settling smoothly
+    // after a rebound or two) that the hit nudges; the orb gives a little along the hit and swells
+    // around it.
+    let squashVelocity = 0;
+    window.addEventListener(ORB_SHOCK_EVENT, onShock);
     // Hovering an overdue task: ferrofluid spikes grow toward the cursor and the orb chitters.
     let agitated = false;
     const onAgitate = (e: Event) => {
@@ -147,6 +165,13 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uniforms.uStress.value = stress;
       uniforms.uTime.value += dt * motion;
       if (uniforms.uRippleAge.value < NO_RIPPLE) uniforms.uRippleAge.value += dt;
+      if (uniforms.uShockAge.value < NO_RIPPLE) uniforms.uShockAge.value += dt * motion;
+      // Spring step, in small substeps so it stays stable at low frame rates.
+      for (let i = 0, n = Math.ceil(dt / 0.008); i < n; i++) {
+        const h = dt / n;
+        squashVelocity += (-42 * uniforms.uSquash.value - 4.2 * squashVelocity) * h;
+        uniforms.uSquash.value += squashVelocity * h * motion;
+      }
       uniforms.uClock.value += dt;
       // Motes fade in over about half a second when work starts, and out a little slower.
       const work = workingRef.current && motion === 1 ? 1 : 0;
@@ -180,6 +205,7 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener(TASK_DONE_EVENT, onTaskDone);
+      window.removeEventListener(ORB_SHOCK_EVENT, onShock);
       window.removeEventListener(ORB_AGITATE_EVENT, onAgitate);
       document.removeEventListener("pointerleave", onLeave);
       observer.disconnect();

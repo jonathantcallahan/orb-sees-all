@@ -1,3 +1,4 @@
+import { useOrbName } from "../orbLook";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
 import { NO_FILTER, NO_PROJECT_FILTER, type AssistanceFilter, type DueFilter, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskSource, type TaskStatus } from "../tasks";
@@ -25,10 +26,10 @@ const PRIORITIES: [PriorityFilter, string][] = [
   ["unrated", "Unrated"],
 ];
 
-/** Labelled as on the task cards. */
-const ASSISTANCE: [AssistanceFilter, string][] = [
-  ["claude", "Orb can do it"],
-  ["assisted", "Orb can help"],
+/** Labelled as on the task cards, with the current orb's name. */
+const assistance = (orb: string): [AssistanceFilter, string][] => [
+  ["claude", `${orb} can do it`],
+  ["assisted", `${orb} can help`],
   ["human", "You do it"],
   ["unassessed", "Not assessed"],
 ];
@@ -180,6 +181,7 @@ export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; on
 
 /** Source, status, priority, due date, Orb assistance and Recommended filters for All tasks. */
 export function TaskFilters({ filter, onChange, showSource = true }: { filter: TaskFilter; onChange: (f: TaskFilter) => void; showSource?: boolean }) {
+  const orbName = useOrbName();
   return (
     <div className="task-filters">
       {showSource && (
@@ -188,7 +190,7 @@ export function TaskFilters({ filter, onChange, showSource = true }: { filter: T
       <MultiFilter label="Filter by status" anyLabel="Status" values={filter.statuses} options={STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
       <MultiFilter label="Filter by priority" anyLabel="Priority" values={filter.priorities} options={PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
       <MultiFilter label="Filter by due date" anyLabel="Due" values={filter.dues} options={DUES} onChange={(dues) => onChange({ ...filter, dues })} />
-      <MultiFilter label="Filter by what Orb can do" anyLabel="Orb" values={filter.assistance} options={ASSISTANCE} onChange={(assistance) => onChange({ ...filter, assistance })} />
+      <MultiFilter label="Filter by what Orb can do" anyLabel="Orb" values={filter.assistance} options={assistance(orbName)} onChange={(assistance) => onChange({ ...filter, assistance })} />
       <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} />
     </div>
   );

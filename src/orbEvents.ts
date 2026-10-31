@@ -11,3 +11,10 @@ export const ORB_AGITATE_EVENT = "orb:agitate";
 export function setOrbAgitated(on: boolean) {
   window.dispatchEvent(new CustomEvent(ORB_AGITATE_EVENT, { detail: on }));
 }
+
+/** Tells the orb an update was just read, so a shockwave runs through it the way the card went. */
+export const ORB_SHOCK_EVENT = "orb:shock";
+
+export function shockOrb() {
+  window.dispatchEvent(new Event(ORB_SHOCK_EVENT));
+}

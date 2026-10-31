@@ -165,6 +165,35 @@ export function approvedPlanMessage(): string {
   return ["The plan's agreed. Please carry it out now, as we last stated it.", "", ...workInstructions()].join("\n");
 }
 
+/** An update from the briefing, as the Explain this chat sees it. */
+export interface ExplainedUpdate {
+  key: string;
+  label: string;
+  text: string;
+  link?: string | null;
+  date?: string | null;
+}
+
+/**
+ * The prompt behind an update's "Explain this": a session that reads where the update came from and
+ * explains it plainly, then answers follow-up questions in the same chat.
+ */
+export function explainPrompt(u: ExplainedUpdate): string {
+  return [
+    sessionMarker(u.key),
+    "",
+    "Explain this update from my day planner's briefing to me.",
+    "",
+    `From: ${u.label}${u.date ? ` (${u.date})` : ""}`,
+    `Update: ${u.text}`,
+    ...(u.link ? [`Source: ${u.link}`] : []),
+    "",
+    "Read the source first (the Slack thread, ticket or doc, and anything it links to that you need) so you explain what actually happened, not just the summary.",
+    "Then tell me, briefly: what happened, why it matters to me and my projects, and whether there's anything I should do about it (and if so, what). If nothing's needed from me, say so.",
+    "Don't send, post or change anything. I may have follow-up questions; answer them in the same plain way.",
+  ].join("\n");
+}
+
 /** A link that opens a new Claude Code session in Claude Desktop with `prompt` filled in (not sent). */
 export function claudeSessionUrl(prompt: string, folder?: string | null): string {
   const params = new URLSearchParams({ q: prompt });

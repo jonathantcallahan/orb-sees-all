@@ -19,6 +19,36 @@ float ripple(vec3 n) {
   float rings = sin(behind * 9.0) * smoothstep(0.0, 0.2, behind) * (1.0 - smoothstep(1.2, 2.1, behind));
   return rings * exp(-uRippleAge * 0.8);
 }
+uniform float uShockAge;
+uniform vec3 uShockDir;
+// One wave front at d from its crest: the crest with a shallower trough trailing behind it.
+float shockFront(float d, float trail) {
+  return exp(-d * d * 9.0) - 0.28 * exp(-(d - trail) * (d - trail) * 8.0);
+}
+// Height of the shockwave at a surface direction: a broad, gentle swell gliding across the orb along
+// uShockDir in about a second, then reverberating: it rolls back from the far side, fainter, and
+// fades away slowly. Zero when none is running.
+float shock(vec3 n) {
+  if (uShockAge > 5.0) return 0.0;
+  float along = dot(normalize(n), uShockDir);
+  float travel = -1.4 + uShockAge * 2.2;
+  // Eases in rather than appearing at full height.
+  float wave = shockFront(along - travel, -0.5) * smoothstep(0.0, 0.25, uShockAge);
+  // Past the far side it rolls back the other way, fainter.
+  if (travel > 0.9) wave += 0.4 * smoothstep(0.9, 1.6, travel) * shockFront(along - (2.6 - travel), 0.5);
+  return wave * exp(-uShockAge * 0.9);
+}
+uniform float uSquash;
+// A soft body's give under the hit: squashed along the shockwave's axis by uSquash (from a damped
+// spring, so it rebounds past rest and jiggles), bulging out around it to keep its volume. The
+// orb's radius at a direction is scaled by this; 1 at rest.
+float squash(vec3 n) {
+  if (abs(uSquash) < 0.0005) return 1.0;
+  float a = 1.0 - uSquash;
+  float b = inversesqrt(max(a, 0.2));
+  float c = dot(normalize(n), uShockDir);
+  return inversesqrt(c * c / (a * a) + (1.0 - c * c) / (b * b));
+}
 `;
 
 /**
@@ -65,7 +95,8 @@ float ferroField(vec3 p) {
       }
   return sqrt(sum);
 }
-// Height of the spikes at a surface direction, 0 to about 1.
+// Height of the spikes at a surface direction, 0 to about 0.5: kept low, which reads as a real
+// ferrofluid more than tall spires do.
 float ferro(vec3 n) {
   if (uSpike <= 0.001) return 0.0;
   n = normalize(n);
@@ -73,7 +104,7 @@ float ferro(vec3 n) {
   float facing = smoothstep(-0.15, 0.8, dot(n, uSpikeDir));
   // Clusters: a slow field that crowds spikes together in drifting patches and thins them between.
   float crowd = smoothstep(-0.35, 0.45, snoise(n * 1.6 + vec3(0.0, uClock * 0.25, uClock * 0.18)));
-  return min(ferroField(n * 6.5), 1.3) * facing * mix(0.25, 1.0, crowd) * uSpike;
+  return min(ferroField(n * 6.5), 1.0) * 0.5 * facing * mix(0.25, 1.0, crowd) * uSpike;
 }
 `;
 
@@ -85,6 +116,12 @@ export type OrbUniforms = {
   uRippleAge: { value: number };
   /** Where on the surface (a unit direction) the latest ripple began. */
   uRippleOrigin: { value: import("three").Vector3 };
+  /** Seconds since the latest shockwave began; NO_RIPPLE when none is running. */
+  uShockAge: { value: number };
+  /** Which way (a unit direction in the orb's own space) the shockwave travels. */
+  uShockDir: { value: import("three").Vector3 };
+  /** How squashed the orb is along uShockDir by the hit, from a damped spring: 0 at rest. */
+  uSquash: { value: number };
   /** How far the ferrofluid spikes have grown in, 0 to 1. */
   uSpike: { value: number };
   /** Which way (a unit direction in the orb's own space) the spikes point: toward the cursor. */

@@ -1,3 +1,4 @@
+import { useOrbName } from "../orbLook";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -9,9 +10,9 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, Reveal, Spinner } from "./common";
+import { CloseIcon, Reveal, ScrambleText, Spinner } from "./common";
 import { SlackSendModal } from "./SlackPreview";
-import { GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { readableReply, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -303,12 +304,9 @@ function carriedLabel(day: string): string {
   return days === 1 ? "from yesterday" : `from ${days} days ago`;
 }
 
-/** What Orb can do for a task, beside the Plan heading; nothing for tasks that are all yours. */
-const ORB_ROLE: Record<Automation, string | null> = {
-  human: null,
-  assisted: "Orb can help",
-  claude: "Orb can complete this task",
-};
+/** What the orb can do for a task, beside the Plan heading, by its name; nothing for tasks that are all yours. */
+const orbRole = (automation: Automation, orb: string): string | null =>
+  automation === "assisted" ? `${orb} can help` : automation === "claude" ? `${orb} can complete this task` : null;
 
 /**
  * A high-level view of the plan: each step's title beside a numbered circle.
@@ -466,6 +464,7 @@ function AssessmentView({
   onRemind?: (index: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const orbName = useOrbName();
   return (
     <>
       {assessment.needs_details && (
@@ -481,7 +480,7 @@ function AssessmentView({
       <div className={`automation ${assessment.automation}`}>
         <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className="automation-kind">Plan</span>
-          {ORB_ROLE[assessment.automation] && <span className="automation-role timestamp">{ORB_ROLE[assessment.automation]}</span>}
+          {orbRole(assessment.automation, orbName) && <span className="automation-role timestamp">{orbRole(assessment.automation, orbName)}</span>}
           <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
             <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -623,13 +622,20 @@ function Composer({ onSend, autoFocus = false, disabled = false }: { onSend: (te
 }
 
 /** Claude's mark, turning while it works. */
-function ClaudeSpark() {
+/** Claude Code's working glyph: a star that grows and shrinks through its shapes, in Claude's orange. */
+const CLAUDE_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+
+export function ClaudeSpark() {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = setInterval(() => setFrame((f) => (f + 1) % CLAUDE_FRAMES.length), 120);
+    return () => clearInterval(t);
+  }, []);
   return (
-    <svg className="claude-spark" width="14" height="14" viewBox="0 0 24 24" aria-hidden>
-      {Array.from({ length: 8 }, (_, i) => (
-        <path key={i} d="M12 12 12 2.5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" transform={`rotate(${i * 45} 12 12)`} />
-      ))}
-    </svg>
+    <span className="claude-spark" aria-hidden>
+      {CLAUDE_FRAMES[frame]}
+    </span>
   );
 }
 
@@ -637,7 +643,7 @@ function ClaudeSpark() {
 const DISCUSS = -1;
 
 /** What the session is waiting on you for: the step it stopped at and what it asked. */
-interface SessionAsk {
+export interface SessionAsk {
   /** 1-based step number, or null when the only thing waiting is a message to send. */
   step: number | null;
   title: string;
@@ -650,7 +656,7 @@ interface SessionAsk {
  * messages it handed over to send, and the reply box at the bottom. The card closes it once the
  * step it opened for is resolved. Esc or the backdrop closes it too.
  */
-function SessionChat({
+export function SessionChat({
   taskId,
   title,
   ask,
@@ -659,11 +665,17 @@ function SessionChat({
   toSend,
   canReply,
   askAction,
+  plain = false,
   onClose,
   onChange,
 }: {
   taskId: string;
   title: string;
+  /**
+   * A conversation rather than a step waiting on you (Explain this): the top box is neutral, with
+   * no waiting marker, and the title is a quiet label.
+   */
+  plain?: boolean;
   ask: SessionAsk | null;
   /** A button in the ask box (Approve & start while discussing the plan). */
   askAction?: ReactNode;
@@ -690,18 +702,36 @@ function SessionChat({
     continueTaskSession(taskId, message).then(onChange, onChange);
     onChange();
   };
-  const shown = sent ? [...messages, { role: "user" as const, text: sent }] : messages;
+  // While Claude answers, its reply streams in as it's written; the transcript's copy of this turn
+  // (which lags) is held back until the turn ends, so nothing shows twice.
+  // When the turn ends, the streamed reply stays up until the transcript's copy arrives, so it
+  // doesn't blink out in between.
+  const live = useJobStatus(`live:${taskId}`);
+  const [held, setHeld] = useState<{ text: string; count: number } | null>(null);
+  useEffect(() => {
+    if (live) setHeld({ text: live, count: messages.length });
+    else setHeld((h) => (h && messages.length > h.count ? null : h));
+  }, [live]);
+  useEffect(() => {
+    if (held && !live && messages.length > held.count) setHeld(null);
+  }, [messages.length]);
+  const streaming = live ?? (held ? held.text : null);
+  const liveText = streaming ? readableReply(streaming) : "";
+  const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
+  // Everything up to your last message (none, on a first turn) while a reply is forming.
+  const settled = working || (held && !live) ? messages.slice(0, lastUserAt + 1) : messages;
+  const shown = sent ? [...settled, { role: "user" as const, text: sent }] : settled;
   // Keep the newest message in view as the conversation grows.
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [shown.length, working, toSend.length]);
+  }, [shown.length, working, toSend.length, liveText.length]);
   const busy = !!working || !!sent;
 
   return createPortal(
     <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
-      <div className="modal chat-modal" role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`modal chat-modal${plain ? " plain" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
         <div className="chat-modal-top">
           <header className="chat-modal-head">
             <span className="chat-modal-title">{title}</span>
@@ -712,7 +742,7 @@ function SessionChat({
           {ask && (
             <div className="chat-ask">
               <span className="chat-ask-step">
-                <StepCircle state="waiting" />
+                {!plain && <StepCircle state="waiting" />}
                 {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
               </span>
               {ask.note && <p className="chat-ask-note">{ask.note}</p>}
@@ -732,11 +762,16 @@ function SessionChat({
               </div>
             ),
           )}
-          {/* Where Claude's reply will appear, as in a Claude session: a turning spark and what it's doing. */}
+          {(busy || held) && liveText && (
+            <div className="chat-turn claude">
+              <ClaudeText text={liveText} />
+            </div>
+          )}
+          {/* Under Claude's reply as it forms, as in a Claude session: its working glyph and what it's doing. */}
           {busy && (
             <div className="chat-working" role="status">
               <ClaudeSpark />
-              <span>{working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"}</span>
+              <ScrambleText text={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"} />
             </div>
           )}
           {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
@@ -776,7 +811,7 @@ function SessionPanel({
     <>
       {working && (
         <span className="muted small session-working">
-          <Spinner /> Claude is working: {working}…
+          <ClaudeSpark /> Claude is working: <ScrambleText text={`${working}…`} />
         </span>
       )}
       {link.lastError && !working && (

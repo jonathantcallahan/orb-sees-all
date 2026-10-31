@@ -65,7 +65,7 @@ void main() {
   float t = uTime * mix(0.32, 1.0, uStress);
   // Smaller lobes than the shell's, so the core stays well inside it and the glass's outline reads.
   float spike = ferro(normal);
-  vec3 pos = position + normal * (blob(normal, t) * mix(0.22, 0.3, uStress) + 0.1 * ripple(normal) + 0.35 * spike);
+  vec3 pos = (position + normal * (blob(normal, t) * mix(0.22, 0.3, uStress) + 0.1 * ripple(normal) + 0.07 * shock(normal) + 0.35 * spike)) * squash(normal);
   // Colored by the undisplaced surface, so spikes match the metal around their base.
   vObj = pos - normal * 0.35 * spike;
   vec4 view = modelViewMatrix * vec4(pos, 1.0);
@@ -121,7 +121,7 @@ float shellRadius(vec3 n, float t) {
   float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
   float drift = snoise(n * 0.75 + vec3(SHELL_SEED) + t * 0.22);
   float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + SHELL_SEED * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
-  return SHELL_RADIUS + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.6 * ferro(n);
+  return (SHELL_RADIUS + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.1 * shock(n) + 0.6 * ferro(n)) * squash(n);
 }
 float orbSurface(vec3 n) {
   return shellRadius(normalize(n), uTime * mix(0.32, 1.0, uStress));
@@ -242,6 +242,9 @@ export function buildGlassOrb(uniforms: OrbUniforms, renderer: THREE.WebGLRender
       uTime: uniforms.uTime,
       uStress: uniforms.uStress,
       uRippleAge: uniforms.uRippleAge,
+      uShockAge: uniforms.uShockAge,
+      uShockDir: uniforms.uShockDir,
+      uSquash: uniforms.uSquash,
       uRippleOrigin: uniforms.uRippleOrigin,
       uSpike: uniforms.uSpike,
       uSpikeDir: uniforms.uSpikeDir,

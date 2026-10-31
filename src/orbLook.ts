@@ -15,8 +15,25 @@ export function storedOrbLook(): OrbLook {
   return look === "glass" || look === "porcelain" || look === "film" ? look : "crystal";
 }
 
+/** Told when the orb look changes, so everything showing its name updates. */
+const LOOK_EVENT = "orb:look";
+
 export function useOrbLook(): [OrbLook, (look: OrbLook) => void] {
   const [look, setLook] = useState<OrbLook>(storedOrbLook);
-  useEffect(() => localStorage.setItem(KEY, look), [look]);
+  useEffect(() => {
+    localStorage.setItem(KEY, look);
+    window.dispatchEvent(new Event(LOOK_EVENT));
+  }, [look]);
   return [look, setLook];
+}
+
+/** The current orb's name (Demian, Roth, Ophelia, Oren), following changes in Settings. */
+export function useOrbName(): string {
+  const [look, setLook] = useState<OrbLook>(storedOrbLook);
+  useEffect(() => {
+    const onChange = () => setLook(storedOrbLook());
+    window.addEventListener(LOOK_EVENT, onChange);
+    return () => window.removeEventListener(LOOK_EVENT, onChange);
+  }, []);
+  return ORB_LOOK_NAMES[look];
 }
