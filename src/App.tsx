@@ -20,7 +20,6 @@ import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORIT
 import { canonicalId } from "./registry";
 import { useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
-import { shockOrb } from "./orbEvents";
 import { setUserProfile } from "./prompts";
 import { OrbGlow } from "./components/PressureBlob";
 import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
@@ -160,10 +159,6 @@ export default function App() {
       <nav className="app-tools" aria-label="App">
         <button className={`glass-button look-${orbLook}`} onClick={() => setShowSettings(true)}>
           Settings
-        </button>
-        {/* Sends the read-update shockwave through the orb, to try it without an update to read. */}
-        <button className="icon-button shock-button" onClick={shockOrb} title="Send a shockwave through the orb" aria-label="Send a shockwave through the orb">
-          ↯
         </button>
         <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
         {!allStatus && running.length > 0 && <span className="timestamp small">{running.filter((k) => k !== "all").length} refreshing…</span>}

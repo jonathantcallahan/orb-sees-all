@@ -1299,7 +1299,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .app-tools .timestamp { margin-left: 2px; }
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
-.shock-button { font-size: 14px; }
 /* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth,
    glossy white for Ophelia, soap-film clear for Oren.
    Its text is the refresh wheel's gray. */
