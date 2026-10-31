@@ -6,6 +6,7 @@ import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
+import { WindowButtons } from "./components/WindowButtons";
 import { SetupScreen } from "./components/SetupScreen";
 import { isWindows, MOD } from "./platform";
 import { ProjectCard } from "./components/ProjectCard";
@@ -154,8 +155,9 @@ export default function App() {
       {/* No top bar: Settings and Refresh all sit small in the top-left corner, with what's refreshing beside them. */}
       {/* The window has no title bar on macOS: this strip along the top drags the window (and zooms it on double-click). */}
       {!isWindows && <div className="window-drag" data-tauri-drag-region />}
+      {!isWindows && <WindowButtons />}
       <nav className="app-tools" aria-label="App">
-        <button className="cta-ghost" onClick={() => setShowSettings(true)}>
+        <button className={`glass-button look-${orbLook}`} onClick={() => setShowSettings(true)}>
           Settings
         </button>
         <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />

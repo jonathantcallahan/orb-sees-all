@@ -316,6 +316,11 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                hide_window_buttons(&window);
+            }
+
             // Wake the frontend's scheduler once a minute, even while the window is hidden.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -341,4 +346,18 @@ pub fn run() {
             show_main(_app);
         }
     });
+}
+
+/// Hides macOS's close, minimize and zoom buttons: the app draws its own, gray until hovered.
+#[cfg(target_os = "macos")]
+fn hide_window_buttons(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    let Ok(ptr) = window.ns_window() else { return };
+    // Safety: Tauri hands back the window's live NSWindow, and setup runs on the main thread.
+    let ns_window: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+    for kind in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
+        if let Some(button) = ns_window.standardWindowButton(kind) {
+            button.setHidden(true);
+        }
+    }
 }

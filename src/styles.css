@@ -166,10 +166,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 .pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; margin-bottom: 16px; }
 /* The orb's center sits halfway between the bottom of the window's close/minimize/zoom buttons
-   (33px down: 19px plus their 14px) and the top of the stats bars. The orb is centered in its
+   (31px down: 19px plus their 12px) and the top of the stats bars. The orb is centered in its
    285px box, with the mood line (12px × 1.45) between the box and the bars, so the box starts
-   below the column's top (16px down) by 33 − 16 + 17.4 ≈ 34px. */
-.today-column .pressure { margin-top: 34px; }
+   below the column's top (16px down) by 31 − 16 + 17.4 ≈ 32px. */
+.today-column .pressure { margin-top: 32px; }
 .pressure-blob { width: 100%; height: 285px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
@@ -324,6 +324,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card :is(button, a, select) { cursor: pointer; }
 .today-plan { border: 1px dashed transparent; transition: border-color 0.15s, background 0.15s; }
 .today-plan.empty { min-height: 56px; border-color: var(--border); padding: 10px; }
+/* The hint's own paragraph margins would leave extra space under it. */
+.today-plan.empty > p { margin: 0; }
 .today-plan.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 10%, transparent); }
 .column.drop { box-shadow: inset 0 0 0 1px var(--border); border-radius: 12px; transition: box-shadow 0.15s; }
 
@@ -1260,6 +1262,42 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .app-tools .timestamp { margin-left: 2px; }
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
+/* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth.
+   Its text is the refresh wheel's gray. */
+.glass-button {
+  padding: 2px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); cursor: pointer;
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  background: var(--glass-fill); border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-shine), var(--glass-fringe), 0 2px 8px rgb(0 0 0 / 0.08);
+  transition: color 0.15s, box-shadow 0.2s, background 0.2s;
+}
+.glass-button:hover { color: var(--text); background: var(--glass-fill-hover); }
+.glass-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.glass-button.look-crystal {
+  --glass-blur: 2px; --glass-fill: rgb(255 255 255 / 0.12); --glass-fill-hover: rgb(255 255 255 / 0.22);
+  --glass-edge: rgb(255 255 255 / 0.55); --glass-shine: rgb(255 255 255 / 0.8);
+  /* Light split at the rim, like the orb's dispersion: cyan along one side, magenta along the other. */
+  --glass-fringe: inset 1px 0 1px rgb(90 200 255 / 0.25), inset -1px 0 1px rgb(230 110 220 / 0.22);
+}
+.glass-button.look-glass {
+  --glass-blur: 14px; --glass-fill: rgb(255 255 255 / 0.45); --glass-fill-hover: rgb(255 255 255 / 0.6);
+  --glass-edge: rgb(255 255 255 / 0.6); --glass-shine: rgb(255 255 255 / 0.7);
+  --glass-fringe: inset 0 -1px 2px rgb(110 140 255 / 0.12);
+}
+:root[data-theme="dark"] .glass-button.look-crystal { --glass-fill: rgb(255 255 255 / 0.04); --glass-fill-hover: rgb(255 255 255 / 0.1); --glass-edge: rgb(255 255 255 / 0.16); --glass-shine: rgb(255 255 255 / 0.22); }
+:root[data-theme="dark"] .glass-button.look-glass { --glass-fill: rgb(255 255 255 / 0.1); --glass-fill-hover: rgb(255 255 255 / 0.16); --glass-edge: rgb(255 255 255 / 0.18); --glass-shine: rgb(255 255 255 / 0.25); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-crystal { --glass-fill: rgb(255 255 255 / 0.04); --glass-fill-hover: rgb(255 255 255 / 0.1); --glass-edge: rgb(255 255 255 / 0.16); --glass-shine: rgb(255 255 255 / 0.22); }
+  :root:not([data-theme="light"]) .glass-button.look-glass { --glass-fill: rgb(255 255 255 / 0.1); --glass-fill-hover: rgb(255 255 255 / 0.16); --glass-edge: rgb(255 255 255 / 0.18); --glass-shine: rgb(255 255 255 / 0.25); }
+}
 /* The window has no title bar on macOS: this strip along the top drags it. */
 .window-drag { position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 5; }
+/* The app's own close/minimize/zoom: gray dots in macOS's spot (12px, 8px apart, 19px down), in
+   their colors while the pointer is over the group. */
+.window-buttons { position: fixed; top: 19px; left: 18px; z-index: 7; display: flex; gap: 8px; }
+.window-button { width: 12px; height: 12px; padding: 0; border-radius: 50%; border: none; cursor: default; background: color-mix(in srgb, var(--text) 18%, transparent); transition: background 0.12s ease; }
+.window-buttons:hover .close { background: #ff5f57; }
+.window-buttons:hover .minimize { background: #febc2e; }
+.window-buttons:hover .zoom { background: #28c840; }
+.window-button:active { filter: brightness(0.85); }
 .today-date { margin-left: 4px; }
