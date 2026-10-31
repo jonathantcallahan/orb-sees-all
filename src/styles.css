@@ -171,7 +171,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
    by 31 − 16 = 15px; it sits 20px lower than that, by choice. */
 .today-column .pressure { margin-top: 35px; }
 /* The stats bars tuck up into the empty lower edge of the orb's box, closer to the orb itself. */
-.today-column .pressure-bars { margin-top: -26px; position: relative; }
+.today-column .pressure-bars { margin-top: -26px; margin-bottom: 16px; position: relative; }
 .pressure-blob { width: 100%; height: 285px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
@@ -383,9 +383,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Day grid: meetings at their real times, with a line at the current time */
 .day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
-/* In the Today column the grid takes the rest of the height, so midnight sits at the bottom, just
+/* In the Today column the grid takes at least the rest of the height, so late in the day midnight sits at the bottom, just
    above the fog. */
 .today-column .day-grid { flex-grow: 1; margin-bottom: 0; }
+.today-column .day-grid.late { overflow: hidden; }
 .today-column { padding-bottom: calc(var(--mist-height) + 4px); }
 /* Each hour: its time flush left (in line with Today above), its line starting after the times. */
 .day-grid .hour { position: absolute; left: 0; right: 0; }
@@ -410,6 +411,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--accent) 26%, var(--surface)); }
 .event-block.past { opacity: 0.5; }
 .event-block.current { border-color: var(--red); }
+/* Lines never squeeze each other; what doesn't fit is left out (see DayGrid). */
+.event-block > span { flex-shrink: 0; }
 .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-when, .event-prep { color: var(--muted); font-size: 10px; }
 .event-when { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }

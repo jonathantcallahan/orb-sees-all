@@ -11,8 +11,8 @@ import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
-/** The least room a minute gets; below this the grid stops shrinking and the column scrolls instead. */
-const MIN_PX_PER_MIN = 0.5;
+/** Pixels per minute on the day grid (72px an hour). */
+const PX_PER_MIN = 1.2;
 /** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
 const EVENT_INSET_TOP = 2;
 const EVENT_INSET_BOTTOM = 2;
@@ -82,14 +82,8 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
 function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
   // Meetings you declined don't take up space on your day.
   const events = all.filter((ev) => ev.my_response !== "declined");
-  const range = dayRange(events, now);
-  // Every hour line, midnight at the bottom included.
-  const hours = Array.from({ length: range.endHour - range.startHour + 1 }, (_, i) => range.startHour + i);
-  const placed = layoutDay(events, range);
-  const nowTop = nowOffset(now, range);
-  const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
-  // The grid fills the column down to the bottom of the window, so midnight sits at the bottom and
-  // the hours stretch to fit; on a short window it keeps a minimum scale and the column scrolls.
+  // The grid keeps one scale and the column scrolls. Late in the day, when the hours left don't
+  // fill the column, earlier hours fill in above so midnight stays at the bottom instead of rising.
   const box = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
   useLayoutEffect(() => {
@@ -99,14 +93,23 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  const base = dayRange(events, now);
+  // Late: what's left of the day, plus room for the midnight label, is shorter than the column.
+  const late = room > 0 && (base.endHour - base.startHour) * 60 * PX_PER_MIN + 8 < room;
+  const range = late ? { ...base, startHour: Math.max(0, base.endHour - Math.ceil((room - 8) / (60 * PX_PER_MIN))) } : base;
+  // Every hour line, midnight at the bottom included.
+  const hours = Array.from({ length: range.endHour - range.startHour + 1 }, (_, i) => range.startHour + i);
+  const placed = layoutDay(events, range);
+  const nowTop = nowOffset(now, range);
+  const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
   const minutes = (range.endHour - range.startHour) * 60;
-  // Room for the midnight label under the last line.
-  const PX_PER_MIN = Math.max(MIN_PX_PER_MIN, (room - 8) / minutes);
+  // Late, everything shifts so midnight lands on the bottom line; the earliest hour is cut off at the top.
+  const shift = late ? room - 8 - minutes * PX_PER_MIN : 0;
 
   return (
-    <div ref={box} className="day-grid" style={{ minHeight: minutes * MIN_PX_PER_MIN + 8 }}>
+    <div ref={box} className={`day-grid${late ? " late" : ""}`} style={{ height: late ? undefined : minutes * PX_PER_MIN + 8 }}>
       {hours.map((h, i) => (
-        <div key={h} className="hour" style={{ top: i * 60 * PX_PER_MIN }}>
+        <div key={h} className="hour" style={{ top: shift + i * 60 * PX_PER_MIN }}>
           <span className="hour-label">{hourLabel(h)}</span>
         </div>
       ))}
@@ -116,6 +119,8 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
           const current = !past && new Date(ev.start) <= now;
           // The call is worth surfacing from 10 minutes before until the meeting ends.
           const joinSoon = !past && new Date(ev.start).getTime() - now.getTime() <= 10 * 60_000;
+          // Drawn height decides what fits: the name always, then the time, then the prep count.
+          const px = Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18);
           return (
             <div
               key={ev.id}
@@ -124,8 +129,8 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
               className={`event-block rsvp-${ev.my_response ?? "accepted"}${past ? " past" : ""}${current ? " current" : ""}`}
               title={ev.my_response === "tentative" ? "You said maybe" : ev.my_response === "needs_action" ? "You haven't responded" : undefined}
               style={{
-                top: top * PX_PER_MIN + EVENT_INSET_TOP,
-                height: Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18),
+                top: shift + top * PX_PER_MIN + EVENT_INSET_TOP,
+                height: px,
                 left: `${(column / columns) * 100}%`,
                 width: `calc(${100 / columns}% - 2px)`,
               }}
@@ -135,8 +140,8 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
               onMouseLeave={() => setHover(null)}
             >
               <span className="event-name">{ev.title}</span>
-              {height >= 40 && <span className="event-when">{time(ev.start)}</span>}
-              {ev.prep.length > 0 && <span className="event-prep">{ev.prep.length} prep</span>}
+              {px >= 32 && <span className="event-when">{time(ev.start)}</span>}
+              {ev.prep.length > 0 && px >= (px >= 32 ? 44 : 32) && <span className="event-prep">{ev.prep.length} prep</span>}
               {ev.video_link && !past && (
                 <button
                   className={`join${joinSoon ? " soon" : ""}`}
@@ -154,7 +159,7 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
           );
         })}
       </div>
-      {nowTop != null && <div className="now-line" style={{ top: nowTop * PX_PER_MIN }} />}
+      {nowTop != null && <div className="now-line" style={{ top: shift + nowTop * PX_PER_MIN }} />}
       {hover && <MeetingCard ev={hover.ev} anchor={hover.anchor} />}
     </div>
   );
