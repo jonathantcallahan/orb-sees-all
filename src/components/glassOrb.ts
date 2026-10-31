@@ -165,7 +165,7 @@ if (dot(objectNormal, shellN) < 0.0) objectNormal = -objectNormal;
  * its surroundings, so this keeps it dark and see-through with crisp white streaks along its edges
  * and folds, and a hint of color in the glints.
  */
-function darkStudio(): THREE.Scene {
+export function darkStudio(): THREE.Scene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0.02, 0.02, 0.03);
   const strip = (w: number, h: number, color: THREE.Color, pos: [number, number, number]) => {

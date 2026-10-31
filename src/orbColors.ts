@@ -40,6 +40,19 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [0.98, 0.72, 0.9],
     ],
   },
+  // Oren's mist is blue: clear sea blue, deepening toward indigo.
+  film: {
+    deep: [
+      [0.1, 0.42, 0.95],
+      [0.14, 0.34, 0.9],
+      [0.28, 0.26, 0.85],
+    ],
+    wisp: [
+      [0.55, 0.82, 1.0],
+      [0.55, 0.74, 1.0],
+      [0.66, 0.66, 1.0],
+    ],
+  },
   // Ophelia's mist is white: milky when calm, warming only faintly toward rose under stress.
   porcelain: {
     deep: [

@@ -200,6 +200,7 @@ export function Settings({
     crystal: "Molten metal suspended in clear glass",
     glass: "Molten metal inside frosted glass",
     porcelain: "Glazed porcelain, faintly translucent",
+    film: "A soap bubble, its colors swirling",
   };
 
   // Rendered into <body> so nothing on the page can clip or offset it.
@@ -261,7 +262,7 @@ export function Settings({
                   label="Orb"
                   value={orbLook}
                   onChange={onOrbLookChange}
-                  options={(["crystal", "glass", "porcelain"] as OrbLook[]).map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
+                  options={(["crystal", "glass", "porcelain", "film"] as OrbLook[]).map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
                 />
               </SettingRow>
             </div>

@@ -8,14 +8,15 @@ import { buildParticles } from "./orbParticles";
 import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
 import { buildPorcelainOrb } from "./porcelainOrb";
+import { buildOrenOrb } from "./orenOrb";
 
 /** Rotation speed in radians per second at stress 0 and 1. */
 const SPIN = { calm: 0.1, stressed: 2.2 };
 /** How far the orb turns toward the cursor, in radians (about 35 degrees). */
 const FACE_ANGLE = 0.6;
 
-/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass) and Ophelia (porcelain). */
-export type OrbLook = "crystal" | "glass" | "porcelain";
+/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain) and Oren (film). */
+export type OrbLook = "crystal" | "glass" | "porcelain" | "film";
 
 /** Mote colors for each look while Orb works: bright on a dark page, deeper on a light one. */
 /** How far above its surroundings a point must stand to count as a wave tip, per look (their waves differ in depth). */
@@ -23,12 +24,14 @@ const TIP: Record<OrbLook, [number, number]> = {
   glass: [0.006, 0.03],
   crystal: [0.006, 0.03],
   porcelain: [0.006, 0.03],
+  film: [0.006, 0.03],
 };
 
 const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [number, number, number] }> = {
   glass: { dark: [0.45, 0.85, 1.0], light: [0.15, 0.35, 0.85] },
   crystal: { dark: [0.78, 0.9, 1.0], light: [0.3, 0.4, 0.72] },
   porcelain: { dark: [1.0, 0.97, 0.93], light: [0.55, 0.52, 0.5] },
+  film: { dark: [0.55, 0.85, 1.0], light: [0.1, 0.4, 0.75] },
 };
 
 /**
@@ -70,7 +73,7 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uWorking: { value: 0 },
     };
     const orb =
-      look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
+      look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
     if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
     // Motes off the wave tips while Orb works; they ride along as the orb turns.
@@ -221,6 +224,12 @@ function glowColors(look: OrbLook, level: number): string[] {
       [[250, 248, 244], [255, 214, 210]],
       [[235, 238, 248], [250, 200, 205]],
       [[255, 250, 240], [255, 225, 200]],
+    ],
+    // Oren: sea blue and aqua when calm, deepening to indigo under stress.
+    film: [
+      [[60, 150, 255], [70, 80, 220]],
+      [[40, 200, 230], [60, 120, 230]],
+      [[120, 190, 255], [110, 90, 240]],
     ],
   };
   return pairs[look].map(([calm, stressed]) => `rgb(${lerp(calm, stressed, t).join(" ")})`);

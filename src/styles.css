@@ -627,6 +627,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .filter-chevron { flex-shrink: 0; opacity: 0.7; transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .filter-select.open .filter-chevron { transform: rotate(180deg); }
 .filter-select.recommended.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* An active filter keeps its color only while its section (Projects, Tasks) is hovered; otherwise gray. */
+.filter-select.on { transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s, filter 0.15s; }
+.column:not(:hover) .filter-select.on { filter: grayscale(1); }
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 /* Three ~36px rows and their two 4px gaps, plus a few px so the third row's border isn't cut
    (rows can render a pixel taller); the fourth starts below that. The count says how many scroll. */
@@ -863,6 +866,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Open in Claude beside Show links: the same small link, with Claude's mark before the words. */
 .claude-link { display: inline-flex; align-items: center; gap: 4px; }
+/* Claude's mark is gray until the card is hovered, like the other badges and icons. */
+.claude-link img { transition: filter 0.15s ease; }
+.card:not(:hover) .claude-link img { filter: grayscale(1); }
 .tab-close { color: var(--muted); }
 .work-tab:hover .tab-close { color: var(--text); }
 
@@ -1262,7 +1268,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
 /* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth,
-   glossy white for Ophelia.
+   glossy white for Ophelia, soap-film clear for Oren.
    Its text is the refresh wheel's gray. */
 .glass-button {
   padding: 2px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); cursor: pointer;
@@ -1278,6 +1284,15 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   --glass-edge: rgb(255 255 255 / 0.55); --glass-shine: rgb(255 255 255 / 0.8);
   /* Light split at the rim, like the orb's dispersion: cyan along one side, magenta along the other. */
   --glass-fringe: inset 1px 0 1px rgb(90 200 255 / 0.25), inset -1px 0 1px rgb(230 110 220 / 0.22);
+}
+.glass-button.look-film {
+  --glass-blur: 3px; --glass-fill: rgb(255 255 255 / 0.1); --glass-fill-hover: rgb(255 255 255 / 0.2);
+  --glass-edge: rgb(255 255 255 / 0.5); --glass-shine: rgb(255 255 255 / 0.85);
+  --glass-fringe: inset 1px 0 1px rgb(120 200 255 / 0.25), inset -1px 0 1px rgb(200 140 255 / 0.18);
+}
+:root[data-theme="dark"] .glass-button.look-film { --glass-fill: rgb(120 190 255 / 0.06); --glass-fill-hover: rgb(120 190 255 / 0.12); --glass-edge: rgb(180 220 255 / 0.2); --glass-shine: rgb(255 255 255 / 0.25); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-film { --glass-fill: rgb(120 190 255 / 0.06); --glass-fill-hover: rgb(120 190 255 / 0.12); --glass-edge: rgb(180 220 255 / 0.2); --glass-shine: rgb(255 255 255 / 0.25); }
 }
 .glass-button.look-porcelain {
   --glass-blur: 10px; --glass-fill: rgb(255 255 255 / 0.7); --glass-fill-hover: rgb(255 255 255 / 0.85);

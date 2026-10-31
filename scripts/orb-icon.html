@@ -11,6 +11,7 @@
       import * as THREE from "three";
       import { buildGlassOrb } from "/src/components/glassOrb.ts";
       import { buildPorcelainOrb } from "/src/components/porcelainOrb.ts";
+      import { buildOrenOrb } from "/src/components/orenOrb.ts";
       import { NO_RIPPLE } from "/src/components/orbEffects.ts";
 
       const SIZE = 1024;
@@ -26,6 +27,8 @@
       const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
       camera.position.z = Number(new URLSearchParams(location.search).get("z") ?? 7);
       const q = new URLSearchParams(location.search);
+      // ?bg=light also puts the page in light theme, for looks that adapt to it.
+      document.documentElement.dataset.theme = q.get("bg") === "light" ? "light" : "dark";
       const uniforms = {
         uTime: { value: Number(q.get("t") ?? 0) },
         uStress: { value: Number(q.get("s") ?? 0) },
@@ -36,9 +39,9 @@
         uClock: { value: 14 },
         uWorking: { value: 0 },
       };
-      // ?v=glass renders Roth (frosted), ?v=porcelain Ophelia, instead of Demian (clear).
+      // ?v=glass renders Roth (frosted), ?v=porcelain Ophelia, ?v=film Oren, instead of Demian (clear).
       const orb =
-        q.get("v") === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, q.get("v") === "glass" ? "frosted" : "clear");
+        q.get("v") === "film" ? buildOrenOrb(uniforms, renderer) : q.get("v") === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, q.get("v") === "glass" ? "frosted" : "clear");
       if (orb.environment) scene.environment = orb.environment;
       // ?rx= and ?ry= turn the orb, to pick the side it shows.
       orb.group.rotation.set(Number(q.get("rx") ?? 0.35), Number(q.get("ry") ?? 0.6), 0);
@@ -56,8 +59,10 @@
       icon.roundRect(inset, inset, side, side, radius);
       icon.clip();
       const bg = icon.createLinearGradient(0, inset, 0, inset + side);
-      bg.addColorStop(0, "#26262a");
-      bg.addColorStop(1, "#111113");
+      // ?bg=light previews the orb over the light theme's page instead.
+      const light = q.get("bg") === "light";
+      bg.addColorStop(0, light ? "#fbfbfa" : "#26262a");
+      bg.addColorStop(1, light ? "#ececea" : "#111113");
       icon.fillStyle = bg;
       icon.fillRect(inset, inset, side, side);
       for (const [x, y, r, color] of [
