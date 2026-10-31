@@ -8,6 +8,7 @@ import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
 import { WindowButtons } from "./components/WindowButtons";
 import { SetupScreen } from "./components/SetupScreen";
+import { Onboarding } from "./components/Onboarding";
 import { isWindows, MOD } from "./platform";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
@@ -76,12 +77,20 @@ export default function App() {
   const running = useRunningJobs();
   const [showSettings, setShowSettings] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  // The menu bar's hidden "Replay onboarding".
+  useEffect(() => {
+    const unlisten = listen("tray-onboarding", () => setShowOnboarding(true));
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
   // First run: walk through setup until it's done. Anyone already using the app (it knows their
   // Slack user) counts as set up.
   useEffect(() => {
     Promise.all([getSetting("setup_done"), getSetting("slack_user_id")]).then(([done, user]) => {
       if (done || user) setSetting("setup_done", "1").catch(() => {});
-      else setShowSetup(true);
+      else setShowOnboarding(true);
     }, () => {});
   }, []);
   const [filterProject, setFilterProject] = useState<string | null>(null);
@@ -233,6 +242,15 @@ export default function App() {
 
       <Mist level={load.level} look={orbLook} />
 
+      {showOnboarding && (
+        <Onboarding
+          onDone={() => {
+            setShowOnboarding(false);
+            reload();
+            refreshAll().catch(() => {});
+          }}
+        />
+      )}
       {showSetup && (
         <SetupScreen
           onClose={() => setShowSetup(false)}

@@ -2,12 +2,12 @@ import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackTh
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { epicCheckPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
+import { epicCheckPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { approvedPlanMessage } from "../openInClaude";
 import { linkSession, type PendingSend, type PlanStep, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -648,11 +648,44 @@ export function planTask(task: PlanTask): Promise<void> {
 }
 
 /** Rediscovers channels, then refreshes the calendar, ad-hoc tasks and every visible project. */
+/**
+ * Works out the user's role from their Slack profile and activity, calendar and Jira, and saves it
+ * as "About you" (they can still edit it in Settings), along with the first name they go by.
+ * Returns the role.
+ */
+export function learnRole(): Promise<string> {
+  return track("role", (status) =>
+    logged("role", null, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: learnRolePrompt(),
+        schema: LearnedRole,
+        tools: [...TOOLS.slackRead, ...TOOLS.calendarRead, ...TOOLS.jiraRead],
+        model: "sonnet",
+        maxTurns: 14,
+      });
+      const role = data.role.trim();
+      if (role) {
+        await db.setSetting("user_profile", role);
+        setUserProfile(role);
+      }
+      const name = data.name?.trim();
+      if (name) await db.setSetting("user_name", name);
+      return { value: role, costUsd };
+    }),
+  );
+}
+
 export function refreshAll(): Promise<void> {
   return track(
     "all",
     async (status) => {
       await db.setSetting("last_full_refresh_date", localDate(new Date()));
+      // The first time, Claude works out who you are, so every prompt after it knows.
+      if (!(await db.getSetting("user_profile"))?.trim()) {
+        status("Getting to know your role");
+        await learnRole().catch(() => {});
+      }
       status("Finding your project channels");
       try {
         await discoverProjects();

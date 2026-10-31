@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { orbMood, type Pressure } from "../tasks";
 import { PressureBars } from "./PressureBars";
 import { NO_RIPPLE } from "./orbEffects";
-import { ORB_AGITATE_EVENT, ORB_SHOCK_EVENT, TASK_DONE_EVENT } from "../orbEvents";
+import { ORB_AGITATE_EVENT, ORB_SHOCK_EVENT, ORB_SPIN_EVENT, TASK_DONE_EVENT } from "../orbEvents";
 import { buildParticles } from "./orbParticles";
 import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
@@ -133,6 +133,12 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // around it.
     let squashVelocity = 0;
     window.addEventListener(ORB_SHOCK_EVENT, onShock);
+    // A spin-up: a quick push, fast for about half a second, then a smooth coast back down.
+    let spinAge = 3;
+    const onSpin = () => {
+      spinAge = 0;
+    };
+    window.addEventListener(ORB_SPIN_EVENT, onSpin);
     // Hovering an overdue task: ferrofluid spikes grow toward the cursor and the orb chitters.
     let agitated = false;
     const onAgitate = (e: Event) => {
@@ -189,7 +195,10 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       // A faint tremor while agitated.
       const shake = 0.012 * uniforms.uSpike.value * motion;
       facing.position.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0);
-      const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress) * motion * spinScale;
+      spinAge = Math.min(spinAge + dt, 3);
+      const push = Math.min(spinAge / 0.08, 1);
+      const burst = spinAge < 3 ? 6 * push * push * (3 - 2 * push) * Math.exp(-spinAge * 2.4) : 0;
+      const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress + burst) * motion * spinScale;
       blob.rotation.y += dt * spin;
       blob.rotation.x += dt * spin * 0.35;
       // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
@@ -206,6 +215,7 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       window.removeEventListener("pointermove", onPointer);
       window.removeEventListener(TASK_DONE_EVENT, onTaskDone);
       window.removeEventListener(ORB_SHOCK_EVENT, onShock);
+      window.removeEventListener(ORB_SPIN_EVENT, onSpin);
       window.removeEventListener(ORB_AGITATE_EVENT, onAgitate);
       document.removeEventListener("pointerleave", onLeave);
       observer.disconnect();

@@ -18,3 +18,10 @@ export const ORB_SHOCK_EVENT = "orb:shock";
 export function shockOrb() {
   window.dispatchEvent(new Event(ORB_SHOCK_EVENT));
 }
+
+/** Spins the orb up for about half a second, then lets it coast back down smoothly (onboarding steps). */
+export const ORB_SPIN_EVENT = "orb:spin";
+
+export function spinOrb() {
+  window.dispatchEvent(new Event(ORB_SPIN_EVENT));
+}

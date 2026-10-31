@@ -468,3 +468,24 @@ If the plan itself changed in the conversation (a step reassigned, reworded, dro
 
 Reply with ONLY a JSON object: {"steps": [{"title": string, "by": "claude" | "you", "state": "todo" | "started" | "done" | "waiting" | "blocked" | "skipped", "note": string | null}]}`;
 }
+
+/**
+ * Works out who the user is at work, for "About you", so they never have to write it: from their
+ * Slack profile and recent activity, their calendar and their Jira work.
+ */
+export function learnRolePrompt(): string {
+  return `Work out who I am at work, so a planning assistant can describe me the way a well-informed colleague would.
+
+Look, briefly, at:
+- my Slack profile (slack_read_user_profile with no user_id): my title, team and anything in my profile;
+- what I've been saying and where, over the last few weeks (search my recent messages): the channels I'm active in and what I'm working on;
+- my calendar this week and next: the meetings I'm in and who with;
+- tickets assigned to me or that I've reported in Jira, if you can see them.
+
+Then write one or two plain sentences about me: my role, the team or area I'm in, what I work on and own, and who I mostly work with. For example: "A product manager on Unity's Asset Store, working on commerce and package distribution; leads the self-serve refunds and Asset Library plugin projects with engineering and legal." Don't guess beyond what you saw; leave out anything you're unsure of.
+
+Also give the first name I go by, from my Slack profile (my display name if it's set, otherwise the first word of my full name), or null if you can't tell.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"name": string | null, "role": string}`;
+}

@@ -1309,3 +1309,20 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .window-buttons:hover .zoom { background: #28c840; }
 .window-button:active { filter: brightness(0.85); }
 .today-date { margin-left: 4px; }
+
+/* Onboarding: Demian alone on black, its line of text beneath, and Start at the end. */
+.onboarding {
+  position: fixed; inset: 0; z-index: 100; background: #000; color: #ededeb;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  animation: onboarding-in 600ms ease-out;
+}
+@keyframes onboarding-in { from { opacity: 0; } }
+.onboarding-orb { width: 340px; }
+.onboarding-orb .pressure { margin: 0; }
+/* Plain small interface text throughout: one size, one color, no bold. */
+.onboarding-line { min-height: 18px; font-size: 12px; font-weight: 400; line-height: 1.5; text-align: center; white-space: pre; }
+.onboarding-actions { min-height: 28px; margin-top: 18px; display: flex; gap: 8px; align-items: center; }
+.onboarding-start { animation: onboarding-start-in 500ms ease-out; }
+/* It takes focus so Return starts; no focus ring for that. */
+.onboarding-start:focus { outline: none; }
+@keyframes onboarding-start-in { from { opacity: 0; transform: translateY(6px); } }

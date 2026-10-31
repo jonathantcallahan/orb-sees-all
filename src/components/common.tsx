@@ -247,11 +247,12 @@ const SCRAMBLE_MS = 500;
 /**
  * Text that, when it changes, morphs from the old string into the new one: each letter flips
  * through random characters (some funky) and lands on its new letter at its own random moment,
- * all within half a second. With reduced motion it just changes.
+ * all within half a second (or `duration`). With reduced motion it just changes.
  */
-export function ScrambleText({ text }: { text: string }) {
-  const [shown, setShown] = useState(text);
-  const current = useRef(text);
+export function ScrambleText({ text, duration = SCRAMBLE_MS, from }: { text: string; duration?: number; from?: string }) {
+  // `from` starts it from other text (scrambled noise, say) and morphs into `text` on first show.
+  const [shown, setShown] = useState(from ?? text);
+  const current = useRef(from ?? text);
   useEffect(() => {
     const from = current.current;
     if (from === text) return;
@@ -262,8 +263,8 @@ export function ScrambleText({ text }: { text: string }) {
     }
     const length = Math.max(from.length, text.length);
     // Each position starts scrambling and settles at its own moment within the half second.
-    const starts = Array.from({ length }, () => Math.random() * SCRAMBLE_MS * 0.4);
-    const ends = starts.map((s) => s + SCRAMBLE_MS * 0.3 + Math.random() * (SCRAMBLE_MS * 0.6 - s));
+    const starts = Array.from({ length }, () => Math.random() * duration * 0.4);
+    const ends = starts.map((s) => s + duration * 0.3 + Math.random() * (duration * 0.6 - s));
     const begin = performance.now();
     let frame = 0;
     const glyph = () => SCRAMBLE_GLYPHS[Math.floor(Math.random() * SCRAMBLE_GLYPHS.length)];
@@ -277,7 +278,7 @@ export function ScrambleText({ text }: { text: string }) {
       }
       current.current = out;
       setShown(out);
-      if (t < SCRAMBLE_MS) frame = requestAnimationFrame(step);
+      if (t < duration) frame = requestAnimationFrame(step);
       else {
         current.current = text;
         setShown(text);

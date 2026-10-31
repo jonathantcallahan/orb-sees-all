@@ -298,8 +298,9 @@ pub fn run() {
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Demian", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;
+            let onboarding = MenuItem::with_id(app, "onboarding", "Replay onboarding", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &refresh, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &refresh, &onboarding, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Demian")
@@ -310,6 +311,10 @@ pub fn run() {
                     "refresh" => {
                         show_main(app);
                         let _ = app.emit("tray-refresh-all", ());
+                    }
+                    "onboarding" => {
+                        show_main(app);
+                        let _ = app.emit("tray-onboarding", ());
                     }
                     "quit" => app.exit(0),
                     _ => {}

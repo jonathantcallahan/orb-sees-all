@@ -277,6 +277,9 @@ export const StepRecheck = z.object({
 });
 export type StepRecheck = z.infer<typeof StepRecheck>;
 
+/** Who the user is at work, worked out by Claude for "About you". */
+export const LearnedRole = z.object({ name: z.string().nullish(), role: z.string() });
+
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
 export const DailyReading = z.object({
