@@ -1261,7 +1261,8 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .app-tools .timestamp { margin-left: 2px; }
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
-/* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth.
+/* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth,
+   glossy white for Ophelia.
    Its text is the refresh wheel's gray. */
 .glass-button {
   padding: 2px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); cursor: pointer;
@@ -1277,6 +1278,15 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   --glass-edge: rgb(255 255 255 / 0.55); --glass-shine: rgb(255 255 255 / 0.8);
   /* Light split at the rim, like the orb's dispersion: cyan along one side, magenta along the other. */
   --glass-fringe: inset 1px 0 1px rgb(90 200 255 / 0.25), inset -1px 0 1px rgb(230 110 220 / 0.22);
+}
+.glass-button.look-porcelain {
+  --glass-blur: 10px; --glass-fill: rgb(255 255 255 / 0.7); --glass-fill-hover: rgb(255 255 255 / 0.85);
+  --glass-edge: rgb(255 255 255 / 0.9); --glass-shine: rgb(255 255 255 / 1);
+  --glass-fringe: inset 0 -1px 2px rgb(200 190 180 / 0.25);
+}
+:root[data-theme="dark"] .glass-button.look-porcelain { --glass-fill: rgb(255 255 255 / 0.14); --glass-fill-hover: rgb(255 255 255 / 0.2); --glass-edge: rgb(255 255 255 / 0.28); --glass-shine: rgb(255 255 255 / 0.35); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-porcelain { --glass-fill: rgb(255 255 255 / 0.14); --glass-fill-hover: rgb(255 255 255 / 0.2); --glass-edge: rgb(255 255 255 / 0.28); --glass-shine: rgb(255 255 255 / 0.35); }
 }
 .glass-button.look-glass {
   --glass-blur: 14px; --glass-fill: rgb(255 255 255 / 0.45); --glass-fill-hover: rgb(255 255 255 / 0.6);

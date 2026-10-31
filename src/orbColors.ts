@@ -40,7 +40,19 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [0.98, 0.72, 0.9],
     ],
   },
-
+  // Ophelia's mist is white: milky when calm, warming only faintly toward rose under stress.
+  porcelain: {
+    deep: [
+      [1.0, 1.0, 1.0],
+      [1.0, 0.98, 0.97],
+      [1.0, 0.93, 0.92],
+    ],
+    wisp: [
+      [1.0, 1.0, 1.0],
+      [1.0, 0.99, 0.98],
+      [1.0, 0.96, 0.95],
+    ],
+  },
 };
 
 const smooth = (e0: number, e1: number, x: number) => {

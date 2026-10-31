@@ -10,6 +10,7 @@
     <script type="module">
       import * as THREE from "three";
       import { buildGlassOrb } from "/src/components/glassOrb.ts";
+      import { buildPorcelainOrb } from "/src/components/porcelainOrb.ts";
       import { NO_RIPPLE } from "/src/components/orbEffects.ts";
 
       const SIZE = 1024;
@@ -35,8 +36,9 @@
         uClock: { value: 14 },
         uWorking: { value: 0 },
       };
-      // ?v=glass renders Roth (frosted) instead of Demian (clear).
-      const orb = buildGlassOrb(uniforms, renderer, q.get("v") === "glass" ? "frosted" : "clear");
+      // ?v=glass renders Roth (frosted), ?v=porcelain Ophelia, instead of Demian (clear).
+      const orb =
+        q.get("v") === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, q.get("v") === "glass" ? "frosted" : "clear");
       if (orb.environment) scene.environment = orb.environment;
       // ?rx= and ?ry= turn the orb, to pick the side it shows.
       orb.group.rotation.set(Number(q.get("rx") ?? 0.35), Number(q.get("ry") ?? 0.6), 0);

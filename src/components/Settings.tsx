@@ -199,6 +199,7 @@ export function Settings({
   const ORB_HINTS: Record<OrbLook, string> = {
     crystal: "Molten metal suspended in clear glass",
     glass: "Molten metal inside frosted glass",
+    porcelain: "Glazed porcelain, faintly translucent",
   };
 
   // Rendered into <body> so nothing on the page can clip or offset it.
@@ -260,7 +261,7 @@ export function Settings({
                   label="Orb"
                   value={orbLook}
                   onChange={onOrbLookChange}
-                  options={(["crystal", "glass"] as OrbLook[]).map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
+                  options={(["crystal", "glass", "porcelain"] as OrbLook[]).map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
                 />
               </SettingRow>
             </div>

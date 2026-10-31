@@ -132,7 +132,7 @@ float orbSurface(vec3 n) {
  * The shell's molten shape, injected into MeshPhysicalMaterial's vertex shader. Normals come from
  * the displaced surface (by finite differences), so reflections and refraction follow the folds.
  */
-const SHELL_SHAPE = /* glsl */ `
+export const SHELL_SHAPE = /* glsl */ `
 uniform float uTime;
 uniform float uStress;
 ${NOISE}
@@ -145,7 +145,7 @@ vec3 shellPoint(vec3 n, float t) {
 }
 `;
 
-const SHELL_NORMAL = /* glsl */ `
+export const SHELL_NORMAL = /* glsl */ `
 float shellT = uTime * mix(0.32, 1.0, uStress);
 vec3 shellN = normalize(normal);
 vec3 shellA = normalize(cross(shellN, abs(shellN.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
