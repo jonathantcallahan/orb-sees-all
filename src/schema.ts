@@ -238,7 +238,6 @@ export const CalendarDay = z.object({
 });
 export type CalendarDay = z.infer<typeof CalendarDay>;
 
-export const ReplyDraft = z.object({ draft: z.string() });
 
 /** Claude's second look at a blocker: is it real, and was it already solved somewhere else? */
 export const BlockerCheck = z.object({

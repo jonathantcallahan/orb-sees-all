@@ -57,7 +57,7 @@ export function RefreshButton({
     <span className="refresh-wrap">
       {busy && status && (
         <span className="refresh-status" title={status}>
-          {status}…
+          <ScrambleText text={`${status}…`} />
         </span>
       )}
       <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>

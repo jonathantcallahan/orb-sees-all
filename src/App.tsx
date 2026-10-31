@@ -218,7 +218,6 @@ export default function App() {
           taskStates={data.taskStates}
           plans={data.plans}
           assessments={data.assessments}
-          drafts={data.drafts}
           recommended={recommended}
           descriptionOverrides={data.descriptionOverrides}
           taskChecks={data.taskChecks}

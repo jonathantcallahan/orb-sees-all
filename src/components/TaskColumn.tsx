@@ -114,7 +114,6 @@ export function TaskColumn({
   taskStates,
   plans,
   assessments,
-  drafts,
   recommended,
   descriptionOverrides,
   taskChecks,
@@ -136,7 +135,6 @@ export function TaskColumn({
   taskStates: Map<string, TaskState>;
   plans: Map<string, StoredPlan>;
   assessments: Map<string, ManualAssessment>;
-  drafts: Map<string, { text: string }>;
   /** Task ids today's reading recommends. */
   recommended: Set<string>;
   /** Descriptions the user edited on refreshed tasks. */
@@ -338,7 +336,7 @@ export function TaskColumn({
   return (
     <TaskDragProvider onDrop={moveTask}>
     <DropZone zone="rest" className="column tasks-column">
-      <Inbox replies={adhoc.replies} states={taskStates} drafts={drafts} running={running} onChange={onChange} />
+      <Inbox replies={adhoc.replies} states={taskStates} onChange={onChange} />
       <header className="column-header">
         <div className="title-line">
           <h2>Tasks</h2>

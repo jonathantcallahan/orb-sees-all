@@ -372,18 +372,6 @@ export const notDuplicateKey = (a: string, b: string) => (a < b ? `${a}|${b}` : 
 
 export const markNotDuplicate = (a: string, b: string) => putRow("not_duplicates", notDuplicateKey(a, b), true);
 
-export async function getReplyDrafts(): Promise<Map<string, { text: string; created_at: string }>> {
-  const rows = await (await db()).select<{ reply_id: string; text: string; created_at: string }[]>("SELECT * FROM reply_drafts");
-  return new Map(rows.map((r) => [r.reply_id, { text: r.text, created_at: r.created_at }]));
-}
-
-export async function saveReplyDraft(replyId: string, text: string, costUsd: number) {
-  await (await db()).execute(
-    "INSERT INTO reply_drafts (reply_id, text, created_at, cost_usd) VALUES ($1, $2, $3, $4) ON CONFLICT(reply_id) DO UPDATE SET text = excluded.text, created_at = excluded.created_at, cost_usd = excluded.cost_usd",
-    [replyId, text, nowIso(), costUsd],
-  );
-}
-
 export async function saveAdhoc(store: AdhocStore) {
   await setSetting("adhoc", JSON.stringify(store));
 }

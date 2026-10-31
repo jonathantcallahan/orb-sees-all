@@ -194,6 +194,43 @@ export function explainPrompt(u: ExplainedUpdate): string {
   ].join("\n");
 }
 
+/** A message waiting on a reply, as the reply chat sees it. */
+export interface ReplyTopic {
+  id: string;
+  source: "slack" | "email";
+  from: string;
+  summary: string;
+  where?: string | null;
+  received?: string | null;
+  link?: string | null;
+}
+
+/**
+ * The prompt behind an inbox item's "Draft response": a chat that reads the message, drafts a reply
+ * in the user's voice and refines it with them. A Slack reply is handed to the planner to send
+ * (reviewed and posted from there); an email reply is left in the chat to copy.
+ */
+export function replyPrompt(r: ReplyTopic): string {
+  const kind = r.source === "slack" ? "Slack message" : "email";
+  return [
+    sessionMarker(r.id),
+    "",
+    `Help me reply to this ${kind}.`,
+    "",
+    `From: ${r.from}`,
+    ...(r.where ? [`Where: ${r.where}`] : []),
+    ...(r.received ? [`Sent: ${r.received}`] : []),
+    `What they asked: ${r.summary}`,
+    ...(r.link ? [`Link: ${r.link}`] : []),
+    "",
+    `Read the ${r.source === "slack" ? "thread" : "email thread"} first, and look at a few of my own recent messages there to match my tone and length.`,
+    "Then propose a short reply in my voice, as I'd send it, and ask whether I'd like anything changed. Where it depends on something only I know, ask me rather than guessing.",
+    r.source === "slack"
+      ? `When I'm happy with it, hand it to my planner to send as a reply in the thread: a line \`[orb] send to ${r.link ?? "<the message's permalink>"}\`, the reply exactly as it should be posted, then a line \`[orb] end\`. Don't send anything yourself.`
+      : "When I'm happy with it, give me the final text on its own so I can copy it into my reply. Don't send anything.",
+  ].join("\n");
+}
+
 /** A link that opens a new Claude Code session in Claude Desktop with `prompt` filled in (not sent). */
 export function claudeSessionUrl(prompt: string, folder?: string | null): string {
   const params = new URLSearchParams({ q: prompt });

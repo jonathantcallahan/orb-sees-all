@@ -16,7 +16,6 @@ export interface AppData {
   plans: Map<string, db.StoredPlan>;
   assessments: Map<string, ManualAssessment>;
   reading: db.StoredReading | null;
-  drafts: Map<string, { text: string; created_at: string }>;
   reminders: Record<string, db.Reminder>;
   blockerChecks: Record<string, db.StoredBlockerCheck>;
   descriptionOverrides: Record<string, string>;
@@ -33,7 +32,7 @@ export interface AppData {
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -42,7 +41,6 @@ async function loadAll(): Promise<AppData> {
     db.getTaskPlans(),
     db.getAssessments(),
     db.getReading(),
-    db.getReplyDrafts(),
     db.getReminders(),
     db.getBlockerChecks(),
     db.getDescriptionOverrides(),
@@ -54,7 +52,7 @@ async function loadAll(): Promise<AppData> {
     db.getNotDuplicates(),
     db.getSetting("last_full_refresh_date"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, drafts, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

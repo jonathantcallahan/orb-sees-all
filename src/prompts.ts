@@ -291,18 +291,6 @@ ${READ_ONLY}
 ${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}]}`;
 }
 
-export function draftReplyPrompt(r: QuickReply, userId: string | null): string {
-  return `Draft a reply for the user${userId ? ` (Slack user ${userId})` : ""} to this message:
-${JSON.stringify(r)}
-
-Read the thread first (slack_read_thread or the channel for Slack, get_thread for email) so you answer what was actually asked, in context. Look at a few of the user's own recent messages in the same place to match their tone and length.
-
-Write the reply as the user would send it: short, direct, friendly, in their voice. For Slack, no greeting or sign-off unless they use one; for email, a brief greeting and sign-off with their first name. Where the answer depends on something only the user knows, leave a clearly marked blank like [date] rather than guessing.
-
-${READ_ONLY} Only draft; never send.
-${JSON_ONLY} Shape: {"draft": string}`;
-}
-
 export function readingPrompt(context: unknown): string {
   return `You are the Orb, who sees all of the user's work. Write today's reading and pick today's recommended tasks.
 
@@ -372,22 +360,6 @@ ${text}
 MESSAGE>>>
 
 After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
-}
-
-/** A reply to a Slack message with no usable permalink: find the message first, then reply in its thread. */
-export function findAndReplyPrompt(r: { from: string; summary: string; where?: string | null; received?: string | null }, text: string): string {
-  return `Find this Slack message to the user and post the reply below in its thread.
-
-The message: from ${r.from}${r.where ? `, in ${r.where}` : ""}${r.received ? `, sent ${r.received}` : ""}, asking: ${r.summary}
-
-Use the Slack search and read tools to find it (search by the sender and the words they'd have used). Then call slack_send_message exactly once, with the message's channel_id and its ts as thread_ts, and the reply text exactly as written: do not reword, shorten, add to, or reformat it. If you can't find the message with confidence, don't post anything.
-
-Reply (between the markers):
-<<<MESSAGE
-${text}
-MESSAGE>>>
-
-After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one; error says why if nothing was posted.`;
 }
 
 export interface CheckBlockerInput {

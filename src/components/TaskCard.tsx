@@ -10,8 +10,7 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, Reveal, ScrambleText, Spinner } from "./common";
-import { SlackSendModal } from "./SlackPreview";
+import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner } from "./common";
 import { readableReply, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
@@ -510,8 +509,9 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
       </div>
       <div className="muted handoff-preview">{send.text.split("\n")[0]}</div>
       {open && (
-        <SlackSendModal
-          to={send.to}
+        <ComposeModal
+          heading={`Send to ${where}`}
+          note={`Posts in ${where} as you.`}
           text={text}
           status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
           failed={!!error && !sending}
@@ -529,6 +529,13 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
               setError((e as Error).message);
             }
           }}
+          actions={
+            send.to.startsWith("http") ? (
+              <ExternalLink href={send.to} className="link-button small more-link">
+                Open thread
+              </ExternalLink>
+            ) : undefined
+          }
         />
       )}
     </div>

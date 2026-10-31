@@ -2,12 +2,12 @@ import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackTh
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { epicCheckPrompt, findAndReplyPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
+import { epicCheckPrompt, recheckStepsPrompt, sendToChannelPrompt } from "../prompts";
 import { approvedPlanMessage } from "../openInClaude";
 import { linkSession, type PendingSend, type PlanStep, type SessionProgress, type StepProgress } from "../sessions";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, draftReplyPrompt, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, ReplyDraft, SentMessage, StepRecheck, TaskPlan, type Blocker, type QuickReply } from "../schema";
+import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
 import { readingContext } from "../reading";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -322,24 +322,6 @@ export function assessPendingTasks(): Promise<void> {
   });
 }
 
-/** Has Claude draft a reply to an Inbox message, for the user to copy. Never sends anything. */
-export function draftReply(reply: QuickReply): Promise<void> {
-  return track(`draft:${reply.id}`, (status) =>
-    logged("draft", reply.id, async () => {
-      const { data, costUsd } = await runClaude({
-        onStatus: status,
-        prompt: draftReplyPrompt(reply, await db.getSetting("slack_user_id")),
-        schema: ReplyDraft,
-        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
-        model: await model(),
-        maxTurns: 15,
-      });
-      await db.saveReplyDraft(reply.id, data.draft, costUsd);
-      return { value: undefined, costUsd };
-    }),
-  );
-}
-
 /** Has Claude critically re-examine a task: captured right, still needed, not a duplicate. */
 export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTasks: CheckTaskInput["otherTasks"]): Promise<void> {
   return track(`taskcheck:${taskId}`, (status) =>
@@ -397,29 +379,6 @@ export function sendReminder(blockerId: string, channelId: string, text: string)
       });
       if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
       await db.saveReminder(blockerId, { at: new Date().toISOString(), link: data.link ?? null });
-      return { value: undefined, costUsd };
-    }),
-  );
-}
-
-/** Posts the user's reply in a Slack message's thread, then marks the message handled. */
-export function sendSlackReply(reply: QuickReply, text: string): Promise<void> {
-  const replyId = reply.id;
-  return track(`reply:${replyId}`, (status) =>
-    logged("reply", replyId, async () => {
-      // The message's permalink names its thread; without one, Claude finds the message first.
-      const thread = slackThread(reply.link) ?? slackThread(reply.id);
-      const { data, costUsd } = await runClaude({
-        onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
-        prompt: thread ? sendReplyPrompt(thread.channelId, thread.threadTs, text) : findAndReplyPrompt(reply, text),
-        schema: SentMessage,
-        tools: thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
-        // A mechanical post; the cheaper model is plenty.
-        model: "sonnet",
-        maxTurns: thread ? 3 : 10,
-      });
-      if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
-      await db.setTaskState(replyId, { status: "done" });
       return { value: undefined, costUsd };
     }),
   );
@@ -534,10 +493,11 @@ export async function discussTaskPlan(taskId: string, prompt: string, onTurn: ()
 }
 
 /**
- * Opens a chat explaining an update from the briefing (Explain this). It's a session like a task's,
- * keyed by the update; resolves once it's linked, while Claude's first answer is written.
+ * Opens a chat session about something that isn't a task (an update to explain, a message to reply
+ * to). It's a session like a task's, keyed by `key`; resolves once it's linked, while Claude's first
+ * answer is written.
  */
-export async function explainUpdate(key: string, prompt: string, onTurn: () => void): Promise<void> {
+export async function startChatSession(key: string, prompt: string, onTurn: () => void): Promise<void> {
   await linkSession(key);
   bump();
   runTaskSession(key, prompt).then(onTurn, onTurn);
