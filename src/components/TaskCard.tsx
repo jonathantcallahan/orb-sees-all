@@ -1039,6 +1039,11 @@ export function TaskCard({
     openCards.set(task.id, !value);
     setCollapsedState(value);
   };
+  // Remember how the card first showed, so it keeps that state when it's dragged into a list whose
+  // cards start the other way (each list renders the card afresh).
+  useEffect(() => {
+    if (!openCards.has(task.id)) openCards.set(task.id, !collapsed);
+  }, []);
   /** The body's content is only rendered once the card has been opened, then kept for the close animation. */
   const [bodyMounted, setBodyMounted] = useState(!collapsed);
   /** True while the height animates; the body clips its content only then (and while collapsed). */

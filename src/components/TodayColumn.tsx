@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import { nameFromChannel } from "../projects";
@@ -11,7 +11,8 @@ import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
-const PX_PER_MIN = 1.2;
+/** The least room a minute gets; below this the grid stops shrinking and the column scrolls instead. */
+const MIN_PX_PER_MIN = 0.5;
 /** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
 const EVENT_INSET_TOP = 2;
 const EVENT_INSET_BOTTOM = 2;
@@ -82,13 +83,28 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
   // Meetings you declined don't take up space on your day.
   const events = all.filter((ev) => ev.my_response !== "declined");
   const range = dayRange(events, now);
-  const hours = Array.from({ length: range.endHour - range.startHour }, (_, i) => range.startHour + i);
+  // Every hour line, midnight at the bottom included.
+  const hours = Array.from({ length: range.endHour - range.startHour + 1 }, (_, i) => range.startHour + i);
   const placed = layoutDay(events, range);
   const nowTop = nowOffset(now, range);
   const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
+  // The grid fills the column down to the bottom of the window, so midnight sits at the bottom and
+  // the hours stretch to fit; on a short window it keeps a minimum scale and the column scrolls.
+  const box = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => setRoom(entry.contentRect.height));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const minutes = (range.endHour - range.startHour) * 60;
+  // Room for the midnight label under the last line.
+  const PX_PER_MIN = Math.max(MIN_PX_PER_MIN, (room - 8) / minutes);
 
   return (
-    <div className="day-grid" style={{ height: hours.length * 60 * PX_PER_MIN }}>
+    <div ref={box} className="day-grid" style={{ minHeight: minutes * MIN_PX_PER_MIN + 8 }}>
       {hours.map((h, i) => (
         <div key={h} className="hour" style={{ top: i * 60 * PX_PER_MIN }}>
           <span className="hour-label">{hourLabel(h)}</span>
@@ -171,19 +187,17 @@ export function TodayColumn({
     .filter((ev) => ev.prep.length > 0 && ev.my_response !== "declined" && new Date(ev.end) >= now);
 
   return (
-    <section className="column">
+    <section className="column today-column">
       <PressureBlob pressure={pressure} look={orbLook} working={working} />
       <header className="column-header">
         <div>
-          <h2>Today</h2>
+          <h2>
+            Today <span className="timestamp today-date">{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</span>
+          </h2>
           <Updated at={calendar?.refreshed_at} />
         </div>
         <RefreshButton busy={busy} status={calendarStatus} title="Refresh calendar" onClick={() => refreshCalendar().catch(() => {})} />
       </header>
-
-      {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}
-      {calendar && events.length === 0 && <p className="muted small">No meetings today.</p>}
-      {calendar && <DayGrid events={events} now={now} />}
 
       {upcomingPrep.length > 0 && (
         <section className="prep">
@@ -199,6 +213,11 @@ export function TodayColumn({
           ))}
         </section>
       )}
+
+      {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}
+      {calendar && events.length === 0 && <p className="muted small">No meetings today.</p>}
+      {calendar && <DayGrid events={events} now={now} />}
+
     </section>
   );
 }

@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
+import { RefreshButton } from "./components/common";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
@@ -16,7 +17,7 @@ import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
-import { isDark, useTheme } from "./theme";
+import { useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
 import { setUserProfile } from "./prompts";
 import { OrbGlow } from "./components/PressureBlob";
@@ -150,32 +151,17 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="row">
-          <h1>{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</h1>
-          <span className="motto">Soothe the orb, serve the shareholder.</span>
-        </div>
-        <div className="row">
-          {allStatus ? (
-            <span className="muted small refresh-status">{allStatus}…</span>
-          ) : (
-            running.length > 0 && <span className="muted small">{running.filter((k) => k !== "all").length} refreshing…</span>
-          )}
-          <UpdateButton />
-          <button className="primary" onClick={refreshAllSafely} disabled={refreshingAll} title={`Refresh everything (${MOD}R)`}>
-            {refreshingAll ? "Refreshing…" : "Refresh all"}
-          </button>
-          <button
-            className="icon-button theme-toggle"
-            onClick={() => setTheme(isDark(theme) ? "light" : "dark")}
-            title={isDark(theme) ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={isDark(theme) ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {isDark(theme) ? "☀" : "☾"}
-          </button>
-          <button onClick={() => setShowSettings(true)}>Settings</button>
-        </div>
-      </header>
+      {/* No top bar: Settings and Refresh all sit small in the top-left corner, with what's refreshing beside them. */}
+      {/* The window has no title bar on macOS: this strip along the top drags the window (and zooms it on double-click). */}
+      {!isWindows && <div className="window-drag" data-tauri-drag-region />}
+      <nav className="app-tools" aria-label="App">
+        <button className="cta-ghost" onClick={() => setShowSettings(true)}>
+          Settings
+        </button>
+        <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
+        {!allStatus && running.length > 0 && <span className="timestamp small">{running.filter((k) => k !== "all").length} refreshing…</span>}
+        <UpdateButton />
+      </nav>
 
       <main className="columns">
         <OrbGlow look={orbLook} level={load.level} />

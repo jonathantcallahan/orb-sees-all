@@ -18,14 +18,9 @@ const minutesOfDay = (iso: string) => {
  */
 export function dayRange(events: Pick<CalendarEvent, "start" | "end">[], now?: Date): DayRange {
   let startHour = 8;
-  let endHour = 18;
-  for (const e of events) {
-    startHour = Math.min(startHour, Math.floor(minutesOfDay(e.start) / 60));
-    const end = minutesOfDay(e.end);
-    // A meeting ending at midnight reads as 0; treat it as the end of the day.
-    endHour = Math.max(endHour, Math.ceil((end === 0 ? 24 * 60 : end) / 60));
-  }
-  endHour = Math.min(endHour, 24);
+  // The day always runs to midnight, so the rest of the evening is there to see.
+  const endHour = 24;
+  for (const e of events) startHour = Math.min(startHour, Math.floor(minutesOfDay(e.start) / 60));
   if (now) startHour = Math.max(startHour, Math.min(now.getHours() - 1, endHour - 1));
   return { startHour, endHour };
 }

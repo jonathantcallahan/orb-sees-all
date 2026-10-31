@@ -289,8 +289,8 @@ describe("calendar layout", () => {
   const ev = (id: string, s: [number, number], e: [number, number]) => ({ id, start: at(...s), end: at(...e) });
 
   it("shows 8am to 6pm, stretched for early or late meetings", () => {
-    expect(dayRange([ev("a", [10, 0], [11, 0])])).toEqual({ startHour: 8, endHour: 18 });
-    expect(dayRange([ev("a", [7, 30], [8, 0]), ev("b", [18, 0], [19, 15])])).toEqual({ startHour: 7, endHour: 20 });
+    expect(dayRange([ev("a", [10, 0], [11, 0])])).toEqual({ startHour: 8, endHour: 24 });
+    expect(dayRange([ev("a", [7, 30], [8, 0]), ev("b", [18, 0], [19, 15])])).toEqual({ startHour: 7, endHour: 24 });
   });
 
   it("positions events by time and splits overlapping ones into columns", () => {
@@ -310,7 +310,7 @@ describe("calendar layout", () => {
   it("drops hours that are long past", () => {
     const events = [ev("a", [9, 0], [10, 0]), ev("b", [12, 30], [14, 0])];
     const range = dayRange(events, new Date(2026, 9, 29, 13, 15));
-    expect(range).toEqual({ startHour: 12, endHour: 18 });
+    expect(range).toEqual({ startHour: 12, endHour: 24 });
     const placed = layoutDay(events, range);
     // The 9am meeting is gone; the 12:30 one starts 30 minutes down.
     expect(placed.map((p) => [p.event.id, p.top, p.height])).toEqual([["b", 30, 90]]);

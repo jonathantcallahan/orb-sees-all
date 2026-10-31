@@ -123,7 +123,7 @@ export function TaskDragProvider({
    */
   const shift = (d: Drag, over: DropZoneId | null, y: number): string | null => {
     const source = [...slots.current.today, ...slots.current.rest].find((s) => s.id === d.id);
-    const size = (source ? source.bottom - source.top : 0) + gapOf(slots.current[d.from]);
+    const size = (source ? source.bottom - source.top : 0) + gapOf(slots.current[d.from], d.id);
     let before: string | null = null;
     for (const zone of ["today", "rest"] as DropZoneId[]) {
       const list = slots.current[zone];
@@ -271,9 +271,15 @@ export function TaskDragProvider({
   );
 }
 
-/** The space between two cards in a list (for sizing the gap a dragged card opens). */
-function gapOf(list: Slot[]): number {
-  return list.length > 1 ? Math.max(0, list[1].top - list[0].bottom) : 10;
+/**
+ * The space between two cards (for sizing the gap a dragged card opens): the dragged card's own
+ * list's spacing, read from its container's CSS rather than measured, since neighbors measured
+ * across two groups would count the heading between them.
+ */
+function gapOf(list: Slot[], id: string): number {
+  const el = list.find((s) => s.id === id)?.el.parentElement;
+  const gap = el ? parseFloat(getComputedStyle(el).rowGap) : NaN;
+  return Number.isFinite(gap) ? gap : 10;
 }
 
 /** A place tasks can be dropped; it lights up while a task from the other list is over it. */

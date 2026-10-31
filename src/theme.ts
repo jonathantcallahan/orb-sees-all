@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 
 export type Theme = "system" | "light" | "dark";
@@ -12,6 +13,11 @@ export function storedTheme(): Theme {
 
 export function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
+  // The window itself follows too, so macOS draws its edge and shadow for the same light or dark
+  // (a light app in a dark-mode window gets a black outline).
+  getCurrentWindow()
+    .setTheme(theme === "system" ? null : theme)
+    .catch(() => {});
 }
 
 /** Whether dark colors are showing right now, resolving "system" against macOS. */

@@ -96,14 +96,6 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .loading { padding: 40px; color: var(--muted); }
 
 .app { display: flex; flex-direction: column; height: 100vh; }
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
 .columns {
   flex: 1;
   display: grid;
@@ -173,6 +165,11 @@ th { text-align: left; font-size: 11px; color: var(--muted); }
 td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--border); }
 
 .pressure { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; margin-bottom: 16px; }
+/* The orb's center sits halfway between the bottom of the window's close/minimize/zoom buttons
+   (33px down: 19px plus their 14px) and the top of the stats bars. The orb is centered in its
+   285px box, with the mood line (12px × 1.45) between the box and the bars, so the box starts
+   below the column's top (16px down) by 33 − 16 + 17.4 ≈ 34px. */
+.today-column .pressure { margin-top: 34px; }
 .pressure-blob { width: 100%; height: 285px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
@@ -215,6 +212,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Likewise in Tasks: the inbox, header and add box stay put; the task groups scroll under them. */
 .tasks-column { overflow: hidden; padding-bottom: 0; }
 .task-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
+/* Its sections keep their full height and the list scrolls, rather than squeezing them. */
+.task-list > * { flex-shrink: 0; }
 .project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: calc(var(--mist-height) + 24px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
@@ -340,6 +339,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Shared by everything that opens and closes in place (task cards, Reveal). */
 :root { --open-ease: cubic-bezier(0.16, 1, 0.3, 1); --close-ease: cubic-bezier(0.4, 0, 1, 1); }
 .task-card.collapsed { cursor: pointer; }
+/* A collapsed card is a handle: pressing its title starts a drag, not a text selection. */
+.task-card.collapsed .task-card-header, .task-card.collapsed .task-card-header .task-title { user-select: none; -webkit-user-select: none; cursor: grab; }
 /* Collapsed cards sit a little tighter. The padding eases with the body's height, so the title row
    glides to its new place instead of jumping. */
 .task-card { transition: padding 280ms var(--open-ease); }
@@ -375,6 +376,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Day grid: meetings at their real times, with a line at the current time */
 .day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
+/* In the Today column the grid takes the rest of the height, so midnight sits at the bottom, just
+   above the fog. */
+.today-column .day-grid { flex-grow: 1; margin-bottom: 0; }
+.today-column { padding-bottom: calc(var(--mist-height) + 4px); }
 .day-grid .hour { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 .hour-label { position: absolute; top: -7px; left: 0; width: 38px; font-size: 10px; color: var(--muted); background: var(--bg); padding-right: 4px; text-align: right; }
 /* Inset from the right so blocks and their borders sit inside the scrolling column, which clips. */
@@ -589,7 +594,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* A drawn star rather than the ✦ character, whose ink sits off-center in most fonts. */
 .sparkle { flex-shrink: 0; display: block; }
 
-.motto { color: var(--muted); font-size: 17px; margin-left: 2px; }
 
 /* All tasks filters: one control per category in the group heading */
 .group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
@@ -1249,3 +1253,13 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 
 /* "Orb can help" after the Plan heading, in the timestamps' lighter gray (.timestamp). */
 .automation-role { font-size: 12px; }
+
+/* Settings and Refresh all in the bottom-left corner, over the fog. Fixed outside the columns, so
+   pointing at them doesn't count as hovering the Today column (which shows its own refresh). */
+.app-tools { position: fixed; left: 20px; bottom: 16px; z-index: 6; display: flex; align-items: center; gap: 6px; }
+.app-tools .timestamp { margin-left: 2px; }
+/* Always shown here, unlike the column refresh buttons that appear on hover. */
+.app-tools .refresh { visibility: visible; }
+/* The window has no title bar on macOS: this strip along the top drags it. */
+.window-drag { position: fixed; top: 0; left: 0; right: 0; height: 14px; z-index: 5; }
+.today-date { margin-left: 4px; }
