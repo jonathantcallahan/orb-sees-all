@@ -280,6 +280,39 @@ export type StepRecheck = z.infer<typeof StepRecheck>;
 /** Who the user is at work, worked out by Claude for "About you". */
 export const LearnedRole = z.object({ name: z.string().nullish(), role: z.string() });
 
+/**
+ * A change the global chat proposes to the planner itself, applied only when the user clicks Apply
+ * (see globalActions.ts). Project ids are channel ids, as everywhere else.
+ */
+export const GlobalAction = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("create_project"),
+    name: z.string(),
+    channels: z.array(z.object({ channel_id: z.string(), name: z.string() })).min(1),
+    reason: z.string().nullish(),
+  }),
+  z.object({
+    type: z.literal("split_project"),
+    project_id: z.string(),
+    new_name: z.string(),
+    /** The channels that move to the new project; the first becomes its main channel. */
+    channel_ids: z.array(z.string()).min(1),
+    reason: z.string().nullish(),
+  }),
+  z.object({ type: z.literal("merge_projects"), from_id: z.string(), into_id: z.string() }),
+  z.object({ type: z.literal("rename_project"), project_id: z.string(), name: z.string() }),
+  z.object({ type: z.literal("set_project_tracking"), project_id: z.string(), tracked: z.boolean() }),
+  z.object({ type: z.literal("add_note"), text: z.string() }),
+  z.object({ type: z.literal("update_profile"), text: z.string() }),
+  z.object({ type: z.literal("add_task"), title: z.string(), project_id: z.string().nullish() }),
+  z.object({
+    type: z.literal("refresh"),
+    what: z.enum(["all", "project", "briefing", "calendar", "tasks"]),
+    project_id: z.string().nullish(),
+  }),
+]);
+export type GlobalAction = z.infer<typeof GlobalAction>;
+
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 
 export const DailyReading = z.object({

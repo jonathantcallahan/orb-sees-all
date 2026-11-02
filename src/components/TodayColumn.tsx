@@ -1,12 +1,14 @@
 import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { setTaskState } from "../db";
+import { collectLinks } from "../links";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
-import { nameFromChannel } from "../projects";
 import type { CalendarDay, CalendarEvent } from "../schema";
-import { applyTaskState, type Pressure, type TaskState } from "../tasks";
-import { Checklist, RefreshButton, Updated } from "./common";
+import { stateOf, type Pressure, type TaskState } from "../tasks";
+import { RefreshButton, Updated } from "./common";
+import { LinkChips } from "./LinkChips";
 import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
@@ -47,16 +49,43 @@ function VideoIcon() {
   );
 }
 
-/** Details shown while hovering a meeting: what it's about and how to prepare. */
-function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
+/** How long a meeting's card stays up after the pointer leaves, so it can travel over to the card. */
+const CARD_LINGER_MS = 250;
+
+/** A meeting's prep items not dismissed, and how many are done. */
+function prepOf(ev: CalendarEvent, states: Map<string, TaskState>) {
+  const items = ev.prep.filter((p) => !stateOf(states, p.id).dismissed);
+  return { items, done: items.filter((p) => stateOf(states, p.id).done).length };
+}
+
+/**
+ * Details shown while hovering a meeting: what it's about, and its prep as a checklist you can tick
+ * off right there, each item's link as a chip. The pointer can move from the meeting onto the card.
+ */
+function MeetingCard({
+  ev,
+  anchor,
+  states,
+  onChange,
+  onEnter,
+  onLeave,
+}: {
+  ev: CalendarEvent;
+  anchor: DOMRect;
+  states: Map<string, TaskState>;
+  onChange: () => void;
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
   const width = 280;
   // Beside the block, kept inside the window. In the lower half of the window it
   // grows upward from the block's bottom edge so it isn't cut off.
-  const left = Math.min(anchor.right + 8, window.innerWidth - width - 8);
+  const left = Math.min(anchor.right + 6, window.innerWidth - width - 8);
+  const prep = prepOf(ev, states);
   const vertical = anchor.top > window.innerHeight / 2 ? { bottom: Math.max(8, window.innerHeight - anchor.bottom) } : { top: anchor.top };
   // Rendered into <body>: inside the column it would sit under the next column's layer.
   return createPortal(
-    <div className="card meeting-card" style={{ left, width, ...vertical }} role="tooltip">
+    <div className="card meeting-card" style={{ left, width, ...vertical }} role="dialog" aria-label={ev.title} onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <div className="meeting-card-title">{ev.title}</div>
       <div className="timestamp small">
         {time(ev.start)} – {time(ev.end)}
@@ -64,13 +93,32 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
       </div>
       {ev.summary && <p className="small">{ev.summary}</p>}
       {ev.attendees.length > 0 && <div className="muted small">With {ev.attendees.join(", ")}</div>}
-      {ev.prep.length > 0 && (
+      {prep.items.length > 0 && (
         <>
-          <h4>Prep</h4>
-          <ul className="small meeting-prep">
-            {ev.prep.map((p) => (
-              <li key={p.id}>{p.title}</li>
-            ))}
+          <h4>
+            Prep <span className="timestamp">{prep.done}/{prep.items.length}</span>
+          </h4>
+          <ul className="checklist small meeting-prep">
+            {prep.items.map((p) => {
+              const done = stateOf(states, p.id).done;
+              return (
+                <li key={p.id} className={done ? "done" : undefined}>
+                  <input
+                    type="checkbox"
+                    checked={done}
+                    aria-label={p.title}
+                    onChange={async (e) => {
+                      await setTaskState(p.id, { status: e.target.checked ? "done" : "todo" });
+                      onChange();
+                    }}
+                  />
+                  <div className="task-body">
+                    <span className="task-title">{p.title}</span>
+                    {p.link && <LinkChips links={collectLinks([{ url: p.link }])} />}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
@@ -79,7 +127,17 @@ function MeetingCard({ ev, anchor }: { ev: CalendarEvent; anchor: DOMRect }) {
   );
 }
 
-function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
+function DayGrid({
+  events: all,
+  now,
+  states,
+  onChange,
+}: {
+  events: CalendarEvent[];
+  now: Date;
+  states: Map<string, TaskState>;
+  onChange: () => void;
+}) {
   // Meetings you declined don't take up space on your day.
   const events = all.filter((ev) => ev.my_response !== "declined");
   // The grid keeps one scale and the column scrolls. Late in the day, when the hours left don't
@@ -102,6 +160,14 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
   const placed = layoutDay(events, range);
   const nowTop = nowOffset(now, range);
   const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
+  // Leaving a meeting closes its card a moment later, unless the pointer arrives on the card.
+  const linger = useRef<number>(0);
+  const keep = () => window.clearTimeout(linger.current);
+  const release = () => {
+    keep();
+    linger.current = window.setTimeout(() => setHover(null), CARD_LINGER_MS);
+  };
+  useEffect(() => keep, []);
   const minutes = (range.endHour - range.startHour) * 60;
   // Late, everything shifts so midnight lands on the bottom line; the earliest hour is cut off at the top.
   const shift = late ? room - 8 - minutes * PX_PER_MIN : 0;
@@ -121,6 +187,7 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
           const joinSoon = !past && new Date(ev.start).getTime() - now.getTime() <= 10 * 60_000;
           // Drawn height decides what fits: the name always, then the time, then the prep count.
           const px = Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18);
+          const prep = prepOf(ev, states);
           return (
             <div
               key={ev.id}
@@ -136,12 +203,19 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
               }}
               onClick={() => ev.link && openUrl(ev.link)}
               onKeyDown={(e) => e.key === "Enter" && ev.link && openUrl(ev.link)}
-              onMouseEnter={(e) => setHover({ ev, anchor: e.currentTarget.getBoundingClientRect() })}
-              onMouseLeave={() => setHover(null)}
+              onMouseEnter={(e) => {
+                keep();
+                setHover({ ev, anchor: e.currentTarget.getBoundingClientRect() });
+              }}
+              onMouseLeave={release}
             >
               <span className="event-name">{ev.title}</span>
               {px >= 32 && <span className="event-when">{time(ev.start)}</span>}
-              {ev.prep.length > 0 && px >= (px >= 32 ? 44 : 32) && <span className="event-prep">{ev.prep.length} prep</span>}
+              {prep.items.length > 0 && px >= (px >= 32 ? 44 : 32) && (
+                <span className={`event-prep${prep.done === prep.items.length ? " complete" : ""}`}>
+                  {prep.done}/{prep.items.length} prep
+                </span>
+              )}
               {ev.video_link && !past && (
                 <button
                   className={`join${joinSoon ? " soon" : ""}`}
@@ -160,7 +234,7 @@ function DayGrid({ events: all, now }: { events: CalendarEvent[]; now: Date }) {
         })}
       </div>
       {nowTop != null && <div className="now-line" style={{ top: shift + nowTop * PX_PER_MIN }} />}
-      {hover && <MeetingCard ev={hover.ev} anchor={hover.anchor} />}
+      {hover && <MeetingCard ev={hover.ev} anchor={hover.anchor} states={states} onChange={onChange} onEnter={keep} onLeave={release} />}
     </div>
   );
 }
@@ -186,10 +260,6 @@ export function TodayColumn({
   const now = useNow();
   const calendarStatus = useJobStatus("calendar");
   const events = calendar?.day.events ?? [];
-  // Prep only matters for meetings that haven't ended.
-  const upcomingPrep = [...events]
-    .sort((a, b) => a.start.localeCompare(b.start))
-    .filter((ev) => ev.prep.length > 0 && ev.my_response !== "declined" && new Date(ev.end) >= now);
 
   return (
     <section className="column today-column">
@@ -204,24 +274,9 @@ export function TodayColumn({
         <RefreshButton busy={busy} status={calendarStatus} title="Refresh calendar" onClick={() => refreshCalendar().catch(() => {})} />
       </header>
 
-      {upcomingPrep.length > 0 && (
-        <section className="prep">
-          <h4 className="section-title">Prep</h4>
-          {upcomingPrep.map((ev) => (
-            <div key={ev.id} className="prep-meeting">
-              <div className="small prep-for" title={ev.title}>
-                <span className="timestamp">{time(ev.start)}</span> {ev.title}
-                {ev.related_project && <span className="chip">{nameFromChannel(ev.related_project)}</span>}
-              </div>
-              <Checklist tasks={applyTaskState(ev.prep, taskStates)} onChange={onChange} />
-            </div>
-          ))}
-        </section>
-      )}
-
       {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}
       {calendar && events.length === 0 && <p className="muted small">No meetings today.</p>}
-      {calendar && <DayGrid events={events} now={now} />}
+      {calendar && <DayGrid events={events} now={now} states={taskStates} onChange={onChange} />}
 
     </section>
   );

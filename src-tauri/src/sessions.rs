@@ -158,9 +158,10 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                 }
                 if trimmed.starts_with("[orb]") {
                     lines.push(trimmed.to_string());
-                    // Hand-offs ("[orb] send …") and plan updates ("[orb] plan") carry a block of text up to "[orb] end".
+                    // Hand-offs ("[orb] send …"), plan updates ("[orb] plan") and proposed changes ("[orb] action")
+                    // carry a block of text up to "[orb] end".
                     let lower = trimmed.to_ascii_lowercase();
-                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") {
+                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") {
                         open = Some((trimmed.to_string(), Vec::new()));
                     }
                 }
@@ -182,7 +183,7 @@ mod tests {
         let user = r#"{"type":"user","message":{"role":"user","content":"Orb task: t-42\n\nWrite `[orb] step N done` when finished."}}"#;
         let reply = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading it now.\n[orb] step 1 started\n`[orb] step 1 done`"}]}}"#;
         let waiting = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[orb] step 2 waiting: need the export"}]}}"#;
-        let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end"}]}}"#;
+        let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end\n[orb] action\n{\"type\": \"add_note\", \"text\": \"Refunds is paused\"}\n[orb] end"}]}}"#;
         std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{waiting}\n{send}\n")).unwrap();
         std::fs::write(project.join("other.jsonl"), r#"{"type":"user","message":{"content":"Orb task: t-7"}}"#).unwrap();
         std::env::set_var("HOME", &home);
@@ -193,7 +194,7 @@ mod tests {
             let progress = read_session_progress(found.path).await.unwrap();
             assert_eq!(
                 progress.lines,
-                vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x"]
+                vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x", "[orb] action"]
             );
             assert_eq!(progress.messages[0].role, "user");
             assert_eq!(progress.messages[0].text, "Orb task: t-42\n\nWrite `[orb] step N done` when finished.");
@@ -201,10 +202,13 @@ mod tests {
             assert!(progress.messages[1].text.starts_with("Reading it now."));
             assert_eq!(
                 progress.sends,
-                vec![SessionSend {
-                    header: "[orb] send step 3 to #tmp-x".into(),
-                    body: "Heads up, the filter is live.\n• Use `publisherId=`".into()
-                }]
+                vec![
+                    SessionSend {
+                        header: "[orb] send step 3 to #tmp-x".into(),
+                        body: "Heads up, the filter is live.\n• Use `publisherId=`".into()
+                    },
+                    SessionSend { header: "[orb] action".into(), body: r#"{"type": "add_note", "text": "Refunds is paused"}"#.into() },
+                ]
             );
             assert!(find_session("Orb task: t-99".into(), 0).await.unwrap().is_none());
             // Paths outside the transcripts folder are refused.

@@ -56,6 +56,20 @@ const SESSION_DISALLOWED = [
   ...["jira_create_issue", "jira_update_issue", "jira_add_comment", "jira_transition_issue", "jira_delete_issue", "jira_edit_comment"].map((t) => `mcp__mcp-jira__${t}`),
 ];
 
+/** Corrections the user has given in the global chat; every run is told them. */
+let notes: string[] = [];
+
+export function setStandingNotes(list: string[]) {
+  notes = list.map((n) => n.trim()).filter(Boolean);
+}
+
+/** The standing corrections as a system prompt addition, or "" when there are none. */
+export function notesPrompt(): string {
+  return notes.length
+    ? `Corrections and context the user has given you about their work. Take them as true and let them shape what you find and write:\n${notes.map((n) => `- ${n}`).join("\n")}`
+    : "";
+}
+
 export interface ClaudeOptions<T> {
   prompt: string;
   schema: z.ZodType<T>;
@@ -200,6 +214,7 @@ async function callOnce(
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
+    ...(notesPrompt() ? ["--append-system-prompt", notesPrompt()] : []),
   ];
   const onStatus = opts.onStatus;
   const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
@@ -300,7 +315,7 @@ export async function runSessionTurn(
     "--max-turns",
     String(opts.maxTurns ?? 80),
     "--append-system-prompt",
-    opts.context ? `${SESSION_DISPLAY}\n\n${opts.context}` : SESSION_DISPLAY,
+    [SESSION_DISPLAY, notesPrompt(), opts.context].filter(Boolean).join("\n\n"),
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,

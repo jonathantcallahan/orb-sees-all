@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
+import { GlobalAction } from "./schema";
 
 /** A task's link to the Claude Code session Orb opened for it. */
 export interface SessionLink {
@@ -22,6 +23,10 @@ export interface SessionLink {
   doneTitles?: string[];
   /** Keys of handed-off messages Orb has already sent (see PendingSend). */
   sentKeys?: string[];
+  /** Proposed changes the user applied, by key (see PendingAction): what each was and what came of it. */
+  applied?: Record<string, { summary: string; result: string }>;
+  /** Keys of proposed changes the user turned down. */
+  dismissedKeys?: string[];
   /**
    * Orb's latest re-check of the steps against the conversation (see recheckSessionSteps): the plan
    * and states it settled on, and how many report lines the transcript had then. Reports written
@@ -47,6 +52,14 @@ export interface PendingSend {
   text: string;
 }
 
+/** A change the session proposed to the planner ("[orb] action" … "[orb] end"), for the user to apply. */
+export interface PendingAction {
+  key: string;
+  /** The change, or null when the block wasn't a change Orb understands (see error). */
+  action: GlobalAction | null;
+  error?: string;
+}
+
 export type StepState = "started" | "done" | "waiting" | "skipped" | "blocked";
 
 export interface StepProgress {
@@ -66,10 +79,15 @@ export interface ChatMessage {
 /** The conversation as you'd read it: the opening prompt left out, Claude's report lines and hand-offs removed. */
 export function readableMessages(raw: ChatMessage[]): ChatMessage[] {
   return raw
+    // An opening prompt that carries the user's own first words (the global chat's) shows as just those.
+    .map((m, i) => (i === 0 && m.role === "user" && m.text.startsWith("Orb task:") && m.text.includes(OPENING_MESSAGE) ? { ...m, text: m.text.slice(m.text.lastIndexOf(OPENING_MESSAGE) + OPENING_MESSAGE.length) } : m))
     .filter((m, i) => !(i === 0 && m.role === "user" && m.text.startsWith("Orb task:")))
     .map((m) => (m.role === "assistant" ? { ...m, text: readableReply(m.text) } : { ...m, text: m.text.trim() }))
     .filter((m) => m.text);
 }
+
+/** Where an opening prompt quotes the user's first message (see globalChatPrompt). */
+export const OPENING_MESSAGE = "\nMy message: ";
 
 export interface StepRecheckResult {
   plan: PlanStep[];
@@ -91,6 +109,8 @@ export interface SessionProgress {
   steps: Record<number, StepProgress>;
   /** Messages the session handed to Orb, oldest first. */
   sends: PendingSend[];
+  /** Changes the session proposed, oldest first. */
+  actions?: PendingAction[];
   /** The conversation since the opening prompt: your messages and Claude's, without its report lines. */
   messages?: ChatMessage[];
   /** Your latest message to the session, unless it's still the opening prompt. */
@@ -202,6 +222,30 @@ export function parseSends(blocks: { header: string; body: string }[]): PendingS
   });
 }
 
+const ACTION = /^\[orb\]\s*action\b/i;
+
+/** Turns the session's "[orb] action / [orb] end" blocks into proposed changes, the same change once. */
+export function parseActions(blocks: { header: string; body: string }[]): PendingAction[] {
+  const seen = new Set<string>();
+  return blocks.flatMap(({ header, body }) => {
+    if (!ACTION.test(header)) return [];
+    const text = body
+      .trim()
+      .replace(/^```[a-z]*\n?/i, "")
+      .replace(/\n?```$/, "")
+      .trim();
+    const key = messageKey("action", text);
+    if (!text || seen.has(key)) return [];
+    seen.add(key);
+    try {
+      const parsed = GlobalAction.safeParse(JSON.parse(text));
+      return [parsed.success ? { key, action: parsed.data } : { key, action: null, error: "Couldn't read this change" }];
+    } catch {
+      return [{ key, action: null, error: "Couldn't read this change" }];
+    }
+  });
+}
+
 /**
  * The handed-off messages still to send: unsent ones, and only the latest for each step (a session
  * that revises a message hands it over again).
@@ -216,7 +260,9 @@ export function unsentMessages(sends: PendingSend[], link: SessionLink | undefin
 /** Claude's message as the user should read it: "[orb]" report lines and hand-off blocks taken out. */
 export function readableReply(text: string): string {
   return text
-    .replace(/^\s*`?\[orb\] (?:send|plan)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    .replace(/^\s*`?\[orb\] (?:send|plan|action)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    // A block still being written (a reply streaming in) is hidden until it's complete.
+    .replace(/^\s*`?\[orb\] (?:send|plan|action)[^\n]*(?:\n[\s\S]*)?$/im, "")
     .split("\n")
     .filter((line) => !/^\s*[-`]*\s*\[orb\]/i.test(line))
     .join("\n")
@@ -302,6 +348,7 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
             steps: now.steps,
             reports: lines.length,
             sends: parseSends(sends),
+            actions: parseActions(sends),
             messages,
             lastUser: lastUserAt >= 0 ? messages[lastUserAt].text : null,
             lastReply: after.length ? after.map((m) => m.text).join("\n\n") : null,

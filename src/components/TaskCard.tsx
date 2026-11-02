@@ -574,7 +574,17 @@ function ClaudeText({ text }: { text: string }) {
  * Where you write back to the session: grows with what you type; Enter sends, Shift+Enter starts a
  * new line (and text being composed with an input method is never sent early).
  */
-function Composer({ onSend, autoFocus = false, disabled = false }: { onSend: (text: string) => void; autoFocus?: boolean; disabled?: boolean }) {
+function Composer({
+  onSend,
+  autoFocus = false,
+  disabled = false,
+  placeholder = "Reply to Claude…",
+}: {
+  onSend: (text: string) => void;
+  autoFocus?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = () => {
@@ -608,8 +618,8 @@ function Composer({ onSend, autoFocus = false, disabled = false }: { onSend: (te
           autoFocus={autoFocus}
           disabled={disabled}
           value={text}
-          placeholder="Reply to Claude…"
-          aria-label="Reply to Claude"
+          placeholder={placeholder}
+          aria-label={placeholder.replace(/…$/, "")}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -673,6 +683,11 @@ export function SessionChat({
   canReply,
   askAction,
   plain = false,
+  headAction,
+  extra,
+  empty,
+  placeholder,
+  onSend,
   onClose,
   onChange,
 }: {
@@ -690,6 +705,15 @@ export function SessionChat({
   working: string | undefined;
   toSend: PendingSend[];
   canReply: boolean;
+  /** Beside the close button (New chat, in the global chat). */
+  headAction?: ReactNode;
+  /** More cards under the conversation once Claude's turn is over (proposed changes, in the global chat). */
+  extra?: ReactNode;
+  /** Shown while the conversation is empty. */
+  empty?: ReactNode;
+  placeholder?: string;
+  /** Sends your message another way than continuing the session (the global chat's first message starts it). */
+  onSend?: (message: string) => void;
   onClose: () => void;
   onChange: () => void;
 }) {
@@ -706,7 +730,8 @@ export function SessionChat({
   }, [lastUser]);
   const send = (message: string) => {
     setSent(message);
-    continueTaskSession(taskId, message).then(onChange, onChange);
+    if (onSend) onSend(message);
+    else continueTaskSession(taskId, message).then(onChange, onChange);
     onChange();
   };
   // While Claude answers, its reply streams in as it's written; the transcript's copy of this turn
@@ -742,9 +767,12 @@ export function SessionChat({
         <div className="chat-modal-top">
           <header className="chat-modal-head">
             <span className="chat-modal-title">{title}</span>
-            <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
-              <CloseIcon />
-            </button>
+            <span className="chat-modal-head-actions">
+              {headAction}
+              <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
+                <CloseIcon />
+              </button>
+            </span>
           </header>
           {ask && (
             <div className="chat-ask">
@@ -758,6 +786,7 @@ export function SessionChat({
           )}
         </div>
         <div className="chat-log" ref={scroller}>
+          {!shown.length && !busy && empty}
           {shown.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="chat-turn you">
@@ -782,10 +811,11 @@ export function SessionChat({
             </div>
           )}
           {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
+          {!busy && extra}
         </div>
         {canReply && (
           <footer className="chat-modal-foot">
-            <Composer onSend={send} autoFocus disabled={busy} />
+            <Composer onSend={send} autoFocus disabled={busy} placeholder={placeholder} />
           </footer>
         )}
       </div>

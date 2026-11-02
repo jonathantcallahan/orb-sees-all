@@ -9,12 +9,14 @@ import { UpdateButton } from "./components/UpdateButton";
 import { WindowButtons } from "./components/WindowButtons";
 import { SetupScreen } from "./components/SetupScreen";
 import { Onboarding } from "./components/Onboarding";
+import { GlobalChat } from "./components/GlobalChat";
 import { isWindows, MOD } from "./platform";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
-import { getSetting, markInterruptedJobs, setSetting } from "./db";
+import { getNotes, getSetting, markInterruptedJobs, setSetting } from "./db";
+import { setStandingNotes } from "./claude";
 import { maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
@@ -78,6 +80,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   // The menu bar's hidden "Replay onboarding".
   useEffect(() => {
     const unlisten = listen("tray-onboarding", () => setShowOnboarding(true));
@@ -99,6 +102,7 @@ export default function App() {
   // Who you are, for the prompts (Settings > About you).
   useEffect(() => {
     getSetting("user_profile").then(setUserProfile, () => {});
+    getNotes().then(setStandingNotes, () => {});
   }, []);
   const allStatus = useJobStatus("all");
   const [projectFilter, setProjectFilter] = useProjectFilter();
@@ -170,6 +174,17 @@ export default function App() {
           Settings
         </button>
         <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
+        <button className="icon-button chat-icon" onClick={() => setShowChat(true)} title="Chat with Demian" aria-label="Chat with Demian">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+            <path
+              d="M2.5 2.5h9a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H6.2L3.5 12.2V10h-1a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         {!allStatus && running.length > 0 && <span className="timestamp small">{running.filter((k) => k !== "all").length} refreshing…</span>}
         <UpdateButton />
       </nav>
@@ -242,6 +257,7 @@ export default function App() {
 
       <Mist level={load.level} look={orbLook} />
 
+      {showChat && <GlobalChat projects={data.projects} onClose={() => setShowChat(false)} onApplied={reload} />}
       {showOnboarding && (
         <Onboarding
           onDone={() => {

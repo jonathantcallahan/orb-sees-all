@@ -417,11 +417,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-when, .event-prep { color: var(--muted); font-size: 10px; }
 .event-when { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .event-prep { color: var(--amber); }
+.event-prep.complete { color: var(--muted); }
 /* The current time: a 1px line, the same weight as the hour lines, in red. */
 .now-line { position: absolute; left: 44px; right: 0; height: 0; border-top: 1px solid var(--red); z-index: 2; pointer-events: none; }
-.prep-meeting { margin-bottom: 8px; }
-.prep-for { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
-.prep-for .chip { margin-left: 4px; }
 
 /* Join-the-call icon, top right of a meeting block */
 .event-block .event-name { padding-right: 18px; }
@@ -452,11 +450,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   flex-direction: column;
   gap: 4px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-  pointer-events: none;
 }
 .meeting-card p { margin: 2px 0; }
 .meeting-card h4 { margin: 6px 0 0; }
-.meeting-prep { margin: 0; padding-left: 16px; }
+/* The meeting's prep, ticked off in the card; each item's link as a chip under it. */
+.meeting-prep { margin: 2px 0 0; }
+.meeting-prep .task-title { color: var(--text); }
+.meeting-prep .link-chips { margin-top: 3px; }
 
 /* Daily reading */
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
@@ -757,7 +757,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .cta-primary:hover { opacity: 0.88; }
 
 /* Description: cut to two lines with "…" and a gray More at the end */
-.description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; }
+.description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; min-width: 0; overflow: hidden; }
+/* The links never wrap; a long status (a double check under way) truncates instead. */
+.description-actions > * { white-space: nowrap; flex-shrink: 0; }
+.description-actions > .checking { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .link-button.more-link { color: var(--muted); }
 
 /* Plan details modal, centered */
@@ -1329,3 +1332,20 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* It takes focus so Return starts; no focus ring for that. */
 .onboarding-start:focus { outline: none; }
 @keyframes onboarding-start-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Settings: the standing corrections from the global chat, each removable */
+.notes-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.notes-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; color: var(--text); line-height: 1.4; }
+.notes-list .icon-button { line-height: 0; padding: 2px; opacity: 0.6; }
+.notes-list .icon-button:hover { opacity: 1; }
+
+/* The global chat's icon, beside Refresh all: the refresh wheel's size and gray. */
+.app-tools .chat-icon { display: grid; place-items: center; padding: 0 4px; height: 20px; line-height: 0; }
+.app-tools .chat-icon:hover { color: var(--text); }
+.chat-modal-head-actions { display: flex; align-items: center; gap: 10px; }
+.global-chat-empty { margin: 4px 0; line-height: 1.5; }
+/* A change the global chat proposed: what it does, with Apply and Not this. */
+.action-card .handoff-head { align-items: flex-start; }
+.action-summary { color: var(--text); line-height: 1.45; }
+.action-buttons { display: flex; gap: 6px; flex-shrink: 0; }
+.action-card.applied { opacity: 0.85; }

@@ -131,6 +131,48 @@ export async function mergeProject(fromId: string, intoId: string) {
   await d.execute("UPDATE manual_tasks SET project_id = $1 WHERE project_id = $2", [intoId, fromId]);
 }
 
+/** A project the user named (from the global chat): tracked, with its channels; the first is its main one. */
+export async function createProject(name: string, channels: { channel_id: string; name: string }[], reason?: string | null) {
+  const d = await db();
+  const id = channels[0].channel_id;
+  await d.execute(
+    "INSERT INTO projects (channel_id, name, hidden, state, found_reason) VALUES ($1, $2, 0, 'tracked', $3) ON CONFLICT(channel_id) DO UPDATE SET name = excluded.name, hidden = 0, state = 'tracked', merged_into = NULL",
+    [id, name, reason ?? null],
+  );
+  for (const [i, c] of channels.entries())
+    await d.execute(
+      "INSERT OR REPLACE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, $4, 'user', $5, $6)",
+      [c.channel_id, id, c.name.replace(/^#/, ""), i === 0 ? "primary" : "related", reason ?? null, nowIso()],
+    );
+  return id;
+}
+
+/**
+ * Splits channels off a project into a new one: the first moved channel becomes the new project's
+ * id and main channel. Returns the new project's id.
+ */
+export async function splitProject(fromId: string, name: string, channelIds: string[], reason?: string | null) {
+  const channels = (await listProjectChannels()).filter((c) => c.project_id === fromId);
+  const moving = channelIds.map((id) => channels.find((c) => c.channel_id === id)).filter((c): c is ProjectChannel => !!c);
+  if (!moving.length) throw new Error("None of those channels belong to that project");
+  // The original project keeps its id, so if its main channel moves, the one left behind takes over.
+  if (moving.some((c) => c.channel_id === fromId)) throw new Error("A project's main channel can't move; split the other channels off instead");
+  return createProject(name, moving, reason);
+}
+
+export async function renameProject(id: string, name: string) {
+  await (await db()).execute("UPDATE projects SET name = $1 WHERE channel_id = $2", [name, id]);
+}
+
+/** Standing corrections from the user (via the global chat) that every job is told. */
+export async function getNotes(): Promise<string[]> {
+  return json<string[]>(await getSetting("user_notes")) ?? [];
+}
+
+export async function saveNotes(notes: string[]) {
+  await setSetting("user_notes", JSON.stringify(notes));
+}
+
 export async function saveProjectSnapshot(channelId: string, snapshot: ProjectSnapshot, profile: ProjectProfile, refreshedAt: string) {
   await (await db()).execute(
     "UPDATE projects SET snapshot = $1, profile = $2, last_refreshed_at = $3, last_error = NULL WHERE channel_id = $4",

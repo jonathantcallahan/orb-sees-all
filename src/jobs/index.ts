@@ -3,8 +3,8 @@ import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
 import { epicCheckPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
-import { approvedPlanMessage } from "../openInClaude";
-import { linkSession, type PendingSend, type PlanStep, type SessionProgress, type StepProgress } from "../sessions";
+import { approvedPlanMessage, globalChatPrompt } from "../openInClaude";
+import { linkSession, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
@@ -411,7 +411,11 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
             return `${i + 1}. ${st.by === "you" ? "[Me] " : ""}${st.title} (${s ? s.state : "not started"})`;
           })
           .join("\n");
-        const context = steps ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}` : undefined;
+        const context = taskId.startsWith("global:")
+          ? await globalContext(link)
+          : steps
+            ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
+            : undefined;
         // The reply as it's written, for the chat to show live (a few times a second at most).
         let last = 0;
         const onText = (text: string) => {
@@ -432,6 +436,46 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
       }
     }),
   );
+}
+
+/** What the planner shows right now, for the global chat's next turn, so it works from current ids. */
+async function globalContext(link: SessionLink | undefined): Promise<string> {
+  const [projects, reading, adhoc, manual, states, profile, notes] = await Promise.all([
+    db.listProjects(),
+    db.getReading(),
+    db.getAdhoc(),
+    db.listManualTasks(),
+    db.getTaskStates(),
+    db.getSetting("user_profile"),
+    db.getNotes(),
+  ]);
+  const open = (id: string) => !["done"].includes(states.get(id)?.status ?? "todo") && !states.get(id)?.dismissed;
+  const projectLines = projects
+    .filter((p) => p.state !== "merged")
+    .map((p) => {
+      const channels = p.channels.filter((c) => c.role !== "excluded").map((c) => `#${c.name} (${c.channel_id})`).join(", ");
+      const status = p.snapshot ? ` — ${p.snapshot.status}: ${p.snapshot.status_reason}` : "";
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}`;
+    });
+  const tasks = [
+    ...projects.filter((p) => p.state === "tracked").flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: projectName(p) }))),
+    ...adhoc.tasks.map((t) => ({ id: t.id, title: t.title, where: t.source })),
+    ...manual.map((t) => ({ id: t.id, title: t.title, where: "added by me" })),
+  ].filter((t) => open(t.id));
+  return [
+    "What my planner shows right now:",
+    `About me: ${profile?.trim() || "(not set)"}`,
+    notes.length ? `Corrections I've already given:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
+    `Projects (tracked ones are on the board; suggested and ignored ones aren't):\n${projectLines.join("\n") || "(none)"}`,
+    reading ? `Today's briefing: ${reading.text}` : "",
+    `Open tasks:\n${tasks.slice(0, 60).map((t) => `- ${t.title} (${t.where})`).join("\n") || "(none)"}`,
+    link?.applied && Object.keys(link.applied).length
+      ? `Changes you proposed that I've applied (the rest I haven't, or turned down):\n${Object.values(link.applied).map((a) => `- ${a.summary}. ${a.result}`).join("\n")}`
+      : "",
+    link?.dismissedKeys?.length ? `I turned down ${link.dismissedKeys.length} of your proposed changes.` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -501,6 +545,22 @@ export async function startChatSession(key: string, prompt: string, onTurn: () =
   await linkSession(key);
   bump();
   runTaskSession(key, prompt).then(onTurn, onTurn);
+}
+
+/** The global chat's current conversation, kept across restarts until New chat starts another. */
+export async function globalChatKey(fresh = false): Promise<string> {
+  const current = await db.getSetting("global_chat_key");
+  if (current && !fresh) return current;
+  const key = `global:${Date.now()}`;
+  await db.setSetting("global_chat_key", key);
+  return key;
+}
+
+/** Starts the global chat's session with the user's first message; resolves once it's linked. */
+export async function startGlobalChat(key: string, message: string, onTurn: () => void): Promise<void> {
+  await linkSession(key);
+  bump();
+  runTaskSession(key, globalChatPrompt(key, message)).then(onTurn, onTurn);
 }
 
 /** The user approved the plan they discussed: the same session starts the work, as agreed. */

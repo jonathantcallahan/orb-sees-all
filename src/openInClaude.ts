@@ -194,6 +194,36 @@ export function explainPrompt(u: ExplainedUpdate): string {
   ].join("\n");
 }
 
+/**
+ * The opening of a global chat: the user's first message, and how Claude helps them fix the planner
+ * itself. Changes go to the planner as "[orb] action" blocks, which the user applies one by one.
+ */
+export function globalChatPrompt(key: string, firstMessage: string): string {
+  return [
+    sessionMarker(key),
+    "",
+    "You're the assistant inside my day planner, Demian. It reads my Slack, email, calendar and Jira, and shows my projects, tasks, inbox and a daily briefing. I'm talking to you about the planner itself: something it has wrong or is missing, or something I want it to do.",
+    "Each turn, my planner tells you what it currently shows (my projects with their ids and channels, today's briefing, my tasks, and what you already know about me). Use those ids.",
+    "Read Slack, email, the calendar, Jira and Drive when you need to check something or find what I mean (a channel for a project, who's involved), but keep it brief.",
+    "You can't change the planner yourself. Propose each change as its own block, which the planner shows me as a card to apply or turn down:",
+    "[orb] action",
+    '{"type": "...", ...}',
+    "[orb] end",
+    "The changes you can propose, as JSON:",
+    '- {"type": "create_project", "name": "Store assets", "channels": [{"channel_id": "C123", "name": "store-assets"}], "reason": "why it\'s a project"}: a project the planner is missing. Find its channels in Slack first; the first is its main channel.',
+    '- {"type": "split_project", "project_id": "C111", "new_name": "Store assets", "channel_ids": ["C222"], "reason": "..."}: moves those channels out of a project into a new one. A project\'s own id (its main channel) can\'t move.',
+    '- {"type": "merge_projects", "from_id": "C111", "into_id": "C222"}',
+    '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
+    '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
+    '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
+    '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
+    '- {"type": "add_task", "title": "...", "project_id": "C111" or null}',
+    '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',
+    "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
+    `My message: ${firstMessage}`,
+  ].join("\n");
+}
+
 /** A message waiting on a reply, as the reply chat sees it. */
 export interface ReplyTopic {
   id: string;

@@ -1,4 +1,5 @@
 import { setUserProfile } from "../prompts";
+import { setStandingNotes } from "../claude";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
@@ -175,6 +176,7 @@ export function Settings({
   const [log, setLog] = useState<db.LogEntry[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [notes, setNotes] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -182,6 +184,7 @@ export function Settings({
       setWeekdaysOnly(((await db.getSetting("weekdays_only")) ?? "1") === "1");
       setModel((await db.getSetting("model")) ?? "opus");
       setAbout((await db.getSetting("user_profile")) ?? "");
+      setNotes(await db.getNotes());
       setLog(await db.recentLog(30));
     })();
   }, []);
@@ -302,6 +305,34 @@ export function Settings({
                   }}
                 />
               </div>
+              {notes.length > 0 && (
+                <div className="setting-row stacked">
+                  <div className="setting-text">
+                    <span className="setting-label">What Demian knows</span>
+                    <span className="setting-hint">Corrections you gave in the chat. Every refresh takes them into account.</span>
+                  </div>
+                  <ul className="notes-list">
+                    {notes.map((note, i) => (
+                      <li key={i} className="small">
+                        <span>{note}</span>
+                        <button
+                          className="icon-button"
+                          aria-label="Forget this"
+                          title="Forget this"
+                          onClick={async () => {
+                            const next = notes.filter((_, j) => j !== i);
+                            setNotes(next);
+                            setStandingNotes(next);
+                            await db.saveNotes(next);
+                          }}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <SettingRow label="Setup" hint="Check Claude Code and your connectors to Slack, Gmail, Calendar and Jira.">
                 <button className="cta-ghost" onClick={onOpenSetup}>
                   Check setup
