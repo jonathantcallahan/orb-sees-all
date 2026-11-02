@@ -1,4 +1,5 @@
 import type { IndexEntry } from "./taskIndex";
+import type { Learning } from "./feedback";
 
 /** Who the user is, as the prompts describe them. Set from Settings > About you; generic by default. */
 const DEFAULT_PROFILE = "a professional who uses this planner to run their work";
@@ -38,8 +39,36 @@ function taskIndexSection(index: IndexEntry[], listName: string): string {
 The user's open tasks from every source (their project channels, Slack and email requests, and their own list), as id, title, project and gist:
 ${index.map((e) => JSON.stringify(e)).join("\n")}
 
-Before you add anything to ${listName}, check it against that list. If it's the same work as a listed task (the same ask, even if worded differently or raised in a different message, channel or source), it is not new: still list it with its own id, but set refines to the listed task's id and write its description to bring the listed task up to date with what's new. Only set refines when you're confident it's the same piece of work; related but separate work is its own task. Otherwise refines is null.
+Before you add anything to ${listName}, check it against that list. If it's the same work as a listed task (the same ask, even if worded differently or raised in a different message, channel or source), it is not new: still list it with its own id, but set refines to the listed task's id and write its description to bring the listed task up to date with what's new. Only set refines when you're confident it's the same piece of work; related but separate work is its own task. Otherwise refines is null. An entry's not_same_as lists tasks the user confirmed are different work: never set refines between those.
 `;
+}
+
+/**
+ * What the user has taught Demian, for a prompt: their own description of the project, their past
+ * corrections, what they dismissed, and the lessons distilled from all of it. These outrank what
+ * the messages suggest.
+ */
+export function learningSection(l: Learning | undefined, what: "project" | "tasks" | "plan"): string {
+  if (!l) return "";
+  const parts: string[] = [];
+  if (l.focus) {
+    const f = [
+      l.focus.name && `The user calls it "${l.focus.name}"; use that as its name.`,
+      l.focus.focus && `What it's about, in their words: ${l.focus.focus}`,
+      l.focus.out_of_scope && `Not part of it: ${l.focus.out_of_scope}. Leave that work out of its status, blockers, tasks and profile even when it's discussed in its channels.`,
+    ].filter(Boolean);
+    parts.push(`The user's own definition of this project, which outranks anything you infer:\n${f.join("\n")}`);
+  }
+  if (l.corrections.length)
+    parts.push(`How the user has corrected ${what === "project" ? "this project" : what === "plan" ? "plans" : "their task list"} before, newest first. Don't repeat these mistakes:\n${l.corrections.map((c) => `- ${c}`).join("\n")}`);
+  if (l.dismissed.length && what !== "plan")
+    parts.push(
+      `Tasks the user dismissed as not theirs to do. Don't list them again, nor the same ask raised in another message; if one comes up again, leave it out:\n${l.dismissed
+        .map((d) => `- ${d.title}${d.gist ? ` (${d.gist})` : ""}${d.why ? `. Why: ${d.why}` : ""}`)
+        .join("\n")}`,
+    );
+  if (l.lessons.length) parts.push(`What the user's corrections have taught you, to apply throughout:\n${l.lessons.map((x) => `- ${x}`).join("\n")}`);
+  return parts.length ? `\n${parts.join("\n\n")}\n` : "";
 }
 
 /** ISO date (YYYY-MM-DD) and unix seconds for an incremental read window. */
@@ -86,6 +115,9 @@ export interface ProjectPromptInput {
   lastRefreshedAt: string | null;
   repoState: RepoState | null;
   now: Date;
+  /** Channels the user unlinked from it; searches leave them out too. */
+  excluded?: string[];
+  learning?: Learning;
 }
 
 export function projectPrompt(p: ProjectPromptInput): string {
@@ -107,9 +139,10 @@ Then update the snapshot: keep items that still hold, drop resolved ones, add ne
     ? `What's known about the project so far (its profile, built up by earlier refreshes):
 ${JSON.stringify(p.profile)}`
     : "There's no profile of the project yet; build one from what you read.";
-  const names = [p.previous?.name, ...(p.profile?.aliases ?? [])].filter(Boolean);
+  const names = [...new Set([p.learning?.focus?.name, p.previous?.name, ...(p.profile?.aliases ?? [])].filter(Boolean))];
+  const notHere = [...ids, ...(p.excluded ?? [])];
   const elsewhere = names.length
-    ? `- Work on a project spills into other channels. Search for it by name: slack_search_public_and_private with the query ${names.map((n) => `"${n}"`).join(" OR ")} ${ids.map((id) => `-in:<#${id}>`).join(" ")} after:${since.date} (one or two searches). Use what you find there for status, blockers and the user's tasks like messages in the project channels.`
+    ? `- Work on a project spills into other channels. Search for it by name: slack_search_public_and_private with the query ${names.map((n) => `"${n}"`).join(" OR ")} ${notHere.map((id) => `-in:<#${id}>`).join(" ")} after:${since.date} (one or two searches). Use what you find there for status, blockers and the user's tasks like messages in the project channels.`
     : "";
 
   const repos =
@@ -121,7 +154,7 @@ ${JSON.stringify(p.profile)}`
 The project's channels: ${p.channels.map((c) => `#${c.name} (${c.channel_id})`).join(", ")}. Read only these channels, apart from the search below.
 
 ${known}
-
+${learningSection(p.learning, "project")}
 ${reading}
 ${elsewhere}
 ${repos}
@@ -173,6 +206,7 @@ export interface AdhocPromptInput {
   projectChannels: string[];
   lastRefreshedAt: string | null;
   now: Date;
+  learning?: Learning;
 }
 
 export function adhocPrompt(p: AdhocPromptInput): string {
@@ -187,7 +221,7 @@ ${JSON.stringify(p.previous)}
 
 Messages waiting on a quick reply from the last refresh:
 ${JSON.stringify(p.previousReplies)}
-
+${learningSection(p.learning, "tasks")}
 Look for new items since ${since.date}:
 - Slack messages awaiting the user's response, since ${replyWindow.date}. Check all of these, in every channel including project channels:
   - @-mentions: slack_search_public_and_private with "<@${p.userId}> after:${replyWindow.date}".
@@ -250,6 +284,7 @@ export interface PlanPromptInput {
   requester: string | null;
   source: string;
   userId: string | null;
+  learning?: Learning;
 }
 
 export function planPrompt(p: PlanPromptInput): string {
@@ -257,7 +292,7 @@ export function planPrompt(p: PlanPromptInput): string {
 
 Task: ${p.title}
 ${p.description ? `Description: ${p.description}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
-
+${learningSection(p.learning, "plan")}
 First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and ask the internal knowledge-base tool, if one is available, for company-specific context when the task depends on internal systems, teams or processes. Spend effort in proportion to the task: a quick reply needs little research.
 
 Then propose a plan:
@@ -488,4 +523,32 @@ Also give the first name I go by, from my Slack profile (my display name if it's
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"name": string | null, "role": string}`;
+}
+
+/**
+ * Distilling the user's corrections into lessons: short, scoped guidance that makes every later
+ * refresh, plan and message better. Also infers why, for corrections the user gave no reason for.
+ */
+export function distillPrompt(p: {
+  feedback: { id: number; kind: string; at: string; project: string | null; before: unknown; after: unknown; reason: string | null }[];
+  lessons: { scope: string; text: string; evidence: number[]; origin: string }[];
+  projects: { id: string; name: string }[];
+}): string {
+  return `You help a day-planner assistant learn from the corrections its user (${profile}) makes to what it found: tasks it captured, priorities it set, descriptions it wrote, plans it proposed, messages it drafted, and how it grouped work into projects.
+
+The user's corrections, newest first (before and after are what the assistant had and what the user made it; reason is theirs when given):
+${p.feedback.map((f) => JSON.stringify(f)).join("\n")}
+
+The current lessons (origin "user" ones were written or edited by the user: keep them exactly, and don't add lessons that repeat them):
+${p.lessons.length ? p.lessons.map((l) => JSON.stringify(l)).join("\n") : "(none yet)"}
+
+Projects, for scoping lessons to one: ${JSON.stringify(p.projects)}
+
+Do two things.
+1. reasons: for each correction with no reason, infer the most likely one from the before and after and the other corrections, in a short plain sentence ("It's a vendor ask with no exec waiting, so not high priority"). Skip any you can't infer with reasonable confidence.
+2. lessons: the full, updated set of learned lessons. Keep and refine the current learned ones that still hold, merge ones that say the same thing, drop ones later corrections contradict, and add new ones when a correction (or a pattern across several) shows something general the assistant should do differently. Each lesson is one short, specific, actionable sentence written as an instruction to the assistant ("Treat requests from the Marketplace Leads channel as high priority", "Keep Slack replies to two sentences, without greetings"). Don't restate a single correction as a lesson unless it clearly generalizes. evidence lists the correction ids behind it.
+   scope is where it applies: "projects" (how to identify, group and describe projects), "tasks" (what counts as a task for this user), "priority" (how to rate tasks), "plans" (how to plan work), "writing" (how to write messages and descriptions in the user's voice), "global", or "project:<id>" for one project only.
+   At most 30 lessons.
+
+${JSON_ONLY} Shape: {"reasons": [{"id": number, "reason": string}], "lessons": [{"scope": string, "text": string, "evidence": [number]}]}`;
 }

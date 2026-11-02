@@ -34,9 +34,11 @@ const PASSTHROUGH_ENV: &[&str] = &[
     "CLAUDE_CODE_GIT_BASH_PATH",
 ];
 
-/// The user's home folder: HOME on macOS and Linux, USERPROFILE on Windows.
+/// The user's home folder: HOME on macOS and Linux. On Windows, USERPROFILE first: that's where
+/// Claude Code keeps its sessions, and HOME there is often a Git Bash path like /c/Users/me.
 pub(crate) fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
+    let (first, second) = if cfg!(windows) { ("USERPROFILE", "HOME") } else { ("HOME", "USERPROFILE") };
+    std::env::var_os(first).or_else(|| std::env::var_os(second)).map(PathBuf::from)
 }
 
 /// Apps launched from Finder or the Start menu don't inherit the login shell's
@@ -75,9 +77,15 @@ fn passthrough_env() -> Vec<(&'static str, String)> {
 
 /// A child process with only the passthrough environment, the search path, and (on Windows) no
 /// console window flashing up.
-fn command(exe: &PathBuf, args: &[String], dir: &PathBuf, path: &std::ffi::OsString) -> Command {
-    let mut cmd = Command::new(exe);
-    cmd.args(args).current_dir(dir).env_clear().envs(passthrough_env()).env("PATH", path).stdin(Stdio::null());
+fn command(exe: &Program, args: &[String], dir: &PathBuf, path: &std::ffi::OsString, stdin: bool) -> Command {
+    let mut cmd = Command::new(&exe.path);
+    cmd.args(&exe.leading_args)
+        .args(args)
+        .current_dir(dir)
+        .env_clear()
+        .envs(passthrough_env())
+        .env("PATH", path)
+        .stdin(if stdin { Stdio::piped() } else { Stdio::null() });
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -100,22 +108,89 @@ fn work_dir(app: &AppHandle, cwd: Option<String>) -> Result<PathBuf, String> {
     }
 }
 
-fn resolve(program: &str, path: &std::ffi::OsString) -> Option<PathBuf> {
-    // Windows programs carry an extension; npm installs claude as a .cmd shim.
-    let names: Vec<String> = if cfg!(windows) {
-        ["exe", "cmd"].iter().map(|ext| format!("{program}.{ext}")).collect()
-    } else {
-        vec![program.to_string()]
-    };
-    std::env::split_paths(path).find_map(|dir| names.iter().map(|n| dir.join(n)).find(|candidate| candidate.is_file()))
+/// What to start for an allowed program: an executable, and any arguments that come before the
+/// caller's (the script, when a program runs through node).
+struct Program {
+    path: PathBuf,
+    leading_args: Vec<String>,
+}
+
+fn find_on(path: &std::ffi::OsString, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path).map(|dir| dir.join(name)).find(|candidate| candidate.is_file())
+}
+
+/// Finds a program on the search path. On Windows a native .exe anywhere on the path wins over an
+/// npm .cmd shim: a .cmd runs through cmd.exe, which caps the command line at about 8k characters
+/// and rewrites %, ^, & and newlines in arguments. When claude exists only as the npm shim, its
+/// script is run with node directly instead.
+fn resolve(program: &str, path: &std::ffi::OsString) -> Option<Program> {
+    if !cfg!(windows) {
+        return find_on(path, program).map(|path| Program { path, leading_args: vec![] });
+    }
+    if let Some(path) = find_on(path, &format!("{program}.exe")) {
+        return Some(Program { path, leading_args: vec![] });
+    }
+    let shim = find_on(path, &format!("{program}.cmd"))?;
+    if program == "claude" {
+        let script = shim.parent()?.join("node_modules").join("@anthropic-ai").join("claude-code").join("cli.js");
+        if let (true, Some(node)) = (script.is_file(), find_on(path, "node.exe")) {
+            return Some(Program { path: node, leading_args: vec![script.to_string_lossy().into_owned()] });
+        }
+    }
+    Some(Program { path: shim, leading_args: vec![] })
+}
+
+/// Text for a child process: what goes on its stdin, and a system prompt to append, passed as a
+/// file. Long prompts don't fit on a Windows command line (about 32k characters in all).
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CliInput {
+    stdin: Option<String>,
+    append_system_prompt: Option<String>,
+}
+
+/// Writes the system prompt to a temp file in the work folder and adds the flag that reads it;
+/// the file is removed when the returned guard is dropped.
+struct TempFile(Option<PathBuf>);
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if let Some(p) = &self.0 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
+fn with_system_prompt(dir: &PathBuf, args: &mut Vec<String>, text: Option<String>) -> Result<TempFile, String> {
+    let Some(text) = text else { return Ok(TempFile(None)) };
+    let file = dir.join(format!("system-prompt-{}-{}.txt", std::process::id(), nanos()));
+    std::fs::write(&file, text).map_err(|e| e.to_string())?;
+    args.push("--append-system-prompt-file".into());
+    args.push(file.to_string_lossy().into_owned());
+    Ok(TempFile(Some(file)))
+}
+
+fn nanos() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+}
+
+/// Writes `text` to the child's stdin on its own thread, so a large prompt can't deadlock with
+/// output the child is writing meanwhile.
+fn feed_stdin(child: &mut std::process::Child, text: Option<String>) {
+    use std::io::Write;
+    if let (Some(text), Some(mut pipe)) = (text, child.stdin.take()) {
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(text.as_bytes());
+        });
+    }
 }
 
 #[tauri::command]
 async fn run_cli(
     app: AppHandle,
     program: String,
-    args: Vec<String>,
+    mut args: Vec<String>,
     cwd: Option<String>,
+    input: Option<CliInput>,
 ) -> Result<CliOutput, String> {
     if !ALLOWED_PROGRAMS.contains(&program.as_str()) {
         return Err(format!("{program} is not an allowed program"));
@@ -124,10 +199,17 @@ async fn run_cli(
     let exe = resolve(&program, &path).ok_or_else(|| format!("{program} not found on PATH"))?;
     let dir = work_dir(&app, cwd)?;
 
+    let input = input.unwrap_or_default();
+    let _prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
+    let has_stdin = input.stdin.is_some();
     tauri::async_runtime::spawn_blocking(move || {
-        let output = command(&exe, &args, &dir, &path)
-            .output()
+        let mut child = command(&exe, &args, &dir, &path, has_stdin)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| e.to_string())?;
+        feed_stdin(&mut child, input.stdin);
+        let output = child.wait_with_output().map_err(|e| e.to_string())?;
         Ok(CliOutput {
             code: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -152,8 +234,9 @@ async fn run_cli_stream(
     app: AppHandle,
     stream_id: String,
     program: String,
-    args: Vec<String>,
+    mut args: Vec<String>,
     cwd: Option<String>,
+    input: Option<CliInput>,
 ) -> Result<CliOutput, String> {
     use std::io::{BufRead, BufReader, Read};
 
@@ -164,12 +247,17 @@ async fn run_cli_stream(
     let exe = resolve(&program, &path).ok_or_else(|| format!("{program} not found on PATH"))?;
     let dir = work_dir(&app, cwd)?;
 
+    let input = input.unwrap_or_default();
+    let prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
+    let has_stdin = input.stdin.is_some();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut child = command(&exe, &args, &dir, &path)
+        let _prompt_file = prompt_file;
+        let mut child = command(&exe, &args, &dir, &path, has_stdin)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| e.to_string())?;
+        feed_stdin(&mut child, input.stdin);
 
         // Drain stderr on its own thread so a full pipe can't stall the program.
         let mut stderr_pipe = child.stderr.take().expect("stderr is piped");
@@ -195,6 +283,25 @@ async fn run_cli_stream(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The first time the window is closed on Windows: a notice that Demian keeps running in the tray.
+#[cfg(windows)]
+fn tell_once_still_running(app: &AppHandle) {
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    let marker = dir.join("told-still-running");
+    if marker.exists() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&marker, "");
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title("Demian is still running")
+        .body("It keeps refreshing in the background. Click the tray icon to open it, or right-click it to quit.")
+        .show();
 }
 
 fn show_main(app: &AppHandle) {
@@ -249,6 +356,18 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/007_project_entity.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "feedback log and distilled lessons",
+            sql: include_str!("../migrations/008_feedback.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "user-owned project focus and profile history",
+            sql: include_str!("../migrations/009_project_focus.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -280,7 +399,10 @@ fn migrate_old_identifier() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     migrate_old_identifier();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_notification::init());
+    let app = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -305,7 +427,17 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Demian")
                 .menu(&menu)
-                .show_menu_on_left_click(true)
+                // On macOS a menu-bar icon opens its menu; on Windows a left click on a tray icon
+                // opens the app, and the menu is on right click.
+                .show_menu_on_left_click(cfg!(not(windows)))
+                .on_tray_icon_event(|tray, event| {
+                    #[cfg(windows)]
+                    if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } = event {
+                        show_main(tray.app_handle());
+                    }
+                    #[cfg(not(windows))]
+                    let _ = (tray, event);
+                })
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main(app),
                     "refresh" => {
@@ -339,6 +471,9 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
+                // Windows users expect closing to quit, so say once that it's still running.
+                #[cfg(windows)]
+                tell_once_still_running(window.app_handle());
             }
         })
         .build(tauri::generate_context!())
@@ -364,5 +499,33 @@ fn hide_window_buttons(window: &tauri::WebviewWindow) {
         if let Some(button) = ns_window.standardWindowButton(kind) {
             button.setHidden(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn pipes_a_long_multiline_prompt_on_stdin_and_cleans_up_the_system_prompt_file() {
+        let dir = std::env::temp_dir().join(format!("demian-cli-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let prompt = format!("line one\n100% & ^ \"quoted\"\n{}", "x".repeat(200_000));
+        let mut args: Vec<String> = vec![];
+        let guard = with_system_prompt(&dir, &mut args, Some("be brief\nplease".into())).unwrap();
+        assert_eq!(args[0], "--append-system-prompt-file");
+        let file = PathBuf::from(&args[1]);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "be brief\nplease");
+
+        let cat = Program { path: PathBuf::from("/bin/cat"), leading_args: vec![] };
+        let mut child = command(&cat, &[], &dir, &search_path(), true).stdout(Stdio::piped()).spawn().unwrap();
+        feed_stdin(&mut child, Some(prompt.clone()));
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), prompt);
+
+        drop(guard);
+        assert!(!file.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
+import { logFeedback, saveFocus, setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
@@ -65,7 +65,40 @@ function PersonChip({ person }: { person: ProfilePerson }) {
  * What's known about the project, built up by its refreshes: goal, channels, people, milestones,
  * links, decisions. A centered modal, portaled to <body>.
  */
-function ProfileModal({ project, onClose }: { project: Project; onClose: () => void }) {
+/**
+ * One of the user's own focus fields in the project details: plain text that saves when you leave it,
+ * and that refreshes keep the project to.
+ */
+function FocusField({ project, field, placeholder, onSaved }: { project: Project; field: "focus" | "out_of_scope"; placeholder: string; onSaved: () => void }) {
+  const saved = project.focus?.[field] ?? "";
+  const [text, setText] = useState(saved);
+  return (
+    <textarea
+      className="focus-field"
+      rows={2}
+      value={text}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={async () => {
+        const next = text.trim();
+        if (next === saved.trim()) return;
+        await saveFocus(project.channel_id, { [field]: next || null });
+        logFeedback({
+          kind: "project_focus",
+          subject: "project",
+          subject_id: project.channel_id,
+          project_id: project.channel_id,
+          before: { [field]: saved || null, project: projectName(project) },
+          after: { [field]: next || null },
+        }).catch(() => {});
+        onSaved();
+      }}
+    />
+  );
+}
+
+function ProfileModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
   const p = project.profile;
   const channels = activeChannels(project);
   const permalinks = channelPermalinks(project);
@@ -93,6 +126,14 @@ function ProfileModal({ project, onClose }: { project: Project; onClose: () => v
         </header>
         {(p?.goal || project.snapshot?.description) && <p className="profile-goal">{p?.goal || project.snapshot?.description}</p>}
       <dl>
+        <dt>Focus</dt>
+        <dd>
+          <FocusField project={project} field="focus" placeholder="What this project is about, in your words. Refreshes keep to it." onSaved={onChange} />
+        </dd>
+        <dt>Not part of it</dt>
+        <dd>
+          <FocusField project={project} field="out_of_scope" placeholder="Related work that belongs elsewhere, so it isn't folded in." onSaved={onChange} />
+        </dd>
         <dt>Channels</dt>
         <dd>
           <LinkChips links={channels.map((c) => ({ url: slackChannelUrl(c.channel_id, permalinks), title: `#${c.name}`, kind: "slack" as const }))} />
@@ -509,7 +550,7 @@ export function ProjectCard({
             </ul>
           )}
 
-          {aboutOpen && <ProfileModal project={project} onClose={() => setAboutOpen(false)} />}
+          {aboutOpen && <ProfileModal project={project} onClose={() => setAboutOpen(false)} onChange={onChange} />}
 
           {tab === "active" && s.active?.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">

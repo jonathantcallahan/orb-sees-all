@@ -191,16 +191,14 @@ function reportLine(line: string, onStatus: (s: string) => void) {
   }
 }
 
-async function callOnce(
-  prompt: string,
-  opts: ClaudeOptions<unknown>,
-  run: StreamingCliRunner,
-  resumeSession?: string,
-): Promise<Envelope> {
-  const args = [
+/**
+ * The command line for a one-shot run. The prompt itself goes on stdin and the system prompt in a
+ * file (see CliInput), so the arguments stay short on every platform.
+ */
+export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTurns" | "tools">, resumeSession?: string): string[] {
+  return [
     ...(resumeSession ? ["--resume", resumeSession] : []),
     "-p",
-    prompt,
     "--output-format",
     "stream-json",
     "--verbose",
@@ -214,10 +212,21 @@ async function callOnce(
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
-    ...(notesPrompt() ? ["--append-system-prompt", notesPrompt()] : []),
   ];
+}
+
+async function callOnce(
+  prompt: string,
+  opts: ClaudeOptions<unknown>,
+  run: StreamingCliRunner,
+  resumeSession?: string,
+): Promise<Envelope> {
   const onStatus = opts.onStatus;
-  const out = await run("claude", args, onStatus ? (line) => reportLine(line, onStatus) : undefined);
+  const notes = notesPrompt();
+  const out = await run("claude", oneShotArgs(opts, resumeSession), onStatus ? (line) => reportLine(line, onStatus) : undefined, {
+    stdin: prompt,
+    ...(notes ? { appendSystemPrompt: notes } : {}),
+  });
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   if (envelope.is_error) throw new Error(`claude: ${envelope.result}`);
@@ -302,8 +311,8 @@ export async function runSessionTurn(
 ): Promise<SessionTurn> {
   const args = [
     ...(opts.resume ? ["--resume", opts.resume] : []),
+    // The prompt (the user's message) goes on stdin and the system prompt in a file; see CliInput.
     "-p",
-    opts.prompt,
     "--output-format",
     "stream-json",
     "--verbose",
@@ -314,8 +323,6 @@ export async function runSessionTurn(
     ...(opts.effort ? ["--effort", opts.effort] : []),
     "--max-turns",
     String(opts.maxTurns ?? 80),
-    "--append-system-prompt",
-    [SESSION_DISPLAY, notesPrompt(), opts.context].filter(Boolean).join("\n\n"),
     ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
@@ -325,6 +332,7 @@ export async function runSessionTurn(
   ];
   const { onStatus, onText } = opts;
   let text = "";
+  const system = [SESSION_DISPLAY, notesPrompt(), opts.context].filter(Boolean).join("\n\n");
   const out = await run("claude", args, (line) => {
     if (onStatus) reportLine(line, onStatus);
     if (!onText) return;
@@ -339,7 +347,7 @@ export async function runSessionTurn(
     } catch {
       // Not a JSON line.
     }
-  });
+  }, { stdin: opts.prompt, appendSystemPrompt: system });
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   return {

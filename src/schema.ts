@@ -302,6 +302,8 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("merge_projects"), from_id: z.string(), into_id: z.string() }),
   z.object({ type: z.literal("rename_project"), project_id: z.string(), name: z.string() }),
   z.object({ type: z.literal("set_project_tracking"), project_id: z.string(), tracked: z.boolean() }),
+  /** What the project is about and what isn't part of it, in the user's words; refreshes keep to it. */
+  z.object({ type: z.literal("set_project_focus"), project_id: z.string(), focus: z.string().nullish(), out_of_scope: z.string().nullish() }),
   z.object({ type: z.literal("add_note"), text: z.string() }),
   z.object({ type: z.literal("update_profile"), text: z.string() }),
   z.object({ type: z.literal("add_task"), title: z.string(), project_id: z.string().nullish() }),
@@ -312,6 +314,12 @@ export const GlobalAction = z.discriminatedUnion("type", [
   }),
 ]);
 export type GlobalAction = z.infer<typeof GlobalAction>;
+
+/** What distilling the user's corrections returns: reasons inferred where none were given, and the lessons. */
+export const Distilled = z.object({
+  reasons: z.array(z.object({ id: z.number(), reason: z.string() })).default([]),
+  lessons: z.array(z.object({ scope: z.string(), text: z.string(), evidence: z.array(z.number()).default([]) })),
+});
 
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
 

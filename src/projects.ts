@@ -1,5 +1,5 @@
 import type { Project } from "./db";
-import type { Discovery, RelatedChannel } from "./schema";
+import type { Discovery, ProjectProfile, RelatedChannel } from "./schema";
 
 /** A Slack channel's link to a project. */
 export interface ProjectChannel {
@@ -87,9 +87,52 @@ export function nameFromChannel(channel: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** The project's proper name: Claude's from the last refresh, else one derived from the channel. */
-export function projectName(p: Pick<Project, "name" | "snapshot">): string {
-  return p.snapshot?.name || nameFromChannel(p.name);
+/**
+ * The project's proper name: the user's, if they named it (renamed or split it off); else Claude's
+ * from the last refresh; else one derived from the channel.
+ */
+export function projectName(p: Pick<Project, "name" | "snapshot"> & { focus?: { pinned_name: string | null } | null }): string {
+  return p.focus?.pinned_name || p.snapshot?.name || nameFromChannel(p.name);
+}
+
+const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+
+/** Items from `next` first, then the ones from `prev` it no longer lists, by key, up to `max`. */
+function union<T>(next: T[], prev: T[], key: (t: T) => string, max: number): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const t of [...next, ...prev]) {
+    const k = key(t);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.slice(0, max);
+}
+
+/**
+ * A refresh's profile folded into what was known, so a project's knowledge builds up instead of
+ * being replaced: people, resources, milestones and decisions it no longer mentions are kept (the
+ * oldest fall off past each cap), the user's own names for it are always among its aliases, and an
+ * empty goal never replaces a known one.
+ */
+export function mergeProfile(prev: ProjectProfile | null, next: ProjectProfile, pinnedAliases: string[] = []): ProjectProfile {
+  if (!prev) return { ...next, aliases: union(pinnedAliases, next.aliases, norm, 10) };
+  const byDate = (a: { date?: string | null }, b: { date?: string | null }) => (a.date ?? "").localeCompare(b.date ?? "");
+  return {
+    goal: next.goal?.trim() ? next.goal : prev.goal,
+    aliases: union([...pinnedAliases, ...next.aliases], prev.aliases, norm, 10),
+    people: union(next.people, prev.people, (p) => norm(p.name), 16),
+    resources: union(next.resources, prev.resources, (r) => norm(r.link), 16),
+    milestones: union(next.milestones, prev.milestones, (m) => `${norm(m.what)}|${m.date ?? ""}`, 12).sort(byDate),
+    decisions: union(next.decisions, prev.decisions, (d) => norm(d.link) || norm(d.what), 15).sort((a, b) => byDate(b, a)),
+  };
+}
+
+/** Folds a merged-away project's knowledge into the one it joins: its name becomes another name for it. */
+export function foldProfile(into: ProjectProfile | null, from: ProjectProfile | null, fromName: string): ProjectProfile {
+  const base: ProjectProfile = into ?? { goal: from?.goal ?? "", aliases: [], people: [], resources: [], milestones: [], decisions: [] };
+  return mergeProfile(from, base, [fromName]);
 }
 
 /** A link that opens the channel in the Slack app (or Slack on the web). */

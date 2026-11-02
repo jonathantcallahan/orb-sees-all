@@ -30,6 +30,8 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
       return `Rename "${project(a.project_id)}" to "${a.name}"`;
     case "set_project_tracking":
       return `${a.tracked ? "Track" : "Stop tracking"} "${project(a.project_id)}"`;
+    case "set_project_focus":
+      return [`Set the focus of "${project(a.project_id)}"`, a.focus && `: ${a.focus}`, a.out_of_scope && `. Not part of it: ${a.out_of_scope}`].filter(Boolean).join("");
     case "add_note":
       return `Remember: ${a.text}`;
     case "update_profile":
@@ -43,8 +45,40 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
   }
 }
 
-/** Applies a change and starts the refresh it needs. Returns what happened, in a line. */
-export async function applyAction(a: GlobalAction): Promise<string> {
+const KIND: Partial<Record<GlobalAction["type"], db.FeedbackKind>> = {
+  create_project: "project_create",
+  split_project: "project_split",
+  merge_projects: "project_merge",
+  rename_project: "project_rename",
+  set_project_tracking: "project_track",
+  set_project_focus: "project_focus",
+  add_note: "note",
+};
+
+/**
+ * Applies a change and starts the refresh it needs, and records it as a correction with why (the
+ * chat's stated reason, else what the user said). Returns what happened, in a line.
+ */
+export async function applyAction(a: GlobalAction, said?: string, summary?: string): Promise<string> {
+  const result = await apply(a);
+  const kind = KIND[a.type];
+  if (kind) {
+    const projectId = "project_id" in a ? a.project_id : a.type === "merge_projects" ? a.into_id : null;
+    const reason = ("reason" in a && a.reason) || said;
+    db.logFeedback({
+      kind,
+      subject: kind === "note" ? "briefing" : "project",
+      subject_id: projectId ?? null,
+      project_id: projectId ?? null,
+      after: { ...a, summary },
+      ...(reason ? { reason, reason_source: "chat" as const } : {}),
+      source: "chat",
+    }).catch(() => {});
+  }
+  return result;
+}
+
+async function apply(a: GlobalAction): Promise<string> {
   switch (a.type) {
     case "create_project": {
       const id = await db.createProject(a.name, a.channels, a.reason);
@@ -68,6 +102,13 @@ export async function applyAction(a: GlobalAction): Promise<string> {
       await db.setProjectState(a.project_id, a.tracked ? "tracked" : "ignored");
       if (a.tracked) quiet(refreshProject(a.project_id));
       return a.tracked ? "It's on the board and being read." : "It's off the board.";
+    case "set_project_focus":
+      await db.saveFocus(a.project_id, {
+        ...(a.focus != null ? { focus: a.focus.trim() || null } : {}),
+        ...(a.out_of_scope != null ? { out_of_scope: a.out_of_scope.trim() || null } : {}),
+      });
+      quiet(refreshProject(a.project_id));
+      return "Saved as its focus; it's being read again with it in mind.";
     case "add_note": {
       const notes = [...(await db.getNotes()), a.text.trim()];
       await db.saveNotes(notes);

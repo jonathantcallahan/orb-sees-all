@@ -10,6 +10,7 @@ import { WindowButtons } from "./components/WindowButtons";
 import { SetupScreen } from "./components/SetupScreen";
 import { Onboarding } from "./components/Onboarding";
 import { GlobalChat } from "./components/GlobalChat";
+import { WhyPrompt } from "./components/WhyPrompt";
 import { isWindows, MOD } from "./platform";
 import { ProjectCard } from "./components/ProjectCard";
 import { Settings } from "./components/Settings";
@@ -17,7 +18,7 @@ import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
 import { getNotes, getSetting, markInterruptedJobs, setSetting } from "./db";
 import { setStandingNotes } from "./claude";
-import { maybeRunMorning, refreshAll } from "./jobs";
+import { maybeDistill, maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
@@ -31,7 +32,11 @@ const refreshAllSafely = () => refreshAll().catch(() => {});
 
 function useScheduler() {
   useEffect(() => {
-    const check = () => maybeRunMorning().catch(() => {});
+    // Each minute: the morning refresh when it's due, and learning from corrections once enough build up.
+    const check = () => {
+      maybeRunMorning().catch(() => {});
+      maybeDistill().catch(() => {});
+    };
     markInterruptedJobs().then(check, check);
     // The Rust side emits a tick every minute, which reaches the webview even
     // while the window is hidden; the interval and focus check are backups.
@@ -40,16 +45,28 @@ function useScheduler() {
     document.addEventListener("visibilitychange", onVisible);
     const unlisteners = [listen("scheduler-tick", check), listen("tray-refresh-all", refreshAllSafely)];
     const onKey = (e: KeyboardEvent) => {
-      if ((isWindows ? e.ctrlKey : e.metaKey) && e.key.toLowerCase() === "r") {
+      const mod = isWindows ? e.ctrlKey : e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === "r" && !e.shiftKey) {
         e.preventDefault();
         refreshAllSafely();
+        return;
+      }
+      // WebView2 keeps browser shortcuts the app doesn't want: reloading (which drops runs in
+      // progress), printing, find, and zoom.
+      if (isWindows && (key === "f5" || (mod && (key === "r" || key === "p" || key === "f" || key === "=" || key === "+" || key === "-" || key === "0")))) {
+        e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
+    // Ctrl+wheel zooms in WebView2.
+    const onWheel = (e: WheelEvent) => isWindows && e.ctrlKey && e.preventDefault();
+    window.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", onWheel);
       unlisteners.forEach((p) => p.then((un) => un()));
     };
   }, []);
@@ -257,6 +274,7 @@ export default function App() {
 
       <Mist level={load.level} look={orbLook} />
 
+      <WhyPrompt />
       {showChat && <GlobalChat projects={data.projects} onClose={() => setShowChat(false)} onApplied={reload} />}
       {showOnboarding && (
         <Onboarding

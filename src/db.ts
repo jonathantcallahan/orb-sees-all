@@ -1,7 +1,7 @@
 import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
-import type { DiscoveryPlan, ProjectChannel } from "./projects";
+import { foldProfile, projectName, type DiscoveryPlan, type ProjectChannel } from "./projects";
 import type { ProjectTracking } from "./jobs/tracking";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 import { announceTaskDone } from "./orbEvents";
@@ -37,6 +37,8 @@ export interface Project {
   profile: ProjectProfile | null;
   repo_state: RepoState | null;
   last_error: string | null;
+  /** What the project is, as the user means it (see ProjectFocus); null until they say. */
+  focus: ProjectFocus | null;
 }
 
 interface ProjectRow {
@@ -61,7 +63,7 @@ export async function listProjectChannels(): Promise<ProjectChannel[]> {
 
 export async function listProjects(): Promise<Project[]> {
   const d = await db();
-  const [rows, channels] = await Promise.all([d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"), listProjectChannels()]);
+  const [rows, channels, focus] = await Promise.all([d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"), listProjectChannels(), listFocus()]);
   return rows.map((r) => ({
     ...r,
     hidden: r.hidden === 1,
@@ -71,6 +73,7 @@ export async function listProjects(): Promise<Project[]> {
     snapshot: json<ProjectSnapshot>(r.snapshot),
     profile: json<ProjectProfile>(r.profile),
     repo_state: json<RepoState>(r.repo_state),
+    focus: focus.get(r.channel_id) ?? null,
   }));
 }
 
@@ -123,6 +126,12 @@ export async function setProjectState(id: string, state: "tracked" | "ignored") 
  */
 export async function mergeProject(fromId: string, intoId: string) {
   const d = await db();
+  // What's known about the merged-away project carries over, its name becoming another name for it.
+  const [from, into] = await Promise.all([getProject(fromId), getProject(intoId)]);
+  if (from && into) {
+    await d.execute("UPDATE projects SET profile = $1 WHERE channel_id = $2", [JSON.stringify(foldProfile(into.profile, from.profile, projectName(from))), intoId]);
+    await saveFocus(intoId, { aliases: [...new Set([...(into.focus?.aliases ?? []), projectName(from)])] });
+  }
   await d.execute(
     "UPDATE project_channels SET project_id = $1, role = CASE role WHEN 'excluded' THEN 'excluded' ELSE 'related' END, origin = 'user' WHERE project_id = $2",
     [intoId, fromId],
@@ -144,6 +153,8 @@ export async function createProject(name: string, channels: { channel_id: string
       "INSERT OR REPLACE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, $4, 'user', $5, $6)",
       [c.channel_id, id, c.name.replace(/^#/, ""), i === 0 ? "primary" : "related", reason ?? null, nowIso()],
     );
+  // The user named it, so that name holds through refreshes.
+  await saveFocus(id, { pinned_name: name });
   return id;
 }
 
@@ -160,8 +171,9 @@ export async function splitProject(fromId: string, name: string, channelIds: str
   return createProject(name, moving, reason);
 }
 
+/** The user's name for a project, which holds through refreshes (see projectName). */
 export async function renameProject(id: string, name: string) {
-  await (await db()).execute("UPDATE projects SET name = $1 WHERE channel_id = $2", [name, id]);
+  await saveFocus(id, { pinned_name: name });
 }
 
 /** Standing corrections from the user (via the global chat) that every job is told. */
@@ -569,4 +581,166 @@ export interface LogEntry {
 
 export async function recentLog(limit = 50): Promise<LogEntry[]> {
   return (await db()).select<LogEntry[]>("SELECT * FROM refresh_log ORDER BY id DESC LIMIT $1", [limit]);
+}
+
+// ---- feedback: the user's corrections, and the lessons distilled from them
+
+export type FeedbackKind =
+  | "description_edit"
+  | "priority_change"
+  | "dismiss"
+  | "task_merge"
+  | "not_duplicate"
+  | "check_verdict"
+  | "plan_change"
+  | "message_edit"
+  | "project_rename"
+  | "project_split"
+  | "project_merge"
+  | "project_create"
+  | "project_track"
+  | "project_focus"
+  | "channel_unlink"
+  | "note";
+
+export interface Feedback {
+  id: number;
+  at: string;
+  kind: FeedbackKind;
+  subject: "task" | "project" | "plan" | "message" | "briefing";
+  subject_id: string | null;
+  project_id: string | null;
+  before: unknown;
+  after: unknown;
+  reason: string | null;
+  reason_source: "user" | "chat" | "inferred" | null;
+  source: "ui" | "chat";
+  distilled: boolean;
+}
+
+export type NewFeedback = Pick<Feedback, "kind" | "subject"> &
+  Partial<Pick<Feedback, "before" | "after" | "reason" | "reason_source" | "source">> & { subject_id?: string | null; project_id?: string | null };
+
+/** Records a correction; returns its id, for adding the reason later. */
+export async function logFeedback(f: NewFeedback): Promise<number> {
+  const res = await (await db()).execute(
+    `INSERT INTO feedback (at, kind, subject, subject_id, project_id, before, after, reason, reason_source, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      nowIso(),
+      f.kind,
+      f.subject,
+      f.subject_id ?? null,
+      f.project_id ?? null,
+      f.before === undefined ? null : JSON.stringify(f.before),
+      f.after === undefined ? null : JSON.stringify(f.after),
+      f.reason ?? null,
+      f.reason ? (f.reason_source ?? "user") : null,
+      f.source ?? "ui",
+    ],
+  );
+  return res.lastInsertId ?? 0;
+}
+
+export async function setFeedbackReason(id: number, reason: string, source: "user" | "inferred") {
+  await (await db()).execute("UPDATE feedback SET reason = $1, reason_source = $2 WHERE id = $3", [reason, source, id]);
+}
+
+interface FeedbackRow extends Omit<Feedback, "before" | "after" | "distilled"> {
+  before: string | null;
+  after: string | null;
+  distilled: number;
+}
+
+/** Corrections, newest first: all of them, or those about one project or one subject. */
+export async function listFeedback(filter: { projectId?: string; subjectId?: string; undistilled?: boolean; limit?: number } = {}): Promise<Feedback[]> {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (filter.projectId) where.push(`project_id = $${args.push(filter.projectId)}`);
+  if (filter.subjectId) where.push(`subject_id = $${args.push(filter.subjectId)}`);
+  if (filter.undistilled) where.push("distilled = 0");
+  const rows = await (await db()).select<FeedbackRow[]>(
+    `SELECT * FROM feedback ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ${filter.limit ?? 200}`,
+    args,
+  );
+  return rows.map((r) => ({ ...r, before: json(r.before), after: json(r.after), distilled: r.distilled === 1 }));
+}
+
+export async function markDistilled(ids: number[]) {
+  if (!ids.length) return;
+  await (await db()).execute(`UPDATE feedback SET distilled = 1 WHERE id IN (${ids.map((_, i) => `$${i + 1}`).join(", ")})`, ids);
+}
+
+export interface Lesson {
+  id: number;
+  scope: string;
+  text: string;
+  evidence: number[];
+  origin: "learned" | "user";
+  updated_at: string;
+}
+
+export async function listLessons(): Promise<Lesson[]> {
+  const rows = await (await db()).select<(Omit<Lesson, "evidence"> & { evidence: string })[]>("SELECT * FROM lessons ORDER BY scope, id");
+  return rows.map((r) => ({ ...r, evidence: json<number[]>(r.evidence) ?? [] }));
+}
+
+/** Replaces the learned lessons with a new set; the ones the user wrote or edited stay as they are. */
+export async function replaceLearnedLessons(lessons: { scope: string; text: string; evidence: number[] }[]) {
+  const d = await db();
+  await d.execute("DELETE FROM lessons WHERE origin = 'learned'");
+  for (const l of lessons)
+    await d.execute("INSERT INTO lessons (scope, text, evidence, origin, updated_at) VALUES ($1, $2, $3, 'learned', $4)", [
+      l.scope,
+      l.text,
+      JSON.stringify(l.evidence),
+      nowIso(),
+    ]);
+}
+
+/** The user's edit of a lesson; it's theirs from then on. */
+export async function saveLesson(id: number, text: string) {
+  await (await db()).execute("UPDATE lessons SET text = $1, origin = 'user', updated_at = $2 WHERE id = $3", [text, nowIso(), id]);
+}
+
+export async function deleteLesson(id: number) {
+  await (await db()).execute("DELETE FROM lessons WHERE id = $1", [id]);
+}
+
+// ---- project focus: what a project is, as the user means it
+
+export interface ProjectFocus {
+  project_id: string;
+  pinned_name: string | null;
+  focus: string | null;
+  in_scope: string | null;
+  out_of_scope: string | null;
+  aliases: string[];
+}
+
+export async function listFocus(): Promise<Map<string, ProjectFocus>> {
+  const rows = await (await db()).select<(Omit<ProjectFocus, "aliases"> & { aliases: string })[]>("SELECT * FROM project_focus");
+  return new Map(rows.map((r) => [r.project_id, { ...r, aliases: json<string[]>(r.aliases) ?? [] }]));
+}
+
+/** Updates part of a project's focus, keeping the rest. */
+export async function saveFocus(projectId: string, patch: Partial<Omit<ProjectFocus, "project_id">>) {
+  const current = (await listFocus()).get(projectId);
+  const next = { pinned_name: null, focus: null, in_scope: null, out_of_scope: null, aliases: [], ...current, ...patch };
+  await (await db()).execute(
+    `INSERT INTO project_focus (project_id, pinned_name, focus, in_scope, out_of_scope, aliases, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT(project_id) DO UPDATE SET pinned_name = excluded.pinned_name, focus = excluded.focus, in_scope = excluded.in_scope,
+       out_of_scope = excluded.out_of_scope, aliases = excluded.aliases, updated_at = excluded.updated_at`,
+    [projectId, next.pinned_name, next.focus, next.in_scope, next.out_of_scope, JSON.stringify(next.aliases), nowIso()],
+  );
+}
+
+/** Keeps the profile a refresh is about to replace, the last ten per project. */
+export async function archiveProfile(projectId: string, profile: ProjectProfile) {
+  const d = await db();
+  await d.execute("INSERT INTO project_profile_history (project_id, profile, at) VALUES ($1, $2, $3)", [projectId, JSON.stringify(profile), nowIso()]);
+  await d.execute(
+    "DELETE FROM project_profile_history WHERE project_id = $1 AND id NOT IN (SELECT id FROM project_profile_history WHERE project_id = $1 ORDER BY id DESC LIMIT 10)",
+    [projectId],
+  );
 }

@@ -52,6 +52,9 @@ export function similarity(a: Comparable, b: Comparable): number {
   return title;
 }
 
+/** Whether two tasks look like the same work, by the same test findDuplicates uses. */
+export const sameWork = (a: Comparable, b: Comparable) => similarity(a, b) >= TITLE_MATCH;
+
 /**
  * For each task, the most similar other open task, when they look like the same work. Pairs the
  * user marked "not a duplicate" are skipped (keys from notDuplicateKey in db.ts).

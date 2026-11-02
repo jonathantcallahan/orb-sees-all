@@ -215,6 +215,7 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '- {"type": "merge_projects", "from_id": "C111", "into_id": "C222"}',
     '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
     '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
+    '- {"type": "set_project_focus", "project_id": "C111", "focus": "what it\'s about, in my words", "out_of_scope": "related work that belongs elsewhere"}: the project\'s focus, which every refresh keeps to. Use it when I say what a project is or isn\'t about.',
     '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
     '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
     '- {"type": "add_task", "title": "...", "project_id": "C111" or null}',

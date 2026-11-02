@@ -1,6 +1,6 @@
 import { useOrbName } from "../orbLook";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
@@ -10,10 +10,12 @@ import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, Proj
 import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner } from "./common";
+import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, useScrambled } from "./common";
 import { readableReply, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
+import { label, recordCorrection, taskSnapshot } from "../feedback";
+import * as db from "../db";
 import { CLAUDE_ICON } from "../linkIcons";
 import { collectLinks, linkKind } from "../links";
 import type { DuplicateCandidate } from "../duplicates";
@@ -256,8 +258,20 @@ function PriorityBadge({
         value={manual ?? AUTO}
         aria-label="Priority"
         onChange={async (e) => {
-          await setPriorityOverride(task.id, e.target.value === AUTO ? null : (e.target.value as Priority));
+          const to = e.target.value === AUTO ? null : (e.target.value as Priority);
+          await setPriorityOverride(task.id, to);
           onChange();
+          recordCorrection(
+            {
+              kind: "priority_change",
+              subject: "task",
+              subject_id: task.id,
+              project_id: task.project?.id,
+              before: { ...taskSnapshot(task), priority: priority ?? null, set_by: manual ? "user" : "demian" },
+              after: { priority: to ?? automatic, set_by: to ? "user" : "demian" },
+            },
+            label.priority(task.title, to ? PRIORITY_LABEL[to] : "automatic"),
+          );
         }}
       >
         {PICKABLE.map((p) => (
@@ -272,6 +286,11 @@ function PriorityBadge({
   );
 }
 
+/** A dismissal, recorded with what the task was, so a refresh doesn't raise it again. */
+function recordDismiss(task: CardTask) {
+  recordCorrection({ kind: "dismiss", subject: "task", subject_id: task.id, project_id: task.project?.id, before: taskSnapshot(task) }, label.dismiss(task.title));
+}
+
 function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
   // A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
   return (
@@ -282,8 +301,10 @@ function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void
         aria-label="Status"
         onChange={async (e) => {
           // Dismiss lives in the same menu: it hides the task rather than setting a status.
-          await setTaskState(task.id, e.target.value === DISMISS ? { dismissed: true } : { status: e.target.value as TaskStatus });
+          const dismiss = e.target.value === DISMISS;
+          await setTaskState(task.id, dismiss ? { dismissed: true } : { status: e.target.value as TaskStatus });
           onChange();
+          if (dismiss) recordDismiss(task);
         }}
       >
         {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
@@ -571,8 +592,66 @@ function ClaudeText({ text }: { text: string }) {
 }
 
 /**
+ * A thin cursor for a textarea, drawn by us: WebKit's own caret can't be made thinner or moved off
+ * the text. A hidden copy of the textarea, laid out the same, finds where the cursor falls; the
+ * textarea hides its native caret (see .composer textarea).
+ */
+function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string) {
+  const mirror = useRef<HTMLDivElement>(null);
+  const [caret, setCaret] = useState<{ x: number; y: number; h: number } | null>(null);
+  const last = useRef<string>("");
+  const place = () => {
+    const el = ref.current;
+    const m = mirror.current;
+    let next: { x: number; y: number; h: number } | null = null;
+    if (el && m && document.activeElement === el && el.selectionStart === el.selectionEnd) {
+      // The mirror takes the textarea's own type and spacing, whatever size this box uses.
+      const cs = getComputedStyle(el);
+      Object.assign(m.style, { font: cs.font, letterSpacing: cs.letterSpacing, lineHeight: cs.lineHeight, padding: cs.padding, width: `${el.clientWidth}px` });
+      const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+      // Measure in the mirror: the text up to the cursor, then a marker where the cursor is.
+      const before = el.value.slice(0, el.selectionStart);
+      if (m.firstChild?.textContent !== before || m.childNodes.length !== 2) {
+        m.replaceChildren(document.createTextNode(before), Object.assign(document.createElement("span"), { textContent: "\u200b" }));
+      }
+      const mark = m.lastChild as HTMLElement;
+      const h = Math.round(line * 0.82);
+      next = { x: mark.offsetLeft, y: mark.offsetTop - el.scrollTop + (line - h) / 2, h };
+    }
+    // Only a real move re-renders; this keeps typing light.
+    const key = next ? `${next.x}:${next.y}:${next.h}` : "";
+    if (key === last.current) return;
+    last.current = key;
+    setCaret(next);
+  };
+  useLayoutEffect(() => place(), [text]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Placed on the next frame, never inside the event: a state update while the textarea's own
+    // input event is still being handled re-renders it with the old value and drops the keystroke.
+    let frame = 0;
+    const later = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
+    };
+    const events = ["focus", "blur", "keyup", "mouseup", "select", "scroll"] as const;
+    events.forEach((e) => el.addEventListener(e, later));
+    return () => {
+      cancelAnimationFrame(frame);
+      events.forEach((e) => el.removeEventListener(e, later));
+    };
+  }, []);
+  return { mirror, caret };
+}
+
+/** How long each example prompt shows in the reply box before the next scrambles in. */
+const HINT_MS = 4500;
+
+/**
  * Where you write back to the session: grows with what you type; Enter sends, Shift+Enter starts a
- * new line (and text being composed with an input method is never sent early).
+ * new line (and text being composed with an input method is never sent early). Given several
+ * placeholders, it cycles through them, each scrambling into the next, while the box is empty.
  */
 function Composer({
   onSend,
@@ -583,10 +662,21 @@ function Composer({
   onSend: (text: string) => void;
   autoFocus?: boolean;
   disabled?: boolean;
-  placeholder?: string;
+  placeholder?: string | string[];
 }) {
   const [text, setText] = useState("");
+  const hints = typeof placeholder === "string" ? [placeholder] : placeholder;
+  const [hint, setHint] = useState(0);
+  useEffect(() => {
+    if (hints.length < 2 || text) return;
+    const t = setInterval(() => setHint((h) => (h + 1) % hints.length), HINT_MS);
+    return () => clearInterval(t);
+  }, [hints.length, !text]);
+  const cycling = hints.length > 1;
+  const shownHint = hints[hint % hints.length] ?? "";
+  const scrambledHint = useScrambled(shownHint);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const { mirror, caret } = useThinCaret(ref, text);
   const fit = () => {
     const el = ref.current;
     if (!el) return;
@@ -612,22 +702,28 @@ function Composer({
           send();
         }}
       >
-        <textarea
-          ref={ref}
-          rows={1}
-          autoFocus={autoFocus}
-          disabled={disabled}
-          value={text}
-          placeholder={placeholder}
-          aria-label={placeholder.replace(/…$/, "")}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send();
-            }
-          }}
-        />
+        <div className="composer-field">
+          <div ref={mirror} className="composer-mirror" aria-hidden />
+          {caret && <span key={`${caret.x}:${caret.y}`} className="composer-caret" style={{ left: caret.x, top: caret.y, height: caret.h }} aria-hidden />}
+          <textarea
+            ref={ref}
+            rows={1}
+            autoFocus={autoFocus}
+            disabled={disabled}
+            value={text}
+            // The textarea's own placeholder, scrambling from one example to the next, so it sits exactly
+            // where typed text does.
+            placeholder={scrambledHint}
+            aria-label={cycling ? "Message" : shownHint.replace(/…$/, "")}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+        </div>
         <button className="composer-send" type="submit" disabled={disabled || !text.trim()} aria-label="Send reply">
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
             <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -638,9 +734,45 @@ function Composer({
   );
 }
 
+/**
+ * Streamed text revealed at a steady pace: Claude Code delivers a reply in a few quick bursts, so
+ * this types out what has arrived, faster the further behind it is (all of it within about half a
+ * second), instead of jumping a burst at a time.
+ */
+function useSmoothText(target: string): string {
+  const [count, setCount] = useState(target.length);
+  const shown = useRef(target.length);
+  const goal = useRef(target);
+  goal.current = target;
+  // A new reply (not a continuation of what's shown) starts from nothing.
+  const prev = useRef(target);
+  if (!target.startsWith(prev.current.slice(0, shown.current))) shown.current = 0;
+  prev.current = target;
+  useEffect(() => {
+    if (shown.current >= target.length) {
+      shown.current = target.length;
+      setCount(target.length);
+      return;
+    }
+    let frame = 0;
+    let then = performance.now();
+    const step = (now: number) => {
+      const behind = goal.current.length - shown.current;
+      const perSecond = Math.max(90, behind / 0.45);
+      shown.current = Math.min(goal.current.length, shown.current + Math.max(1, Math.round(perSecond * ((now - then) / 1000))));
+      then = now;
+      setCount(shown.current);
+      if (shown.current < goal.current.length) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return target.slice(0, Math.min(count, target.length));
+}
+
 /** Claude's mark, turning while it works. */
 /** Claude Code's working glyph: a star that grows and shrinks through its shapes, in Claude's orange. */
-const CLAUDE_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+const CLAUDE_FRAMES = SPINNER_FRAMES;
 
 export function ClaudeSpark() {
   const [frame, setFrame] = useState(0);
@@ -711,7 +843,8 @@ export function SessionChat({
   extra?: ReactNode;
   /** Shown while the conversation is empty. */
   empty?: ReactNode;
-  placeholder?: string;
+  /** The reply box's placeholder; several cycle through as examples. */
+  placeholder?: string | string[];
   /** Sends your message another way than continuing the session (the global chat's first message starts it). */
   onSend?: (message: string) => void;
   onClose: () => void;
@@ -748,7 +881,7 @@ export function SessionChat({
     if (held && !live && messages.length > held.count) setHeld(null);
   }, [messages.length]);
   const streaming = live ?? (held ? held.text : null);
-  const liveText = streaming ? readableReply(streaming) : "";
+  const liveText = useSmoothText(streaming ? readableReply(streaming) : "");
   const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
   // Everything up to your last message (none, on a first turn) while a reply is forming.
   const settled = working || (held && !live) ? messages.slice(0, lastUserAt + 1) : messages;
@@ -1222,6 +1355,24 @@ export function TaskCard({
     setChatFor(DISCUSS);
   };
   const approvePlan = async () => {
+    // A plan the chat reworked is a correction: what was proposed, what was agreed, and what the
+    // user said along the way (their reasons, in their words).
+    const proposed = (plan ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null })) : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))).map(
+      (st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`,
+    );
+    const agreed = outlineSteps.map((st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`);
+    if (progress?.plan && agreed.join("\n") !== proposed.join("\n")) {
+      const said = (progress.messages ?? []).filter((m) => m.role === "user").map((m) => m.text);
+      db.logFeedback({
+        kind: "plan_change",
+        subject: "plan",
+        subject_id: task.id,
+        project_id: task.project?.id,
+        before: { task: taskSnapshot(task), steps: proposed },
+        after: { steps: agreed },
+        ...(said.length ? { reason: said.join(" / ").slice(0, 1200), reason_source: "chat" as const } : {}),
+      }).catch(() => {});
+    }
     await setTaskState(task.id, { status: "in_progress" });
     approveDiscussedPlan(task.id).then(onChange, onChange);
     onChange();
@@ -1306,7 +1457,7 @@ export function TaskCard({
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */
   /** Saves an edited description. Before work starts, Claude assesses and plans again from it; once a session is linked, the plan stays as the session has it. */
-  const saveDescription = async (next: string | null) => {
+  const saveDescription = async (next: string | null, fromUser = true) => {
     setEditing(false);
     if (manual) {
       await updateManualTask(task.id, { title: task.title, description: next });
@@ -1319,6 +1470,11 @@ export function TaskCard({
       await saveDescriptionOverride(task.id, next);
     }
     onChange();
+    if (fromUser)
+      recordCorrection(
+        { kind: "description_edit", subject: "task", subject_id: task.id, project_id: task.project?.id, before: taskSnapshot(task), after: { description: next } },
+        label.description(task.title),
+      );
     if (next && !linked) runPlan(next);
   };
   // A double check that found the task captured wrong applies its corrected description on its own,
@@ -1329,7 +1485,7 @@ export function TaskCard({
     if (!correction || check?.appliedAt || applyingCorrection) return;
     setApplyingCorrection(true);
     markCorrectionApplied(task.id)
-      .then(() => saveDescription(correction))
+      .then(() => saveDescription(correction, false))
       .finally(() => setApplyingCorrection(false));
   }, [correction, check?.appliedAt]);
   const correctionState: CorrectionState | null = !correction
@@ -1542,6 +1698,10 @@ export function TaskCard({
                       onClick={async () => {
                         await mergeTasks(task.id, duplicateOf.id);
                         onChange();
+                        recordCorrection(
+                          { kind: "task_merge", subject: "task", subject_id: task.id, project_id: task.project?.id, before: { kept: taskSnapshot(task), folded: { title: duplicateOf.title } }, after: { into: task.id } },
+                          label.merge(task.title),
+                        );
                       }}
                       title="Keep this task and fold the other into it, with its sources, links and anything this one lacks"
                     >
@@ -1552,6 +1712,10 @@ export function TaskCard({
                       onClick={async () => {
                         await markNotDuplicate(task.id, duplicateOf.id);
                         onChange();
+                        recordCorrection(
+                          { kind: "not_duplicate", subject: "task", subject_id: task.id, project_id: task.project?.id, before: { task: taskSnapshot(task), looked_like: { id: duplicateOf.id, title: duplicateOf.title } } },
+                          label.notDuplicate(task.title),
+                        );
                       }}
                     >
                       Not a duplicate
@@ -1592,11 +1756,15 @@ export function TaskCard({
                           await mergeTasks(duplicateTarget.id, task.id);
                           await clearTaskCheck(task.id);
                           onChange();
+                          recordCorrection(
+                            { kind: "task_merge", subject: "task", subject_id: duplicateTarget.id, project_id: task.project?.id, before: { kept: { title: duplicateTarget.title }, folded: taskSnapshot(task) }, after: { into: duplicateTarget.id } },
+                            label.merge(duplicateTarget.title),
+                          );
                         }
                       : undefined
                   }
                   onDone={() => setStateAndRefresh({ status: "done" })}
-                  onDismiss={() => setStateAndRefresh({ dismissed: true })}
+                  onDismiss={() => setStateAndRefresh({ dismissed: true }).then(() => recordDismiss(task))}
                   correction={correctionState}
                   taskId={task.id}
                 />

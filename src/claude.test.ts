@@ -59,9 +59,20 @@ describe("runClaude", () => {
     const result = await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
     expect(result.data.status).toBe("on_track");
     expect(result.costUsd).toBe(1);
-    const retryArgs = run.mock.calls[1][1];
+    const [, retryArgs, , retryInput] = run.mock.calls[1];
     expect(retryArgs.slice(0, 2)).toEqual(["--resume", "s1"]);
-    expect(retryArgs[3]).toContain("status");
+    expect(retryInput?.stdin).toContain("status");
+  });
+
+  it("sends the prompt on stdin, never on the command line", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    const long = `line one\n${"x".repeat(40_000)}\n100% done & dusted ^`;
+    await runClaude({ prompt: long, schema: ProjectSnapshot, tools: [] }, run);
+    const [, args, , input] = run.mock.calls[0];
+    expect(input?.stdin).toBe(long);
+    // The whole command line stays well under Windows' ~32k limit.
+    expect(args.join(" ").length).toBeLessThan(4000);
+    expect(args).not.toContain("--append-system-prompt");
   });
 
   it("overrides gateway credentials so the claude.ai connectors load", async () => {
@@ -148,8 +159,12 @@ describe("runSessionTurn", () => {
   it("resumes the session for a later turn and returns its id and cost", async () => {
     const run = vi.fn<CliRunner>().mockResolvedValue(reply("[orb] step 2 waiting: which channel?", { session_id: "abc" }));
     const turn = await runSessionTurn({ prompt: "Post it in #plugins", tools: ["mcp__x__read"], resume: "abc" }, run);
-    const args = run.mock.calls[0][1];
-    expect(args.slice(0, 4)).toEqual(["--resume", "abc", "-p", "Post it in #plugins"]);
+    const [, args, , input] = run.mock.calls[0];
+    expect(args.slice(0, 3)).toEqual(["--resume", "abc", "-p"]);
+    expect(input?.stdin).toBe("Post it in #plugins");
+    // The display rules and context go in the system-prompt file, not the arguments.
+    expect(input?.appendSystemPrompt).toContain("Orb");
+    expect(args).not.toContain("--append-system-prompt");
     expect(args).toContain("--disallowedTools");
     expect(args).not.toContain("--effort");
     expect(turn).toEqual({ sessionId: "abc", costUsd: 0.5, error: null });

@@ -186,7 +186,8 @@ mod tests {
         let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end\n[orb] action\n{\"type\": \"add_note\", \"text\": \"Refunds is paused\"}\n[orb] end"}]}}"#;
         std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{waiting}\n{send}\n")).unwrap();
         std::fs::write(project.join("other.jsonl"), r#"{"type":"user","message":{"content":"Orb task: t-7"}}"#).unwrap();
-        std::env::set_var("HOME", &home);
+        // Where home_dir() looks first on this platform.
+        std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home);
 
         tauri::async_runtime::block_on(async {
             let found = find_session("Orb task: t-42".into(), 0).await.unwrap().expect("found");

@@ -1,5 +1,6 @@
 import { setUserProfile } from "../prompts";
 import { setStandingNotes } from "../claude";
+import { label, recordCorrection } from "../feedback";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
@@ -36,6 +37,66 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
 }
 
 /** One setting: its name and a line on what it does on the left, its control on the right. */
+const SCOPE_LABEL: Record<string, string> = {
+  global: "Everything",
+  projects: "Projects",
+  tasks: "Tasks",
+  priority: "Priorities",
+  plans: "Plans",
+  writing: "Writing",
+};
+
+/** One learned lesson: where it applies, its text (click to reword, which makes it yours), and forget. */
+function LessonRow({ lesson, projects, onChange }: { lesson: db.Lesson; projects: db.Project[]; onChange: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(lesson.text);
+  const project = lesson.scope.startsWith("project:") ? projects.find((p) => `project:${p.channel_id}` === lesson.scope) : undefined;
+  const scope = project ? projectName(project) : (SCOPE_LABEL[lesson.scope] ?? lesson.scope);
+  const save = async () => {
+    setEditing(false);
+    if (text.trim() && text.trim() !== lesson.text) await db.saveLesson(lesson.id, text.trim());
+    onChange();
+  };
+  return (
+    <li className="small">
+      <span className="lesson">
+        <span className="lesson-scope">{scope}</span>
+        {editing ? (
+          <input
+            className="lesson-edit"
+            value={text}
+            autoFocus
+            onChange={(e) => setText(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") {
+                setText(lesson.text);
+                setEditing(false);
+              }
+            }}
+          />
+        ) : (
+          <span className="lesson-text" onClick={() => setEditing(true)} title={lesson.origin === "user" ? "Yours" : `Learned from ${lesson.evidence.length} correction${lesson.evidence.length === 1 ? "" : "s"}`}>
+            {lesson.text}
+          </span>
+        )}
+      </span>
+      <button
+        className="icon-button"
+        aria-label="Forget this"
+        title="Forget this"
+        onClick={async () => {
+          await db.deleteLesson(lesson.id);
+          onChange();
+        }}
+      >
+        <CloseIcon />
+      </button>
+    </li>
+  );
+}
+
 function SettingRow({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <div className="setting-row">
@@ -92,6 +153,10 @@ function ProjectRow({ project, others, onSaved }: { project: db.Project; others:
                 onClick={async () => {
                   await db.unlinkChannel(c.channel_id);
                   onSaved();
+                  recordCorrection(
+                    { kind: "channel_unlink", subject: "project", subject_id: project.channel_id, project_id: project.channel_id, before: { channel: c.name, project: projectName(project) } },
+                    label.unlink(c.name),
+                  );
                 }}
               >
                 <CloseIcon size={7} />
@@ -177,6 +242,8 @@ export function Settings({
   const [discovering, setDiscovering] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
+  const [lessons, setLessons] = useState<db.Lesson[]>([]);
+  const reloadLessons = () => db.listLessons().then(setLessons, () => {});
 
   useEffect(() => {
     (async () => {
@@ -185,6 +252,7 @@ export function Settings({
       setModel((await db.getSetting("model")) ?? "opus");
       setAbout((await db.getSetting("user_profile")) ?? "");
       setNotes(await db.getNotes());
+      reloadLessons();
       setLog(await db.recentLog(30));
     })();
   }, []);
@@ -329,6 +397,19 @@ export function Settings({
                           <CloseIcon />
                         </button>
                       </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {lessons.length > 0 && (
+                <div className="setting-row stacked">
+                  <div className="setting-text">
+                    <span className="setting-label">What Demian has learned</span>
+                    <span className="setting-hint">Lessons from your corrections, used in every refresh, plan and message. Click one to reword it.</span>
+                  </div>
+                  <ul className="notes-list">
+                    {lessons.map((l) => (
+                      <LessonRow key={l.id} lesson={l} projects={projects} onChange={reloadLessons} />
                     ))}
                   </ul>
                 </div>

@@ -119,7 +119,11 @@ export function Updated({ at }: { at: string | null | undefined }) {
 }
 
 /** Claude Code's working indicator: a star that grows through these glyphs and back. */
-const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+/**
+ * Claude Code's working glyph, frame by frame. U+FE0E asks for the plain text form: WebView2 (on
+ * Windows) otherwise draws ✳ as a green color emoji.
+ */
+export const SPINNER_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"].map((f) => (f === "·" ? f : `${f}\uFE0E`));
 
 export function Spinner() {
   const [frame, setFrame] = useState(0);
@@ -250,6 +254,11 @@ const SCRAMBLE_MS = 500;
  * all within half a second (or `duration`). With reduced motion it just changes.
  */
 export function ScrambleText({ text, duration = SCRAMBLE_MS, from }: { text: string; duration?: number; from?: string }) {
+  return <span className="scramble">{useScrambled(text, duration, from)}</span>;
+}
+
+/** The scramble as a string (ScrambleText's), for places that can't hold a span, like a placeholder. */
+export function useScrambled(text: string, duration = SCRAMBLE_MS, from?: string): string {
   // `from` starts it from other text (scrambled noise, say) and morphs into `text` on first show.
   const [shown, setShown] = useState(from ?? text);
   const current = useRef(from ?? text);
@@ -287,5 +296,5 @@ export function ScrambleText({ text, duration = SCRAMBLE_MS, from }: { text: str
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
   }, [text]);
-  return <span className="scramble">{shown}</span>;
+  return shown;
 }

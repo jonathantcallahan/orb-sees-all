@@ -185,7 +185,7 @@ function DayGrid({
           const current = !past && new Date(ev.start) <= now;
           // The call is worth surfacing from 10 minutes before until the meeting ends.
           const joinSoon = !past && new Date(ev.start).getTime() - now.getTime() <= 10 * 60_000;
-          // Drawn height decides what fits: the name always, then the time, then the prep count.
+          // Drawn height decides what fits: the name always, then the time with the prep count beside it.
           const px = Math.max(height * PX_PER_MIN - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 18);
           const prep = prepOf(ev, states);
           return (
@@ -210,10 +210,14 @@ function DayGrid({
               onMouseLeave={release}
             >
               <span className="event-name">{ev.title}</span>
-              {px >= 32 && <span className="event-when">{time(ev.start)}</span>}
-              {prep.items.length > 0 && px >= (px >= 32 ? 44 : 32) && (
-                <span className={`event-prep${prep.done === prep.items.length ? " complete" : ""}`}>
-                  {prep.done}/{prep.items.length} prep
+              {px >= 32 && (
+                <span className="event-when">
+                  {time(ev.start)}
+                  {prep.items.length > 0 && (
+                    <span className={`event-prep${prep.done === prep.items.length ? " complete" : ""}`}>
+                      {prep.done}/{prep.items.length} prep
+                    </span>
+                  )}
                 </span>
               )}
               {ev.video_link && !past && (

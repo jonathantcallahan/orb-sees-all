@@ -1,14 +1,15 @@
-import { activeChannels, newRelatedChannels, planDiscovery, projectName, slackThread } from "../projects";
+import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectName, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { epicCheckPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
+import { distillPrompt, epicCheckPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { approvedPlanMessage, globalChatPrompt } from "../openInClaude";
 import { linkSession, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { AdhocSnapshot, Distilled, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
 import { readingContext } from "../reading";
+import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
@@ -126,17 +127,19 @@ export function discoverProjects(): Promise<void> {
 
 /** Every open task from every source, for refreshes to check new work against. */
 async function loadTaskIndex(): Promise<IndexEntry[]> {
-  const [projects, adhoc, manual, assessments, states, aliases] = await Promise.all([
+  const [projects, adhoc, manual, assessments, states, aliases, descriptions, notDuplicates] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
     db.getAssessments(),
     db.getTaskStates(),
     db.getTaskAliases(),
+    db.getDescriptionOverrides(),
+    db.getNotDuplicates(),
   ]);
   const visible = projects.filter((p) => !p.hidden);
   const nameOf = new Map(visible.map((p) => [p.channel_id, projectName(p)]));
-  return buildIndex(
+  const entries = buildIndex(
     [
       ...manual.map((t) => ({
         id: t.id,
@@ -144,12 +147,23 @@ async function loadTaskIndex(): Promise<IndexEntry[]> {
         description: t.description ?? assessments.get(t.id)?.description,
         project: t.project_id ? nameOf.get(t.project_id) : null,
       })),
-      ...visible.flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ ...t, project: nameOf.get(p.channel_id) }))),
-      ...adhoc.tasks,
+      // Tasks as the user has them: their edited description over the refresh's.
+      ...visible.flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ ...t, description: descriptions[t.id] ?? t.description, project: nameOf.get(p.channel_id) }))),
+      ...adhoc.tasks.map((t) => ({ ...t, description: descriptions[t.id] ?? t.description })),
     ],
     states,
     aliases,
   );
+  // Pairs the user said aren't duplicates, so a refresh never folds one into the other.
+  const listed = new Set(entries.map((e) => e.id));
+  const separate = new Map<string, string[]>();
+  for (const key of notDuplicates) {
+    const [a, b] = key.split("|");
+    if (!listed.has(a) || !listed.has(b)) continue;
+    separate.set(a, [...(separate.get(a) ?? []), b]);
+    separate.set(b, [...(separate.get(b) ?? []), a]);
+  }
+  return entries.map((e) => (separate.has(e.id) ? { ...e, not_same_as: separate.get(e.id) } : e));
 }
 
 /**
@@ -184,14 +198,25 @@ export async function refreshProject(channelId: string): Promise<void> {
         // This project's own tasks are already in its previous snapshot; the index adds everything else.
         const own = new Set((project.snapshot?.my_tasks ?? []).map((t) => t.id));
         const index = (await loadTaskIndex()).filter((e) => !own.has(e.id));
+        // What the user has taught it about this project, and its tasks as the user has them.
+        const [learning, descriptions, priorities] = await Promise.all([
+          learningFor(channelId, ["projects", "tasks", "priority"]),
+          db.getDescriptionOverrides(),
+          db.getPriorityOverrides(),
+        ]);
+        const previous = project.snapshot
+          ? { ...project.snapshot, my_tasks: project.snapshot.my_tasks.map((t) => asUserHasIt(t, descriptions, priorities)) }
+          : null;
         const { data, costUsd } = await runClaude({
         onStatus: status,
           prompt: projectPrompt({
             index,
             channels: activeChannels(project),
             userId: uid,
-            previous: project.snapshot,
+            previous,
             profile: project.profile,
+            excluded: project.channels.filter((c) => c.role === "excluded").map((c) => c.channel_id),
+            learning,
             lastRefreshedAt: project.last_refreshed_at,
             repoState,
             now: startedAt,
@@ -201,7 +226,11 @@ export async function refreshProject(channelId: string): Promise<void> {
           tools: [...TOOLS.slackRead, ...TOOLS.jiraRead],
           model: await model(),
         });
-        const { profile, related_channels, epics, ...snapshot } = data;
+        const { profile: found, related_channels, epics, ...snapshot } = data;
+        // What's known builds up: the refresh's profile folds into the last one (kept in history),
+        // with the user's own names for the project among its aliases.
+        if (project.profile) await db.archiveProfile(channelId, project.profile);
+        const profile = mergeProfile(project.profile, found, project.focus?.aliases ?? []);
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
         await db.saveProjectSnapshot(channelId, snapshot, profile, startedAt.toISOString());
@@ -212,6 +241,7 @@ export async function refreshProject(channelId: string): Promise<void> {
         const links = [...profile.resources.map((r) => r.link), ...snapshot.recent_updates.map((u) => u.link), ...snapshot.my_tasks.map((t) => t.link)];
         await db.saveProjectTracking(channelId, await collectTracking(projectRepos(project.gh_repos, links), epics));
         await recordRefinements(data.my_tasks, index);
+        await keepDismissed(data.my_tasks, channelId);
         return { value: undefined, costUsd };
       } catch (e) {
         await db.saveProjectError(channelId, (e as Error).message);
@@ -228,14 +258,16 @@ export async function refreshAdhoc(): Promise<void> {
       const previous = await db.getAdhoc();
       const startedAt = new Date();
       const index = await loadTaskIndex();
+      const [learning, descriptions, priorities] = await Promise.all([learningFor(null, ["tasks", "priority"]), db.getDescriptionOverrides(), db.getPriorityOverrides()]);
       const projects = (await db.listProjects()).filter((p) => !p.hidden);
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: adhocPrompt({
           index,
           userId: uid,
-          previous: previous.tasks,
+          previous: previous.tasks.map((t) => asUserHasIt(t, descriptions, priorities)),
           previousReplies: previous.replies,
+          learning,
           projectChannels: projects.flatMap((p) => activeChannels(p).map((c) => c.name)),
           lastRefreshedAt: previous.refreshed_at,
           now: startedAt,
@@ -248,6 +280,7 @@ export async function refreshAdhoc(): Promise<void> {
       });
       await db.saveAdhoc({ tasks: data.tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
       await recordRefinements(data.tasks, index);
+      await keepDismissed(data.tasks, null);
       return { value: undefined, costUsd };
     }),
   );
@@ -411,22 +444,43 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
             return `${i + 1}. ${st.by === "you" ? "[Me] " : ""}${st.title} (${s ? s.state : "not started"})`;
           })
           .join("\n");
-        const context = taskId.startsWith("global:")
-          ? await globalContext(link)
-          : steps
-            ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
-            : undefined;
-        // The reply as it's written, for the chat to show live (a few times a second at most).
+        // Sessions carry out plans and write messages for the user, so they get those lessons too.
+        const lessons = await lessonsFor(["plans", "writing"]);
+        const context = [
+          taskId.startsWith("global:")
+            ? await globalContext(link)
+            : steps
+              ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
+              : "",
+          lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n") || undefined;
+        // The reply as it's written, for the chat to show live: at most every 80ms, and always the
+        // latest text in the end (Claude Code sends a reply in quick bursts, so a dropped update can be
+        // most of it).
+        const liveKey = `live:${taskId}`;
+        let latest = "";
+        let flush = 0;
         let last = 0;
-        const onText = (text: string) => {
-          const now = Date.now();
-          if (now - last < 80) return;
-          last = now;
-          setStatus(`live:${taskId}`, text);
+        const publish = () => {
+          flush = 0;
+          last = Date.now();
+          setStatus(liveKey, latest);
         };
-        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText }).finally(
-          () => setStatus(`live:${taskId}`, null),
-        );
+        const onText = (text: string) => {
+          latest = text;
+          const wait = 80 - (Date.now() - last);
+          if (wait <= 0) publish();
+          else if (!flush) flush = window.setTimeout(publish, wait);
+        };
+        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText }).finally(() => {
+          // The whole reply goes out before it's cleared, so the chat holds all of it until the
+          // transcript's copy arrives.
+          window.clearTimeout(flush);
+          if (latest) setStatus(liveKey, latest);
+          window.setTimeout(() => setStatus(liveKey, null), 60);
+        });
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
         if (turn.error) throw new Error(turn.error);
         return { value: undefined, costUsd: turn.costUsd };
@@ -455,7 +509,8 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     .map((p) => {
       const channels = p.channels.filter((c) => c.role !== "excluded").map((c) => `#${c.name} (${c.channel_id})`).join(", ");
       const status = p.snapshot ? ` — ${p.snapshot.status}: ${p.snapshot.status_reason}` : "";
-      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}`;
+      const focus = [p.focus?.focus && `focus: ${p.focus.focus}`, p.focus?.out_of_scope && `not part of it: ${p.focus.out_of_scope}`].filter(Boolean).join("; ");
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${focus ? ` (my ${focus})` : ""}`;
     });
   const tasks = [
     ...projects.filter((p) => p.state === "tracked").flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: projectName(p) }))),
@@ -602,6 +657,9 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
         ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
       });
       const edited = text !== send.text ? ` I edited it first; this is what went out:\n\n${text}` : "";
+      // How the user rewrote Claude's draft says something about how they write.
+      if (text !== send.text)
+        db.logFeedback({ kind: "message_edit", subject: "message", subject_id: taskId, before: { to: send.to, text: send.text }, after: { text } }).catch(() => {});
       continueTaskSession(taskId, `I sent the message to ${send.to}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`).catch(() => {});
       return { value: undefined, costUsd };
     }),
@@ -658,15 +716,16 @@ export function refreshReading(): Promise<void> {
   return track("reading", (status) =>
     logged("reading", null, async () => {
       const today = localDate(new Date());
-      const [projects, adhoc, manual, assessments, states, calendar] = await Promise.all([
+      const [projects, adhoc, manual, assessments, states, calendar, priorityOverrides] = await Promise.all([
         db.listProjects(),
         db.getAdhoc(),
         db.listManualTasks(),
         db.getAssessments(),
         db.getTaskStates(),
         db.getCalendarDay(today),
+        db.getPriorityOverrides(),
       ]);
-      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today });
+      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today, priorityOverrides });
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: readingPrompt(context),
@@ -696,7 +755,7 @@ export function planTask(task: PlanTask): Promise<void> {
     logged("plan", task.id, async () => {
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: planPrompt({ ...task, userId: await db.getSetting("slack_user_id") }),
+        prompt: planPrompt({ ...task, userId: await db.getSetting("slack_user_id"), learning: await planLearning() }),
         schema: TaskPlan,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow],
         model: await model(),
@@ -736,6 +795,59 @@ export function learnRole(): Promise<string> {
   );
 }
 
+/** Distil after this many new corrections, or once a day when there are any. */
+const DISTILL_AFTER = 5;
+const DISTILL_EVERY_MS = 24 * 60 * 60 * 1000;
+
+/** Distils the user's corrections into lessons when enough have built up (see distillLessons). */
+export async function maybeDistill(): Promise<void> {
+  if (!(await db.getSetting("setup_done"))) return;
+  const pending = await db.listFeedback({ undistilled: true, limit: DISTILL_AFTER });
+  if (!pending.length) return;
+  const last = Number((await db.getSetting("lessons_distilled_at")) ?? 0);
+  if (pending.length >= DISTILL_AFTER || Date.now() - last > DISTILL_EVERY_MS) await distillLessons();
+}
+
+/**
+ * Turns the user's corrections into lessons: short, scoped guidance that every later refresh,
+ * plan and session is given (see lessonsFor). Also infers a reason for corrections given none.
+ * Lessons the user wrote or edited are kept as they are.
+ */
+export function distillLessons(): Promise<void> {
+  return track("lessons", (status) =>
+    logged("lessons", null, async () => {
+      status("Learning from your corrections");
+      const [feedback, lessons, projects] = await Promise.all([db.listFeedback({ limit: 150 }), db.listLessons(), db.listProjects()]);
+      const names = new Map(projects.map((p) => [p.channel_id, projectName(p)]));
+      const { data, costUsd } = await runClaude({
+        prompt: distillPrompt({
+          feedback: feedback.map((f) => ({
+            id: f.id,
+            kind: f.kind,
+            at: f.at,
+            project: f.project_id ? (names.get(f.project_id) ?? f.project_id) : null,
+            before: f.before,
+            after: f.after,
+            reason: f.reason,
+          })),
+          lessons: lessons.map((l) => ({ scope: l.scope, text: l.text, evidence: l.evidence, origin: l.origin })),
+          projects: projects.filter((p) => p.state === "tracked").map((p) => ({ id: p.channel_id, name: projectName(p) })),
+        }),
+        schema: Distilled,
+        tools: [],
+        model: "sonnet",
+        maxTurns: 2,
+      });
+      const known = new Set(feedback.map((f) => f.id));
+      for (const r of data.reasons) if (known.has(r.id) && !feedback.find((f) => f.id === r.id)?.reason) await db.setFeedbackReason(r.id, r.reason, "inferred");
+      await db.replaceLearnedLessons(data.lessons.map((l) => ({ ...l, text: l.text.trim() })).filter((l) => l.text));
+      await db.markDistilled(feedback.map((f) => f.id));
+      await db.setSetting("lessons_distilled_at", String(Date.now()));
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
 export function refreshAll(): Promise<void> {
   return track(
     "all",
@@ -746,6 +858,8 @@ export function refreshAll(): Promise<void> {
         status("Getting to know your role");
         await learnRole().catch(() => {});
       }
+      // What the latest corrections teach goes into this refresh's prompts.
+      await maybeDistill().catch(() => {});
       status("Finding your project channels");
       try {
         await discoverProjects();

@@ -12,6 +12,8 @@ export interface IndexEntry {
   project?: string;
   /** The first part of the description, enough to tell similar tasks apart. */
   gist?: string;
+  /** Ids of listed tasks the user said are different work; never refine one into the other. */
+  not_same_as?: string[];
 }
 
 export interface IndexSource {

@@ -18,12 +18,15 @@ function ActionRow({
   item,
   link,
   describe,
+  said,
   onChange,
 }: {
   chatKey: string;
   item: PendingAction;
   link: SessionLink | undefined;
   describe: (item: PendingAction) => string;
+  /** What the user said in the chat before this was proposed, recorded as the reason. */
+  said?: string;
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -36,7 +39,7 @@ function ActionRow({
     setBusy(true);
     setError(null);
     try {
-      const outcome = await applyAction(item.action);
+      const outcome = await applyAction(item.action, said, summary);
       // The session hears about it with your next message (see globalContext), so applying costs no turn.
       await db.updateSessionLink(chatKey, { applied: { ...(link?.applied ?? {}), [item.key]: { summary, result: outcome } } });
       onChange();
@@ -75,6 +78,33 @@ function ActionRow({
 }
 
 /**
+ * Example messages for the empty reply box, made from what's on the board: the kinds of things the
+ * chat is for, with real project and people names where there are some.
+ */
+function examplePrompts(projects: Project[]): string[] {
+  const tracked = projects.filter((p) => p.state === "tracked").map(projectName);
+  // Other people on the projects, not the user (who's in the snapshots' owner lists as "is_me").
+  const me = new Set(projects.flatMap((p) => [...(p.snapshot?.blockers ?? []), ...(p.snapshot?.active ?? [])].flatMap((b) => b.owners.filter((o) => o.is_me).map((o) => o.name))));
+  const people = [
+    ...new Set(
+      projects
+        .flatMap((p) => p.profile?.people ?? [])
+        .filter((x) => !me.has(x.name))
+        .map((x) => x.name.split(" ")[0]),
+    ),
+  ];
+  const [a, b, c] = tracked;
+  const [x, y] = people;
+  return [
+    a ? `"${a}" is really two separate projects that should be split` : "One of my projects is really two separate projects",
+    x && y ? `The daily briefing is missing the context from my DM with ${x} and ${y}` : "The daily briefing is missing context from one of my DMs",
+    "I have an ongoing project that isn't on the board",
+    b ? `"${b}" is paused until next quarter, so it isn't at risk` : "One of my projects is paused, so it isn't at risk",
+    c ? `I'm only consulted on "${c}", so stop giving me its tasks` : "I'm only consulted on one project, so stop giving me its tasks",
+  ];
+}
+
+/**
  * The global chat, opened from the corner beside Refresh all: tell Demian what it has wrong or
  * missing, and it proposes changes (split or add a project, a standing correction, a refresh) to
  * apply one by one. One ongoing conversation, kept across restarts; New chat starts another.
@@ -101,24 +131,19 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
   const describe = (item: PendingAction) => (item.action ? describeAction(item.action, project, channel) : (item.error ?? "Couldn't read this change"));
 
   if (!key) return null;
+  const hints = examplePrompts(projects);
   const started = !!link;
   return (
     <SessionChat
       taskId={key}
-      title="Demian chat"
+      title="Demian"
       ask={null}
       plain
       messages={progress?.messages ?? []}
       working={working ?? (link && !link.sessionId ? "Starting" : undefined)}
       toSend={progress ? unsentMessages(progress.sends, link) : []}
       canReply
-      placeholder="Tell Demian what's wrong or missing…"
-      empty={
-        <p className="muted small global-chat-empty">
-          Tell Demian what it has wrong or missing: a project that's really two, one it hasn't found, context the daily plan is missing. It'll
-          propose changes for you to apply.
-        </p>
-      }
+      placeholder={hints}
       headAction={
         started && (
           <button
@@ -139,6 +164,7 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
           item={item}
           link={link}
           describe={describe}
+          said={[...(progress?.messages ?? [])].reverse().find((m) => m.role === "user")?.text}
           onChange={() => {
             reload();
             onApplied();
