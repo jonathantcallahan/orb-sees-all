@@ -8,9 +8,10 @@ import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { linkKind } from "../links";
 import { LinkChips } from "./LinkChips";
 import { TrackingFeed } from "./TrackingFeed";
-import { activeChannels, projectName, slackChannelUrl } from "../projects";
+import { activeChannels, projectContext, projectName, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
-import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated } from "./common";
+import { useOrbName } from "../orbLook";
+import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated, updatedText } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   blocked: "Blocked",
@@ -66,40 +67,137 @@ function PersonChip({ person }: { person: ProfilePerson }) {
  * links, decisions. A centered modal, portaled to <body>.
  */
 /**
- * One of the user's own focus fields in the project details: plain text that saves when you leave it,
- * and that refreshes keep the project to.
+ * One context entry: click the text to reword it, × to remove it. Rewording or removing one of
+ * Demian's makes the change yours, and refreshes keep to it.
  */
-function FocusField({ project, field, placeholder, onSaved }: { project: Project; field: "focus" | "out_of_scope"; placeholder: string; onSaved: () => void }) {
-  const saved = project.focus?.[field] ?? "";
-  const [text, setText] = useState(saved);
+function ContextEntry({ entry, onSave, onRemove }: { entry: { text: string; by: "you" | "demian" }; onSave: (text: string) => void; onRemove: () => void }) {
+  const [editing, setEditing] = useState(!entry.text);
+  const [text, setText] = useState(entry.text);
+  const save = () => {
+    setEditing(false);
+    const next = text.trim();
+    if (!next) return onRemove();
+    if (next !== entry.text) onSave(next);
+  };
   return (
-    <textarea
-      className="focus-field"
-      rows={2}
-      value={text}
-      placeholder={placeholder}
-      aria-label={placeholder}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={async () => {
-        const next = text.trim();
-        if (next === saved.trim()) return;
-        await saveFocus(project.channel_id, { [field]: next || null });
-        logFeedback({
-          kind: "project_focus",
-          subject: "project",
-          subject_id: project.channel_id,
-          project_id: project.channel_id,
-          before: { [field]: saved || null, project: projectName(project) },
-          after: { [field]: next || null },
-        }).catch(() => {});
-        onSaved();
+    <li className="small">
+      <span className="lesson">
+        <span className="lesson-scope">{entry.by === "you" ? "You" : "Demian"}</span>
+        {editing ? (
+          <input
+            className="lesson-edit"
+            value={text}
+            autoFocus
+            placeholder="Something true about this project"
+            onChange={(e) => setText(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") {
+                setText(entry.text);
+                setEditing(false);
+                if (!entry.text) onRemove();
+              }
+            }}
+          />
+        ) : (
+          <span className="lesson-text" onClick={() => setEditing(true)} title="Click to reword">
+            {entry.text}
+          </span>
+        )}
+      </span>
+      <button className="icon-button" aria-label="Remove this" title="Remove this" onClick={onRemove}>
+        <CloseIcon />
+      </button>
+    </li>
+  );
+}
+
+/** "Project context": how Demian reads the project (its focus, what isn't part of it), to read and correct. */
+function UnderstandingModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
+  const orb = useOrbName();
+  const entries = projectContext(project);
+  const [adding, setAdding] = useState(false);
+  const mine = project.focus?.context ?? [];
+  const removed = project.focus?.removed ?? [];
+  // Every change is recorded as a correction, so it's also learned from.
+  const record = (before: string | null, after: string | null) =>
+    logFeedback({
+      kind: "project_focus",
+      subject: "project",
+      subject_id: project.channel_id,
+      project_id: project.channel_id,
+      before: { context: before, project: projectName(project) },
+      after: { context: after },
+    }).catch(() => {});
+  /** Rewords (text) or removes (null) an entry. Changing one of Demian's makes the result yours. */
+  const change = async (entry: { text: string; by: "you" | "demian" }, text: string | null) => {
+    const ownIndex = entry.by === "you" ? mine.indexOf(entry.text) : -1;
+    const nextMine = entry.by === "you" ? mine.flatMap((t, i) => (i === ownIndex ? (text ? [text] : []) : [t])) : text ? [...mine, text] : mine;
+    const nextRemoved = entry.by === "demian" ? [...removed, entry.text] : removed;
+    await saveFocus(project.channel_id, { context: nextMine, removed: nextRemoved });
+    record(entry.text, text);
+    onChange();
+  };
+  const add = async (text: string) => {
+    setAdding(false);
+    await saveFocus(project.channel_id, { context: [...mine, text] });
+    record(null, text);
+    onChange();
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return createPortal(
+    <div
+      className="modal-backdrop plan-modal-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
       }}
-    />
+    >
+      <div className="modal plan-modal understanding-modal" role="dialog" aria-label={`Project context for ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>
+            Project context <span className="understanding-project">{projectName(project)}</span>
+          </h2>
+          <button className="icon-button" title="Close" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </header>
+        <p className="small muted understanding-intro">
+          {orb} writes this from the project's channels and keeps it current. Click an entry to reword it, remove what's wrong, or add your own; every refresh works from what's here.
+        </p>
+        <ul className="notes-list context-list">
+          {entries.map((entry, i) => (
+            <ContextEntry
+              key={`${entry.by}:${entry.text}:${i}`}
+              entry={entry}
+              onSave={(text) => change(entry, text)}
+              onRemove={() => change(entry, null)}
+            />
+          ))}
+          {adding && <ContextEntry key="new" entry={{ text: "", by: "you" }} onSave={(text) => add(text)} onRemove={() => setAdding(false)} />}
+        </ul>
+        {!adding && (
+          <button className="link-button small more-link context-add" onClick={() => setAdding(true)}>
+            Add context
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
 function ProfileModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
   const p = project.profile;
+  const [contextOpen, setContextOpen] = useState(false);
+  const orbName = useOrbName();
+  // Its context changes with each refresh (Demian's entries) and with your edits; the later one.
+  const contextAt = [project.last_refreshed_at, project.focus?.updated_at].filter((t): t is string => !!t).sort().at(-1);
   const channels = activeChannels(project);
   const permalinks = channelPermalinks(project);
   useEffect(() => {
@@ -125,15 +223,16 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
           </button>
         </header>
         {(p?.goal || project.snapshot?.description) && <p className="profile-goal">{p?.goal || project.snapshot?.description}</p>}
+        <div className="understanding-row">
+          <button className="link-button small more-link understanding-link" onClick={() => setContextOpen(true)}>
+            Project context
+          </button>
+          <span className="timestamp">
+            How {orbName} understands this project.{contextAt && ` Updated ${updatedText(contextAt)}`}
+          </span>
+        </div>
+        {contextOpen && <UnderstandingModal project={project} onClose={() => setContextOpen(false)} onChange={onChange} />}
       <dl>
-        <dt>Focus</dt>
-        <dd>
-          <FocusField project={project} field="focus" placeholder="What this project is about, in your words. Refreshes keep to it." onSaved={onChange} />
-        </dd>
-        <dt>Not part of it</dt>
-        <dd>
-          <FocusField project={project} field="out_of_scope" placeholder="Related work that belongs elsewhere, so it isn't folded in." onSaved={onChange} />
-        </dd>
         <dt>Channels</dt>
         <dd>
           <LinkChips links={channels.map((c) => ({ url: slackChannelUrl(c.channel_id, permalinks), title: `#${c.name}`, kind: "slack" as const }))} />
@@ -490,6 +589,7 @@ export function ProjectCard({
   // clicking the other one switches to it.
   const [tab, setTab] = useState<"blockers" | "active" | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
+
   const toggle = (next: "blockers" | "active") => setTab((current) => (current === next ? null : next));
   // Blockers and active work the user marked done stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);

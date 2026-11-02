@@ -112,7 +112,7 @@ describe("project prompts", () => {
       ],
       userId: "U1",
       previous: null,
-      profile: { goal: "Ship refunds", aliases: ["RFD"], people: [], resources: [], milestones: [], decisions: [] },
+      profile: { goal: "Ship refunds", context: [], aliases: ["RFD"], people: [], resources: [], milestones: [], decisions: [] },
       lastRefreshedAt: null,
       repoState: null,
       now: new Date(2026, 9, 30),

@@ -116,11 +116,25 @@ function union<T>(next: T[], prev: T[], key: (t: T) => string, max: number): T[]
  * oldest fall off past each cap), the user's own names for it are always among its aliases, and an
  * empty goal never replaces a known one.
  */
+/**
+ * A project's context as the user sees it: their own entries, then Demian's (from its refreshes)
+ * that they haven't removed or rewritten. Each knows whose it is.
+ */
+export function projectContext(p: Pick<Project, "profile" | "focus">): { text: string; by: "you" | "demian" }[] {
+  const mine = p.focus?.context ?? [];
+  const removed = new Set((p.focus?.removed ?? []).map(norm));
+  const have = new Set(mine.map(norm));
+  const legacy = [p.profile?.focus, p.profile?.out_of_scope && `Not part of it: ${p.profile.out_of_scope}`].filter((t): t is string => !!t?.trim());
+  const demians = (p.profile?.context?.length ? p.profile.context : legacy).filter((t) => t.trim() && !removed.has(norm(t)) && !have.has(norm(t)));
+  return [...mine.map((text) => ({ text, by: "you" as const })), ...demians.map((text) => ({ text, by: "demian" as const }))];
+}
+
 export function mergeProfile(prev: ProjectProfile | null, next: ProjectProfile, pinnedAliases: string[] = []): ProjectProfile {
   if (!prev) return { ...next, aliases: union(pinnedAliases, next.aliases, norm, 10) };
   const byDate = (a: { date?: string | null }, b: { date?: string | null }) => (a.date ?? "").localeCompare(b.date ?? "");
   return {
     goal: next.goal?.trim() ? next.goal : prev.goal,
+    context: next.context?.length ? next.context : (prev.context ?? []),
     aliases: union([...pinnedAliases, ...next.aliases], prev.aliases, norm, 10),
     people: union(next.people, prev.people, (p) => norm(p.name), 16),
     resources: union(next.resources, prev.resources, (r) => norm(r.link), 16),
@@ -131,7 +145,7 @@ export function mergeProfile(prev: ProjectProfile | null, next: ProjectProfile, 
 
 /** Folds a merged-away project's knowledge into the one it joins: its name becomes another name for it. */
 export function foldProfile(into: ProjectProfile | null, from: ProjectProfile | null, fromName: string): ProjectProfile {
-  const base: ProjectProfile = into ?? { goal: from?.goal ?? "", aliases: [], people: [], resources: [], milestones: [], decisions: [] };
+  const base: ProjectProfile = into ?? { goal: from?.goal ?? "", context: [], aliases: [], people: [], resources: [], milestones: [], decisions: [] };
   return mergeProfile(from, base, [fromName]);
 }
 

@@ -716,22 +716,32 @@ export interface ProjectFocus {
   in_scope: string | null;
   out_of_scope: string | null;
   aliases: string[];
+  /** Context entries the user wrote or edited; refreshes keep to them. */
+  context: string[];
+  /** Entries Demian wrote that the user removed; refreshes leave them out. */
+  removed: string[];
+  /** When the user last changed any of it. */
+  updated_at?: string;
 }
 
 export async function listFocus(): Promise<Map<string, ProjectFocus>> {
-  const rows = await (await db()).select<(Omit<ProjectFocus, "aliases"> & { aliases: string })[]>("SELECT * FROM project_focus");
-  return new Map(rows.map((r) => [r.project_id, { ...r, aliases: json<string[]>(r.aliases) ?? [] }]));
+  const rows = await (await db()).select<(Omit<ProjectFocus, "aliases" | "context" | "removed"> & { aliases: string; context: string; removed: string })[]>(
+    "SELECT * FROM project_focus",
+  );
+  return new Map(
+    rows.map((r) => [r.project_id, { ...r, aliases: json<string[]>(r.aliases) ?? [], context: json<string[]>(r.context) ?? [], removed: json<string[]>(r.removed) ?? [] }]),
+  );
 }
 
 /** Updates part of a project's focus, keeping the rest. */
 export async function saveFocus(projectId: string, patch: Partial<Omit<ProjectFocus, "project_id">>) {
   const current = (await listFocus()).get(projectId);
-  const next = { pinned_name: null, focus: null, in_scope: null, out_of_scope: null, aliases: [], ...current, ...patch };
+  const next = { pinned_name: null, focus: null, in_scope: null, out_of_scope: null, aliases: [], context: [], removed: [], ...current, ...patch };
   await (await db()).execute(
-    `INSERT INTO project_focus (project_id, pinned_name, focus, in_scope, out_of_scope, aliases, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO project_focus (project_id, pinned_name, focus, in_scope, out_of_scope, aliases, context, removed, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT(project_id) DO UPDATE SET pinned_name = excluded.pinned_name, focus = excluded.focus, in_scope = excluded.in_scope,
-       out_of_scope = excluded.out_of_scope, aliases = excluded.aliases, updated_at = excluded.updated_at`,
-    [projectId, next.pinned_name, next.focus, next.in_scope, next.out_of_scope, JSON.stringify(next.aliases), nowIso()],
+       out_of_scope = excluded.out_of_scope, aliases = excluded.aliases, context = excluded.context, removed = excluded.removed, updated_at = excluded.updated_at`,
+    [projectId, next.pinned_name, next.focus, next.in_scope, next.out_of_scope, JSON.stringify(next.aliases), JSON.stringify(next.context), JSON.stringify(next.removed), nowIso()],
   );
 }
 

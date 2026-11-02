@@ -1,4 +1,4 @@
-import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectName, slackThread } from "../projects";
+import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
@@ -510,21 +510,33 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     .map((p) => {
       const channels = p.channels.filter((c) => c.role !== "excluded").map((c) => `#${c.name} (${c.channel_id})`).join(", ");
       const status = p.snapshot ? ` — ${p.snapshot.status}: ${p.snapshot.status_reason}` : "";
-      const focus = [p.focus?.focus && `focus: ${p.focus.focus}`, p.focus?.out_of_scope && `not part of it: ${p.focus.out_of_scope}`].filter(Boolean).join("; ");
-      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${focus ? ` (my ${focus})` : ""}`;
+      const context = projectContext(p)
+        .map((c) => `${c.text}${c.by === "you" ? " (mine)" : ""}`)
+        .join("; ");
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}`;
     });
+  const calendar = await db.getCalendarDay(localDate(new Date()));
   const tasks = [
-    ...projects.filter((p) => p.state === "tracked").flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: projectName(p) }))),
-    ...adhoc.tasks.map((t) => ({ id: t.id, title: t.title, where: t.source })),
-    ...manual.map((t) => ({ id: t.id, title: t.title, where: "added by me" })),
+    ...projects
+      .filter((p) => p.state === "tracked")
+      .flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: projectName(p), gist: t.description }))),
+    ...adhoc.tasks.map((t) => ({ id: t.id, title: t.title, where: t.source, gist: t.description })),
+    ...manual.map((t) => ({ id: t.id, title: t.title, where: "added by me", gist: t.description })),
+    ...(calendar?.day.events ?? []).flatMap((ev) => ev.prep.map((p) => ({ id: p.id, title: p.title, where: `prep for ${ev.title}`, gist: null }))),
   ].filter((t) => open(t.id));
+  const today = localDate(new Date());
+  const taskLine = (t: (typeof tasks)[number]) => {
+    const st = states.get(t.id);
+    const gist = t.gist ? ` — ${t.gist.replace(/\s+/g, " ").slice(0, 120)}` : "";
+    return `- [id ${t.id}] ${t.title} (${t.where}${st?.todayOn === today ? ", in Today's tasks" : ""}${st?.status && st.status !== "todo" ? `, ${st.status.replace("_", " ")}` : ""})${gist}`;
+  };
   return [
     "What my planner shows right now:",
     `About me: ${profile?.trim() || "(not set)"}`,
     notes.length ? `Corrections I've already given:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
     `Projects (tracked ones are on the board; suggested and ignored ones aren't):\n${projectLines.join("\n") || "(none)"}`,
     reading ? `Today's briefing: ${reading.text}` : "",
-    `Open tasks:\n${tasks.slice(0, 60).map((t) => `- ${t.title} (${t.where})`).join("\n") || "(none)"}`,
+    `My open tasks (use these ids in task changes):\n${tasks.slice(0, 120).map(taskLine).join("\n") || "(none)"}`,
     link?.applied && Object.keys(link.applied).length
       ? `Changes you proposed that I've applied (the rest I haven't, or turned down):\n${Object.values(link.applied).map((a) => `- ${a.summary}. ${a.result}`).join("\n")}`
       : "",
@@ -770,9 +782,12 @@ export function planTask(task: PlanTask): Promise<void> {
 /** Rediscovers channels, then refreshes the calendar, ad-hoc tasks and every visible project. */
 /**
  * Works out the user's role from their Slack profile and activity, calendar and Jira, and saves it
- * as "About you" (they can still edit it in Settings), along with the first name they go by.
+ * as the prompts' description of them (the chat can correct it), along with the first name they go by.
  * Returns the role.
  */
+/** How often Claude looks at the user's role again, in the morning refresh. */
+const ROLE_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+
 export function learnRole(): Promise<string> {
   return track("role", (status) =>
     logged("role", null, async () => {
@@ -789,6 +804,7 @@ export function learnRole(): Promise<string> {
         await db.setSetting("user_profile", role);
         setUserProfile(role);
       }
+      await db.setSetting("user_profile_at", String(Date.now()));
       const name = data.name?.trim();
       if (name) await db.setSetting("user_name", name);
       return { value: role, costUsd };
@@ -854,8 +870,10 @@ export function refreshAll(): Promise<void> {
     "all",
     async (status) => {
       await db.setSetting("last_full_refresh_date", localDate(new Date()));
-      // The first time, Claude works out who you are, so every prompt after it knows.
-      if (!(await db.getSetting("user_profile"))?.trim()) {
+      // Claude works out who you are the first time, and looks again each week, so every prompt knows
+      // your current role without you writing it.
+      const roleAt = Number((await db.getSetting("user_profile_at")) ?? 0);
+      if (!(await db.getSetting("user_profile"))?.trim() || Date.now() - roleAt > ROLE_EVERY_MS) {
         status("Getting to know your role");
         await learnRole().catch(() => {});
       }

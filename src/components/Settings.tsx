@@ -1,4 +1,3 @@
-import { setUserProfile } from "../prompts";
 import { setStandingNotes } from "../claude";
 import { label, recordCorrection } from "../feedback";
 import { useEffect, useState, type ReactNode } from "react";
@@ -237,12 +236,12 @@ export function Settings({
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [model, setModel] = useState("opus");
-  const [about, setAbout] = useState("");
   const [log, setLog] = useState<db.LogEntry[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
   const [lessons, setLessons] = useState<db.Lesson[]>([]);
+  const [lessonsOpen, setLessonsOpen] = useState(false);
   const reloadLessons = () => db.listLessons().then(setLessons, () => {});
 
   useEffect(() => {
@@ -250,7 +249,6 @@ export function Settings({
       setTime((await db.getSetting("refresh_time")) ?? "07:30");
       setWeekdaysOnly(((await db.getSetting("weekdays_only")) ?? "1") === "1");
       setModel((await db.getSetting("model")) ?? "opus");
-      setAbout((await db.getSetting("user_profile")) ?? "");
       setNotes(await db.getNotes());
       reloadLessons();
       setLog(await db.recentLog(30));
@@ -268,10 +266,11 @@ export function Settings({
 
   const shown = projects.filter((p) => p.state !== "merged");
   const ORB_HINTS: Record<OrbLook, string> = {
-    crystal: "Molten metal suspended in clear glass",
-    glass: "Molten metal inside frosted glass",
-    porcelain: "Glazed porcelain, faintly translucent",
-    film: "A soap bubble, its colors swirling",
+    // Each orb's temperament: Demian, Roth, Ophelia, Oren.
+    crystal: "Inquisitive",
+    glass: "Brooding",
+    porcelain: "Creative",
+    film: "Ethereal",
   };
 
   // Rendered into <body> so nothing on the page can clip or offset it.
@@ -356,23 +355,6 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <div className="setting-row stacked">
-                <div className="setting-text">
-                  <span className="setting-label">About you</span>
-                  <span className="setting-hint">How Claude describes you when it reads your channels and plans your work.</span>
-                </div>
-                <textarea
-                  rows={2}
-                  value={about}
-                  aria-label="About you"
-                  placeholder="e.g. a product manager on the payments team"
-                  onChange={(e) => setAbout(e.target.value)}
-                  onBlur={async () => {
-                    await db.setSetting("user_profile", about.trim());
-                    setUserProfile(about);
-                  }}
-                />
-              </div>
               {notes.length > 0 && (
                 <div className="setting-row stacked">
                   <div className="setting-text">
@@ -403,15 +385,22 @@ export function Settings({
               )}
               {lessons.length > 0 && (
                 <div className="setting-row stacked">
-                  <div className="setting-text">
-                    <span className="setting-label">What Demian has learned</span>
+                  <button className="setting-text setting-toggle" onClick={() => setLessonsOpen(!lessonsOpen)} aria-expanded={lessonsOpen}>
+                    <span className="setting-label">
+                      What Demian has learned <span className="timestamp">{lessons.length}</span>
+                      <svg className={`disclosure${lessonsOpen ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                        <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
                     <span className="setting-hint">Lessons from your corrections, used in every refresh, plan and message. Click one to reword it.</span>
-                  </div>
-                  <ul className="notes-list">
-                    {lessons.map((l) => (
-                      <LessonRow key={l.id} lesson={l} projects={projects} onChange={reloadLessons} />
-                    ))}
-                  </ul>
+                  </button>
+                  <Reveal open={lessonsOpen}>
+                    <ul className="notes-list">
+                      {lessons.map((l) => (
+                        <LessonRow key={l.id} lesson={l} projects={projects} onChange={reloadLessons} />
+                      ))}
+                    </ul>
+                  </Reveal>
                 </div>
               )}
               <SettingRow label="Setup" hint="Check Claude Code and your connectors to Slack, Gmail, Calendar and Jira.">

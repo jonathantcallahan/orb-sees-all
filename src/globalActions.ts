@@ -9,6 +9,7 @@ import { setStandingNotes } from "./claude";
 import { assessPendingTasks, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading } from "./jobs";
 import { setUserProfile } from "./prompts";
 import type { GlobalAction } from "./schema";
+import { localDate } from "./scheduler";
 
 const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 
@@ -30,14 +31,20 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
       return `Rename "${project(a.project_id)}" to "${a.name}"`;
     case "set_project_tracking":
       return `${a.tracked ? "Track" : "Stop tracking"} "${project(a.project_id)}"`;
-    case "set_project_focus":
-      return [`Set the focus of "${project(a.project_id)}"`, a.focus && `: ${a.focus}`, a.out_of_scope && `. Not part of it: ${a.out_of_scope}`].filter(Boolean).join("");
+    case "add_project_context":
+      return `Add to the context of "${project(a.project_id)}": ${a.entries.join(" · ")}`;
     case "add_note":
       return `Remember: ${a.text}`;
     case "update_profile":
-      return `Update About you: ${a.text}`;
+      return `Update how Demian describes you: ${a.text}`;
     case "add_task":
       return `Add the task "${a.title}"${a.project_id ? ` to "${project(a.project_id)}"` : ""}`;
+    case "plan_today":
+      return a.today ? `Move "${a.title ?? "this task"}" into Today's tasks` : `Take "${a.title ?? "this task"}" off Today's tasks`;
+    case "set_task_status":
+      return `Mark "${a.title ?? "this task"}" ${{ todo: "to do", in_progress: "in progress", waiting: "waiting", done: "done" }[a.status]}`;
+    case "set_task_priority":
+      return `Set "${a.title ?? "this task"}" to ${a.priority} priority`;
     case "refresh":
       return a.what === "project" && a.project_id
         ? `Refresh "${project(a.project_id)}"`
@@ -51,7 +58,7 @@ const KIND: Partial<Record<GlobalAction["type"], db.FeedbackKind>> = {
   merge_projects: "project_merge",
   rename_project: "project_rename",
   set_project_tracking: "project_track",
-  set_project_focus: "project_focus",
+  add_project_context: "project_focus",
   add_note: "note",
 };
 
@@ -102,13 +109,13 @@ async function apply(a: GlobalAction): Promise<string> {
       await db.setProjectState(a.project_id, a.tracked ? "tracked" : "ignored");
       if (a.tracked) quiet(refreshProject(a.project_id));
       return a.tracked ? "It's on the board and being read." : "It's off the board.";
-    case "set_project_focus":
-      await db.saveFocus(a.project_id, {
-        ...(a.focus != null ? { focus: a.focus.trim() || null } : {}),
-        ...(a.out_of_scope != null ? { out_of_scope: a.out_of_scope.trim() || null } : {}),
-      });
+    case "add_project_context": {
+      const current = (await db.listFocus()).get(a.project_id);
+      const entries = a.entries.map((e) => e.trim()).filter(Boolean);
+      await db.saveFocus(a.project_id, { context: [...(current?.context ?? []), ...entries] });
       quiet(refreshProject(a.project_id));
-      return "Saved as its focus; it's being read again with it in mind.";
+      return "Added to its context; it's being read again with it in mind.";
+    }
     case "add_note": {
       const notes = [...(await db.getNotes()), a.text.trim()];
       await db.saveNotes(notes);
@@ -120,11 +127,20 @@ async function apply(a: GlobalAction): Promise<string> {
       await db.setSetting("user_profile", a.text.trim());
       setUserProfile(a.text);
       quiet(refreshReading());
-      return "About you is updated; the daily briefing is being rebuilt.";
+      return "Updated how Demian describes you; the daily briefing is being rebuilt.";
     case "add_task":
       await db.addManualTask(a.title, a.project_id ?? null);
       quiet(assessPendingTasks());
       return `Added "${a.title}" to your tasks.`;
+    case "plan_today":
+      await db.setTaskState(a.task_id, { todayOn: a.today ? localDate(new Date()) : null });
+      return a.today ? "It's in Today's tasks." : "It's off Today's tasks.";
+    case "set_task_status":
+      await db.setTaskState(a.task_id, { status: a.status });
+      return "Done.";
+    case "set_task_priority":
+      await db.setPriorityOverride(a.task_id, a.priority);
+      return "Priority set.";
     case "refresh": {
       const run = {
         all: refreshAll,

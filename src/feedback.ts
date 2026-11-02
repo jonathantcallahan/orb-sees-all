@@ -105,7 +105,7 @@ export async function dismissedFor(projectId: string | null): Promise<{ title: s
 
 export interface Learning {
   /** The user's own description of the project. */
-  focus?: { name: string | null; focus: string | null; out_of_scope: string | null } | null;
+  focus?: { name: string | null; context: string[]; removed: string[] } | null;
   /** The user's past corrections about this project (or the task list), newest first. */
   corrections: string[];
   /** Tasks the user dismissed; not to be raised again. */
@@ -128,7 +128,7 @@ export async function learningFor(projectId: string | null, scopes: string[]): P
     .filter((l): l is string => !!l)
     .slice(0, 25);
   return {
-    focus: focus && (focus.pinned_name || focus.focus || focus.out_of_scope) ? { name: focus.pinned_name, focus: focus.focus, out_of_scope: focus.out_of_scope } : null,
+    focus: focus && (focus.pinned_name || focus.context.length || focus.removed.length) ? { name: focus.pinned_name, context: focus.context, removed: focus.removed } : null,
     corrections,
     dismissed,
     lessons,

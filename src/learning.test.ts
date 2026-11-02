@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Feedback } from "./db";
 import { asUserHasIt, describeFeedback } from "./feedback";
-import { foldProfile, mergeProfile, projectName } from "./projects";
+import { foldProfile, mergeProfile, projectContext, projectName } from "./projects";
 import { distillPrompt, learningSection, planPrompt, projectPrompt } from "./prompts";
 import type { ProjectProfile } from "./schema";
 
-const profile = (p: Partial<ProjectProfile>): ProjectProfile => ({ goal: "", aliases: [], people: [], resources: [], milestones: [], decisions: [], ...p });
+const profile = (p: Partial<ProjectProfile>): ProjectProfile => ({ goal: "", context: [], aliases: [], people: [], resources: [], milestones: [], decisions: [], ...p });
 
 const fb = (f: Partial<Feedback>): Feedback => ({
   id: 1,
@@ -50,6 +50,17 @@ describe("project knowledge builds up", () => {
     expect(folded.people.map((p) => p.name)).toEqual(["Ana", "Cy"]);
   });
 
+  it("lists the user's context entries first, then Demian's, leaving out removed and repeated ones", () => {
+    const p = {
+      profile: { ...profile({}), context: ["Covers refunds", "It covers payouts", "Run by Ana"] },
+      focus: { project_id: "C1", pinned_name: null, focus: null, in_scope: null, out_of_scope: null, aliases: [], context: ["Run by Ana"], removed: ["It covers payouts"] },
+    };
+    expect(projectContext(p)).toEqual([
+      { text: "Run by Ana", by: "you" },
+      { text: "Covers refunds", by: "demian" },
+    ]);
+  });
+
   it("names a project the user's way first", () => {
     const p = { name: "tmp-refunds", snapshot: { name: "Asset refunds" } as never };
     expect(projectName(p)).toBe("Asset refunds");
@@ -59,7 +70,7 @@ describe("project knowledge builds up", () => {
 
 describe("corrections reach the prompts", () => {
   const learning = {
-    focus: { name: "Refunds v2", focus: "Self-serve refunds for publishers", out_of_scope: "Chargebacks" },
+    focus: { name: "Refunds v2", context: ["Self-serve refunds for publishers", "Not part of it: Chargebacks"], removed: ["It covers payouts"] },
     corrections: ["Set \"Reply to Kim\" to low priority (Demian had high). Why: vendor ask"],
     dismissed: [{ title: "Fill in the offsite survey", gist: null, why: "Not work" }],
     lessons: ["Rate vendor asks as medium unless an exec is waiting"],
@@ -79,6 +90,7 @@ describe("corrections reach the prompts", () => {
     });
     expect(prompt).toContain('The user calls it "Refunds v2"');
     expect(prompt).toContain("Not part of it: Chargebacks");
+    expect(prompt).toContain("- It covers payouts");
     expect(prompt).toContain("Why: vendor ask");
     expect(prompt).toContain("Fill in the offsite survey");
     expect(prompt).toContain("Rate vendor asks as medium");

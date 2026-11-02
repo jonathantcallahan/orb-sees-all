@@ -41,6 +41,15 @@ export function ExternalLink({
   );
 }
 
+/** A keyboard shortcut as a small hint, e.g. ⌘D ("Ctrl" and the letter on Windows). */
+export function Kbd({ keys }: { keys: string }) {
+  return (
+    <kbd className="kbd" aria-hidden>
+      {keys}
+    </kbd>
+  );
+}
+
 export function RefreshButton({
   busy,
   onClick,
@@ -110,12 +119,17 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
   );
 }
 
-export function Updated({ at }: { at: string | null | undefined }) {
-  if (!at) return <span className="timestamp small">never refreshed</span>;
+/** A time the way the app shows "updated …": just the time today, else the date and time. */
+export function updatedText(at: string): string {
   const d = new Date(at);
   const today = d.toDateString() === new Date().toDateString();
-  const text = d.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return <span className={`timestamp small${today ? "" : " stale"}`}>updated {text}</span>;
+  return d.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+export function Updated({ at }: { at: string | null | undefined }) {
+  if (!at) return <span className="timestamp small">never refreshed</span>;
+  const today = new Date(at).toDateString() === new Date().toDateString();
+  return <span className={`timestamp small${today ? "" : " stale"}`}>updated {updatedText(at)}</span>;
 }
 
 /** Claude Code's working indicator: a star that grows through these glyphs and back. */

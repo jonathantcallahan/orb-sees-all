@@ -447,6 +447,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/009_project_focus.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "project context as entries",
+            sql: include_str!("../migrations/010_project_context.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

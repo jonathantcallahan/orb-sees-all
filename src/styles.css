@@ -1368,9 +1368,8 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .notes-list .icon-button { line-height: 0; padding: 2px; opacity: 0.6; }
 .notes-list .icon-button:hover { opacity: 1; }
 
-/* The global chat's icon, beside Refresh all: the refresh wheel's size and gray. */
-.app-tools .chat-icon { display: grid; place-items: center; padding: 0 4px; height: 20px; line-height: 0; }
-.app-tools .chat-icon:hover { color: var(--text); }
+/* The Demian chat, beside Settings: the same glass button, reading Chat with its shortcut. */
+.chat-button { display: inline-flex; align-items: center; gap: 6px; padding-right: 9px; }
 .chat-modal-head-actions { display: flex; align-items: center; gap: 10px; }
 /* A change the global chat proposed: what it does, with Apply and Not this. */
 .action-card .handoff-head { align-items: flex-start; }
@@ -1438,3 +1437,32 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 
 /* The setup checklist opened from onboarding ("More help") sits above onboarding's black screen. */
 body:has(.onboarding) .modal-backdrop:has(.setup-modal) { z-index: 110; }
+
+/* "Project context": a quiet link under the description in Project details, and its modal, layered
+   above the details modal it opens from. */
+body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
+/* The same size as the description above it, in the link blue. */
+.understanding-row { display: flex; align-items: baseline; gap: 8px; margin-top: -6px; flex-wrap: wrap; }
+.understanding-link, .understanding-link.small { font-size: inherit; color: var(--accent); }
+.understanding-modal { width: min(560px, 100%); }
+.understanding-modal .column-header { display: flex; justify-content: space-between; align-items: center; }
+.understanding-project { color: var(--muted); }
+.understanding-intro { margin: -4px 0 2px; line-height: 1.5; }
+.understanding-field { display: flex; flex-direction: column; gap: 5px; }
+.understanding-label { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.understanding-label .more-link { margin-left: auto; }
+
+/* A keyboard shortcut, as plain light text (no badge). */
+.kbd { font: 11px/1 -apple-system, "Segoe UI", system-ui, sans-serif; letter-spacing: 0.02em; color: color-mix(in srgb, var(--muted) 60%, transparent); }
+/* Add a task's shortcut sits inside the bar, at the right, until you type. */
+.add-task { position: relative; }
+.add-task input { padding-right: 44px; }
+.add-task > .kbd { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+/* A collapsible Settings row (What Demian has learned), closed at first. */
+.setting-toggle { all: unset; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.setting-toggle .setting-label { display: flex; align-items: center; gap: 6px; }
+.setting-toggle .disclosure { color: var(--muted); transition: transform 0.2s ease; }
+.setting-toggle .disclosure.open { transform: rotate(90deg); }
+/* Project context: entries like the lessons list, with Add context under them. */
+.context-list { margin-top: 2px; }
+.context-add { align-self: flex-start; }

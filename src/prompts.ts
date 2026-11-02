@@ -1,7 +1,7 @@
 import type { IndexEntry } from "./taskIndex";
 import type { Learning } from "./feedback";
 
-/** Who the user is, as the prompts describe them. Set from Settings > About you; generic by default. */
+/** Who the user is, as the prompts describe them. Learned in the background (learnRole); generic by default. */
 const DEFAULT_PROFILE = "a professional who uses this planner to run their work";
 let profile = DEFAULT_PROFILE;
 
@@ -54,8 +54,9 @@ export function learningSection(l: Learning | undefined, what: "project" | "task
   if (l.focus) {
     const f = [
       l.focus.name && `The user calls it "${l.focus.name}"; use that as its name.`,
-      l.focus.focus && `What it's about, in their words: ${l.focus.focus}`,
-      l.focus.out_of_scope && `Not part of it: ${l.focus.out_of_scope}. Leave that work out of its status, blockers, tasks and profile even when it's discussed in its channels.`,
+      l.focus.context.length &&
+        `What the user says about it, which is true and outranks anything you read (anything they say isn't part of it stays out of its status, blockers, tasks and profile, even when it's discussed in its channels):\n${l.focus.context.map((c) => `- ${c}`).join("\n")}`,
+      l.focus.removed.length && `Things the user said are wrong about it; don't say them again in its context or elsewhere:\n${l.focus.removed.map((c) => `- ${c}`).join("\n")}`,
     ].filter(Boolean);
     parts.push(`The user's own definition of this project, which outranks anything you infer:\n${f.join("\n")}`);
   }
@@ -173,6 +174,7 @@ Fields:
 - last_activity: YYYY-MM-DD of the latest message.
 - profile: the durable facts about the project, as opposed to its current status. Start from the profile above and refine it: keep what still holds, correct what changed, add what's new, drop what turned out wrong. Don't restate status, blockers or tasks here.
   - goal: what the project is for and what "done" looks like, one or two sentences.
+  - context: how you understand the project, as three to six short, separate statements, each one plain sentence: what it covers (the product or area, the work streams, the main deliverables), what isn't part of it (related work that belongs elsewhere or was split off, written as "Not part of it: …"), and anything else that tells you what belongs to it (who drives it, how it's run). Don't repeat what the user already says about it above, nor anything they said is wrong; add only what they haven't covered.
   - aliases: other names people use for it (codenames, abbreviations, ticket keys like "CPS-6931"), at most five.
   - people: who's involved and their role on it ("PM", "eng lead", "legal reviewer", "exec sponsor"), at most twelve, most central first. Include the user.
   - resources: the key docs, tickets, epics, dashboards and repos, at most twelve. ${LINK_TITLE} kind is "doc", "ticket", "epic", "dashboard", "repo" or "other".
@@ -191,7 +193,7 @@ ${JSON_ONLY} Shape:
  "my_tasks": [{"id": string, "refines": string|null, "title": string, "description": string, "follow_up": {"kind": string, "action": string}, ${ASSESSMENT_SHAPE}, "link": string|null, "due": "YYYY-MM-DD"|null}],
  "recent_updates": [{"summary": string, "date": string|null, "link": string|null}],
  "last_activity": "YYYY-MM-DD"|null,
- "profile": {"goal": string, "aliases": [string], "people": [{"name": string, "slack_user_id": string|null, "role": string}], "resources": [{"title": string, "link": string, "kind": string}], "milestones": [{"what": string, "date": "YYYY-MM-DD"|null, "status": "done"|"planned"|"at_risk"|"missed"}], "decisions": [{"what": string, "date": "YYYY-MM-DD"|null, "link": string|null}]},
+ "profile": {"goal": string, "context": [string], "aliases": [string], "people": [{"name": string, "slack_user_id": string|null, "role": string}], "resources": [{"title": string, "link": string, "kind": string}], "milestones": [{"what": string, "date": "YYYY-MM-DD"|null, "status": "done"|"planned"|"at_risk"|"missed"}], "decisions": [{"what": string, "date": "YYYY-MM-DD"|null, "link": string|null}]},
  "related_channels": [{"channel_id": string, "name": string, "reason": string}],
  "epics": [{"key": string, "title": string, "status": string, "done": number, "total": number, "link": string, "updated": string|null}]}`;
 }
@@ -527,7 +529,7 @@ Reply with ONLY a JSON object: {"steps": [{"title": string, "by": "claude" | "yo
 }
 
 /**
- * Works out who the user is at work, for "About you", so they never have to write it: from their
+ * Works out who the user is at work, for the prompts, so they never have to write it: from their
  * Slack profile and recent activity, their calendar and their Jira work.
  */
 export function learnRolePrompt(): string {

@@ -109,6 +109,14 @@ export type ProjectSnapshot = z.infer<typeof ProjectSnapshot>;
 export const ProjectProfile = z.object({
   /** What the project is for and what "done" looks like. */
   goal: z.string(),
+  /**
+   * How Claude reads the project, as short separate statements: what it covers, what isn't part of
+   * it, how it's run. Shown as Project context, where the user edits, removes and adds entries.
+   */
+  context: z.array(z.string()).default([]),
+  /** Older profiles' single-text versions of the context; read only. */
+  focus: z.string().nullish(),
+  out_of_scope: z.string().nullish(),
   /** Other names people use for it: codenames, ticket prefixes, abbreviations. */
   aliases: z.array(z.string()).default([]),
   people: z.array(z.object({ name: z.string(), slack_user_id: z.string().nullish(), role: z.string() })).default([]),
@@ -277,7 +285,7 @@ export const StepRecheck = z.object({
 });
 export type StepRecheck = z.infer<typeof StepRecheck>;
 
-/** Who the user is at work, worked out by Claude for "About you". */
+/** Who the user is at work, worked out by Claude in the background (the prompts' description of them). */
 export const LearnedRole = z.object({ name: z.string().nullish(), role: z.string() });
 
 /**
@@ -302,11 +310,15 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("merge_projects"), from_id: z.string(), into_id: z.string() }),
   z.object({ type: z.literal("rename_project"), project_id: z.string(), name: z.string() }),
   z.object({ type: z.literal("set_project_tracking"), project_id: z.string(), tracked: z.boolean() }),
-  /** What the project is about and what isn't part of it, in the user's words; refreshes keep to it. */
-  z.object({ type: z.literal("set_project_focus"), project_id: z.string(), focus: z.string().nullish(), out_of_scope: z.string().nullish() }),
+  /** Context entries in the user's words about a project; refreshes keep to them. */
+  z.object({ type: z.literal("add_project_context"), project_id: z.string(), entries: z.array(z.string()).min(1) }),
   z.object({ type: z.literal("add_note"), text: z.string() }),
   z.object({ type: z.literal("update_profile"), text: z.string() }),
   z.object({ type: z.literal("add_task"), title: z.string(), project_id: z.string().nullish() }),
+  /** Plans an existing task for today (Today's tasks), or takes it off. */
+  z.object({ type: z.literal("plan_today"), task_id: z.string(), title: z.string().nullish(), today: z.boolean().default(true) }),
+  z.object({ type: z.literal("set_task_status"), task_id: z.string(), title: z.string().nullish(), status: z.enum(["todo", "in_progress", "waiting", "done"]) }),
+  z.object({ type: z.literal("set_task_priority"), task_id: z.string(), title: z.string().nullish(), priority: z.enum(["critical", "high", "medium", "low"]) }),
   z.object({
     type: z.literal("refresh"),
     what: z.enum(["all", "project", "briefing", "calendar", "tasks"]),

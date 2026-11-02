@@ -1,11 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { isWindows, MOD } from "../platform";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
 import { applyOrder, applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
-import { CloseIcon, RefreshButton, Updated } from "./common";
+import { CloseIcon, Kbd, RefreshButton, Updated } from "./common";
 import { setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
@@ -158,6 +159,19 @@ export function TaskColumn({
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  // ⌘N (Ctrl+N on Windows) jumps to Add a task from anywhere.
+  const addTask = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((isWindows ? e.ctrlKey : e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        addTask.current?.focus();
+        addTask.current?.scrollIntoView({ block: "nearest" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const tasksStatus = useJobStatus("adhoc", "assess");
   const [filter, setFilter] = useTaskFilter();
   const filtering = isFiltering(filter);
@@ -391,7 +405,8 @@ export function TaskColumn({
           assessPendingTasks().catch(() => {});
         }}
       >
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" />
+        <input ref={addTask} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" aria-label={`Add a task (${MOD}N)`} />
+        {!draft && <Kbd keys={`${MOD}N`} />}
       </form>
 
       {/* The inbox, header and add box stay put; only the tasks below them scroll. */}

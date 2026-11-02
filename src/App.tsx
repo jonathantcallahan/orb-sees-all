@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
-import { RefreshButton } from "./components/common";
+import { Kbd, RefreshButton } from "./components/common";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
@@ -98,6 +98,17 @@ export default function App() {
   const [showSetup, setShowSetup] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  // ⌘D (Ctrl+D on Windows) opens the Demian chat, or closes it if it's open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((isWindows ? e.ctrlKey : e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setShowChat((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // The menu bar's hidden "Replay onboarding".
   useEffect(() => {
     const unlisten = listen("tray-onboarding", () => setShowOnboarding(true));
@@ -116,7 +127,7 @@ export default function App() {
   const [filterProject, setFilterProject] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
   const [orbLook, setOrbLook] = useOrbLook();
-  // Who you are, for the prompts (Settings > About you).
+  // Who you are, for the prompts (learned in the background; see learnRole).
   useEffect(() => {
     getSetting("user_profile").then(setUserProfile, () => {});
     getNotes().then(setStandingNotes, () => {});
@@ -190,18 +201,11 @@ export default function App() {
         <button className={`glass-button look-${orbLook}`} onClick={() => setShowSettings(true)}>
           Settings
         </button>
-        <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
-        <button className="icon-button chat-icon" onClick={() => setShowChat(true)} title="Chat with Demian" aria-label="Chat with Demian">
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
-            <path
-              d="M2.5 2.5h9a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H6.2L3.5 12.2V10h-1a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinejoin="round"
-            />
-          </svg>
+        <button className={`glass-button chat-button look-${orbLook}`} onClick={() => setShowChat(true)} title="Chat with Demian" aria-label={`Chat with Demian (${MOD}D)`}>
+          Chat
+          <Kbd keys={`${MOD}D`} />
         </button>
+        <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
         {!allStatus && running.length > 0 && <span className="timestamp small">{running.filter((k) => k !== "all").length} refreshing…</span>}
         <UpdateButton />
       </nav>
