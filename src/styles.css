@@ -912,7 +912,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* One line, cut with an ellipsis; hovering shows the full title. */
 .task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Open in Claude beside Show links: the same small link, with Claude's mark before the words. */
-.claude-link { display: inline-flex; align-items: center; gap: 4px; }
+/* Baseline-aligned like the links beside it: the text sets the baseline, the icon centers on it. */
+.claude-link { display: inline-flex; align-items: baseline; gap: 4px; }
+.claude-link img { align-self: center; }
 /* Claude's mark is gray until the card is hovered, like the other badges and icons. */
 .claude-link img { transition: filter 0.15s ease; }
 .card:not(:hover) .claude-link img { filter: grayscale(1); }
