@@ -8,6 +8,7 @@ import { unsentMessages, useSessionProgress, type PendingAction, type SessionLin
 import { useJobStatus } from "../useAppData";
 import { Spinner } from "./common";
 import { SessionChat } from "./TaskCard";
+import { useOrbName } from "../orbLook";
 
 /**
  * A change the chat proposed, as a card: what it does, with Apply and Not this. Applying it runs the
@@ -121,6 +122,7 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
   useEffect(reload, [key]);
   const progress = useSessionProgress(key ?? "", key ? link : undefined, reload);
   const working = useJobStatus(`session:${key}`);
+  const orbName = useOrbName();
 
   // Names for the cards: projects by id, channels by id.
   const project = (id: string) => {
@@ -137,13 +139,15 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
     <SessionChat
       taskId={key}
       title="Demian"
+      subtitle={`Ask ${orbName} to adjust your workspace`}
       ask={null}
       plain
       messages={progress?.messages ?? []}
       working={working ?? (link && !link.sessionId ? "Starting" : undefined)}
       toSend={progress ? unsentMessages(progress.sends, link) : []}
       canReply
-      placeholder={hints}
+      // Example prompts only until the conversation starts; then an ordinary reply box.
+      placeholder={started ? "Reply to Demian…" : hints}
       headAction={
         started && (
           <button

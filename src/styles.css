@@ -1048,12 +1048,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   flex: 1; min-width: 0; resize: none; border: none; outline: none; background: none; padding: 3px 0;
   font: inherit; font-size: 12px; line-height: 1.45; color: var(--text); max-height: 160px; overflow-y: auto;
 }
-.composer textarea::placeholder { color: var(--muted); }
+.composer textarea::placeholder { color: color-mix(in srgb, var(--muted) 60%, transparent); }
 /* The reply box draws its own thin cursor, a couple of pixels off the text (useThinCaret), since
    WebKit's caret can't be made thinner; the native one is hidden. The mirror is a hidden copy of the
    textarea, laid out the same, for finding where the cursor falls. */
 .composer-field { flex: 1; min-width: 0; display: flex; position: relative; }
-.composer textarea { caret-color: transparent; }
+/* Text starts a few pixels in, so the cursor (drawn at the very start of an empty box) sits clear of it. */
+.composer textarea { caret-color: transparent; text-indent: 5px; }
 .composer-mirror {
   /* Its font, spacing, padding and width are copied from the textarea when measuring. */
   position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; overflow: hidden;
@@ -1401,3 +1402,14 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .lesson-scope { flex-shrink: 0; color: var(--muted); font-size: 11px; min-width: 64px; }
 .lesson-text { cursor: text; }
 .lesson-edit { flex: 1; min-width: 0; padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; }
+
+/* Today's header: the title and date stay on one line, and what a calendar refresh is doing sits
+   beside them on that line, truncating in the room left over instead of pushing the date onto a
+   second line. */
+.today-column > .column-header { align-items: flex-start; }
+.today-column > .column-header > div:first-child { flex-shrink: 0; white-space: nowrap; }
+.today-column > .column-header > .refresh-wrap { flex: 1; justify-content: flex-end; line-height: 18px; }
+.today-column > .column-header .refresh-status { min-width: 0; max-width: none; }
+
+/* After the chat's title, what it's for, lighter. */
+.chat-modal-subtitle { margin-left: 8px; color: color-mix(in srgb, var(--muted) 38%, var(--bg)); }

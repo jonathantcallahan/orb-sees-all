@@ -607,16 +607,20 @@ function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string) 
     if (el && m && document.activeElement === el && el.selectionStart === el.selectionEnd) {
       // The mirror takes the textarea's own type and spacing, whatever size this box uses.
       const cs = getComputedStyle(el);
-      Object.assign(m.style, { font: cs.font, letterSpacing: cs.letterSpacing, lineHeight: cs.lineHeight, padding: cs.padding, width: `${el.clientWidth}px` });
-      const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+      Object.assign(m.style, { font: cs.font, letterSpacing: cs.letterSpacing, lineHeight: cs.lineHeight, padding: cs.padding, textIndent: cs.textIndent, width: `${el.clientWidth}px` });
       // Measure in the mirror: the text up to the cursor, then a marker where the cursor is.
       const before = el.value.slice(0, el.selectionStart);
       if (m.firstChild?.textContent !== before || m.childNodes.length !== 2) {
         m.replaceChildren(document.createTextNode(before), Object.assign(document.createElement("span"), { textContent: "\u200b" }));
       }
       const mark = m.lastChild as HTMLElement;
-      const h = Math.round(line * 0.82);
-      next = { x: mark.offsetLeft, y: mark.offsetTop - el.scrollTop + (line - h) / 2, h };
+      // Text starts a few pixels in (.composer textarea's text-indent); an empty box's cursor sits
+      // at the very start, so the placeholder reads to the right of it.
+      // The marker's own box spans the font's ascent to descent, where the text's glyphs sit, so the
+      // cursor takes its top and height (a pixel trimmed from each end), not the line's.
+      const top = mark.offsetTop - el.scrollTop + 1;
+      const h = Math.max(8, mark.offsetHeight - 2);
+      next = { x: el.value ? mark.offsetLeft : -2, y: top, h };
     }
     // Only a real move re-renders; this keeps typing light.
     const key = next ? `${next.x}:${next.y}:${next.h}` : "";
@@ -816,6 +820,7 @@ export function SessionChat({
   askAction,
   plain = false,
   headAction,
+  subtitle,
   extra,
   empty,
   placeholder,
@@ -839,6 +844,8 @@ export function SessionChat({
   canReply: boolean;
   /** Beside the close button (New chat, in the global chat). */
   headAction?: ReactNode;
+  /** A lighter line after the title, saying what the chat is for. */
+  subtitle?: string;
   /** More cards under the conversation once Claude's turn is over (proposed changes, in the global chat). */
   extra?: ReactNode;
   /** Shown while the conversation is empty. */
@@ -899,7 +906,10 @@ export function SessionChat({
       <div className={`modal chat-modal${plain ? " plain" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
         <div className="chat-modal-top">
           <header className="chat-modal-head">
-            <span className="chat-modal-title">{title}</span>
+            <span className="chat-modal-title">
+              {title}
+              {subtitle && <span className="chat-modal-subtitle">{subtitle}</span>}
+            </span>
             <span className="chat-modal-head-actions">
               {headAction}
               <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
