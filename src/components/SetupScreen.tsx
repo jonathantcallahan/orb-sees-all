@@ -6,7 +6,7 @@ import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "
 import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { INSTALL_CLAUDE, isWindows, TERMINAL } from "../platform";
 
-const CONNECTORS_URL = "https://claude.ai/settings/connectors";
+export const CONNECTORS_URL = "https://claude.ai/settings/connectors";
 
 type Mark = "ok" | "bad" | "warn" | "wait" | "todo";
 
@@ -16,7 +16,7 @@ function StatusMark({ mark }: { mark: Mark }) {
 }
 
 /** A shell command with a Copy button, for steps the user runs in Terminal (PowerShell on Windows). */
-function Command({ text }: { text: string }) {
+export function Command({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="setup-command">

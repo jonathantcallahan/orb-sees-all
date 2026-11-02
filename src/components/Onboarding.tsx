@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import * as db from "../db";
 import { learnRole } from "../jobs";
 import { spinOrb } from "../orbEvents";
-import { runSetupChecks, type SetupReport } from "../setup";
+import { runCli } from "../cli";
+import { runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
+import { OnboardingGuide, type GuideKind } from "./OnboardingGuide";
 import { ScrambleText } from "./common";
 import { PressureBlob } from "./PressureBlob";
 import { SetupScreen } from "./SetupScreen";
@@ -24,7 +26,14 @@ interface Problem {
   stage: Stage;
   /** For steps you fix outside the app (signing in, connecting a tool): the re-check button's label. */
   recheck?: string;
+  /** The walk-through for fixing it, when there is one. */
+  guide?: GuideKind;
+  connectors?: ConnectorCheck[] | null;
+  apiKey?: boolean;
 }
+
+/** How often install and sign-in are looked at again while onboarding waits on them. */
+const POLL_MS = 4000;
 
 /**
  * First run (and the menu bar's Replay onboarding): a black screen with Demian at its center. Its
@@ -80,13 +89,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       if (at("claude")) setLine("Finding Claude Code");
       const claude = await until((r) => r.claude, at("claude") ? STEP_MS : 0);
       if (!live()) return;
-      if (!claude?.ok) return setProblem({ text: "Claude Code isn't installed on this Mac.", stage: "claude", recheck: "Check again" });
+      if (!claude?.ok) return setProblem({ text: "First, install Claude Code", stage: "claude", recheck: "Check again", guide: "install" });
       if (at("claude")) spinOrb();
 
       if (at("login")) setLine(run.from === "login" ? "Checking your sign-in again" : "Checking your Claude sign-in");
       const login = await until((r) => r.login, at("login") ? STEP_MS : 0);
       if (!live()) return;
-      if (!login?.ok) return setProblem({ text: "Sign in to Claude Code with your claude.ai account.", stage: "login", recheck: "Check sign-in again" });
+      if (!login?.ok) return setProblem({ text: "Next, sign in to Claude", stage: "login", recheck: "Check sign-in again", guide: "login" });
       if (at("login")) spinOrb();
 
       setLine(run.from === "tools" ? "Checking your tools again" : "Connecting your tools");
@@ -96,15 +105,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       if (!live()) return;
       const r = report.current!;
       if (r.probeError) return setProblem({ text: "Claude Code couldn't start to check your tools.", stage: "tools", recheck: "Check tools again" });
-      if (r.noClaudeAi) return setProblem({ text: "Claude Code isn't using a claude.ai account, so its connectors aren't there.", stage: "login", recheck: "Check sign-in again" });
+      if (r.noClaudeAi)
+        return setProblem({ text: "Sign in with your Claude account", stage: "login", recheck: "Check sign-in again", guide: "login", apiKey: true });
       const missing = (r.connectors ?? []).filter((c) => c.required && c.state !== "connected");
       if (missing.length) {
         const names = missing.map((c) => c.label);
         const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
         return setProblem({
-          text: `Connect ${list} in Claude (claude.ai › Settings › Connectors).`,
+          text: `Connect ${list}`,
           stage: "tools",
           recheck: missing.length === 1 ? `Check ${names[0]} again` : "Check connectors again",
+          guide: "connectors",
+          connectors: r.connectors,
         });
       }
       spinOrb();
@@ -130,6 +142,32 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     };
   }, [run]);
 
+  // While it waits on an install or a sign-in, it looks again every few seconds and carries on by
+  // itself once it's done (both checks are cheap; connectors aren't, so those wait for Check again).
+  useEffect(() => {
+    const kind = problem?.guide;
+    if ((kind !== "install" && kind !== "login") || problem?.apiKey) return;
+    let stop = false;
+    const timer = setInterval(async () => {
+      const out = await runCli("claude", kind === "install" ? ["--version"] : ["auth", "status"]).catch(() => null);
+      let ok = out?.code === 0;
+      if (ok && kind === "login") {
+        try {
+          ok = !!JSON.parse(out!.stdout).loggedIn;
+        } catch {
+          ok = false;
+        }
+      }
+      if (ok && !stop) setRun((r) => ({ from: problem!.stage, n: r.n + 1 }));
+    }, POLL_MS);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [problem]);
+
+  const recheck = () => problem && setRun((r) => ({ from: problem.stage, n: r.n + 1 }));
+
   return (
     <div className="onboarding">
       <div className="onboarding-orb">
@@ -138,16 +176,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       <div className="onboarding-line">
         <ScrambleText text={problem ? problem.text : line} from="◇◆░▒▓※∂" duration={greeting && !problem ? GREETING_MS : run.n === 0 && line === "Demian" ? 3200 : 500} />
       </div>
+      {problem?.guide && <OnboardingGuide kind={problem.guide} connectors={problem.connectors} apiKey={problem.apiKey} onCheck={recheck} />}
       <div className="onboarding-actions">
+        {problem && !problem.guide && (
+          <button className="cta-primary" onClick={recheck}>
+            {problem.recheck ?? "Try again"}
+          </button>
+        )}
         {problem && (
-          <>
-            <button className="cta-primary" onClick={() => setRun((r) => ({ from: problem.stage, n: r.n + 1 }))}>
-              {problem.recheck ?? "Try again"}
-            </button>
-            <button className="cta-ghost" onClick={() => setDetails(true)}>
-              How to fix it
-            </button>
-          </>
+          <button className="link-button small onboarding-help" onClick={() => setDetails(true)}>
+            More help
+          </button>
         )}
         {ready && (
           <button className="cta-primary onboarding-start" onClick={onDone} autoFocus>

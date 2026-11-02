@@ -304,6 +304,44 @@ fn tell_once_still_running(app: &AppHandle) {
         .show();
 }
 
+/// Opens a terminal window running one of setup's own steps, so onboarding can walk someone through
+/// installing Claude Code or signing in without typing commands. Only these fixed steps run: the
+/// frontend names one, it never supplies a command.
+#[tauri::command]
+fn open_setup_terminal(step: String) -> Result<(), String> {
+    let path = search_path();
+    let claude = resolve("claude", &path).map(|p| p.path.to_string_lossy().into_owned());
+    let script = match step.as_str() {
+        // Claude's official installer.
+        "install" if cfg!(windows) => "irm https://claude.ai/install.ps1 | iex".to_string(),
+        "install" => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
+        // Signing in with a Claude subscription (not an API key); it opens the browser to approve.
+        "login" => {
+            let exe = claude.unwrap_or_else(|| "claude".into());
+            if cfg!(windows) { format!("& '{exe}' auth login --claudeai") } else { format!("'{exe}' auth login --claudeai") }
+        }
+        _ => return Err(format!("Unknown setup step {step}")),
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let run = format!("tell application \"Terminal\" to do script \"{}\"", script.replace('\\', "\\\\").replace('"', "\\\""));
+        Command::new("osascript")
+            .args(["-e", &run, "-e", "tell application \"Terminal\" to activate"])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    {
+        Command::new("cmd")
+            .args(["/c", "start", "powershell", "-NoExit", "-Command", &script])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = script;
+    Ok(())
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -414,6 +452,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             run_cli,
             run_cli_stream,
+            open_setup_terminal,
             sessions::find_session,
             sessions::read_session_progress
         ])
