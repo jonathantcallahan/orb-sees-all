@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
-import type { ManualAssessment, Priority } from "../schema";
+import type { CalendarDay, ManualAssessment, Priority } from "../schema";
 import { applyOrder, applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
@@ -108,6 +108,7 @@ const SETTLE_BEFORE_SORT_MS = 450;
 export function TaskColumn({
   adhoc,
   manual,
+  calendar,
   projects,
   filterProject,
   onClearFilter,
@@ -127,6 +128,8 @@ export function TaskColumn({
 }: {
   adhoc: AdhocStore;
   manual: ManualTask[];
+  /** Today's meetings; their prep items are tasks too. */
+  calendar: CalendarDay | null;
   /** Visible projects; their open tasks for the user show here with a project badge. */
   projects: Project[];
   /** When set, only this project's tasks are shown. */
@@ -229,6 +232,27 @@ export function TaskColumn({
       recommended: isRecommended(t.id),
     }));
 
+  // Meeting prep: each item of today's meetings you haven't declined is a task, planned for today
+  // until you move it. It shares its id with the meeting card's prep checklist, so ticking either
+  // ticks both.
+  const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const rawPrep = filterProject
+    ? []
+    : (calendar?.events ?? [])
+        .filter((ev) => ev.my_response !== "declined")
+        // Prep for a meeting that's over is moot, unless you've already worked on it.
+        .flatMap((ev) =>
+          ev.prep.filter((p) => new Date(ev.end) > new Date() || taskStates.has(p.id)).map((p) => ({
+            id: p.id,
+            title: p.title,
+            link: p.link ?? null,
+            description: `To prepare for "${ev.title}" at ${time(ev.start)}${ev.summary ? `: ${ev.summary}` : "."}`,
+            due: calendar!.date,
+            source: "meeting" as const,
+            recommended: isRecommended(p.id),
+          })),
+        );
+
   // The same work from several sources (or merged by hand) shows once, under its canonical id.
   type Raw = (typeof rawMine)[number] | (typeof rawProjects)[number] | (typeof rawInbox)[number];
   const folded = foldTasks<Raw>([rawMine, rawProjects, rawInbox], taskAliases);
@@ -244,12 +268,17 @@ export function TaskColumn({
       rest: [...rest.filter((t) => pendingZone[t.id] !== "today"), ...planned.filter((t) => pendingZone[t.id] === "rest")],
     };
   };
+  // Prep you haven't touched counts as planned for today.
+  const withPrepPlanned = applyTaskState(rawPrep, taskStates).map((t) => (taskStates.has(t.id) ? t : { ...t, todayOn: today }));
+  const prep = split(withPrepPlanned);
   const inbox = split(applyTaskState(foldedInbox, taskStates));
   const projectTasks = split(applyTaskState(foldedProjects, taskStates));
   const mine = split(applyTaskState(foldedMine, taskStates));
 
   // Every open task's title, so a double check can spot duplicates.
-  const openList = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest].filter((t) => !t.done);
+  const openList = [...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest, ...prep.planned, ...prep.rest].filter(
+    (t) => !t.done,
+  );
   const openTasks = openList.map((t) => ({ id: t.id, title: t.title }));
   // Likely duplicates among open tasks, for each card to offer a merge.
   const duplicates = findDuplicates(openList, notDuplicates);
@@ -258,7 +287,7 @@ export function TaskColumn({
   // Today's plan pulls from every group, in the order you arranged it, open tasks first (a task
   // just dropped among the finished ones waits there a moment before moving up).
   const doneish = (t: { id: string; done: boolean }) => t.done || t.id === heldAmongDone;
-  const planned = applyOrder([...mine.planned, ...projectTasks.planned, ...inbox.planned], order.today).sort(
+  const planned = applyOrder([...prep.planned, ...mine.planned, ...projectTasks.planned, ...inbox.planned], order.today).sort(
     (a, b) => Number(doneish(a)) - Number(doneish(b)),
   );
   const estimate = (t: (typeof planned)[number]) =>
@@ -300,7 +329,10 @@ export function TaskColumn({
   );
 
   // All tasks, in your order (priority order for anything you haven't arranged).
-  const allTasks = applyOrder(byPriority(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest]), order.all);
+  const allTasks = applyOrder(
+    byPriority(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest, ...prep.rest]),
+    order.all,
+  );
 
   // Dropping a task puts it where you let go: in Today or All tasks, before the card it landed above.
   // Dropping on Today plans it; dropping it in All tasks unplans it.

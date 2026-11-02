@@ -253,6 +253,7 @@ export default function App() {
         <TaskColumn
           adhoc={data.adhoc}
           manual={data.manual}
+          calendar={data.calendar?.day ?? null}
           projects={projects}
           filterProject={projects.find((p) => p.channel_id === filterProject) ?? null}
           onClearFilter={() => setFilterProject(null)}

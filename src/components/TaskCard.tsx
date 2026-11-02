@@ -28,7 +28,7 @@ export interface CardTask {
   due?: string | null;
   requester?: string | null;
   follow_up?: FollowUp | null;
-  source: "manual" | "slack" | "email" | "project";
+  source: "manual" | "slack" | "email" | "project" | "meeting";
   status: TaskStatus;
   /** YYYY-MM-DD the task was planned for, if it's in Today. */
   todayOn: string | null;
@@ -50,7 +50,7 @@ export interface CardTask {
   done: boolean;
 }
 
-const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null } as const;
+const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null, meeting: "Meeting prep" } as const;
 
 /** A description cut to two lines with "…" and More when it runs longer; Less and Edit follow inline. */
 /**
@@ -1510,7 +1510,9 @@ export function TaskCard({
       ? "the user's own to-do list"
       : task.project
         ? `the "${task.project.name}" project's Slack channel${task.blocking ? " (this task is blocking the project)" : ""}`
-        : task.source;
+        : task.source === "meeting"
+          ? "preparation for a meeting on the user's calendar"
+          : task.source;
   const runPlan = (descriptionText: string | null = description ?? null) => {
     planTask({
       id: task.id,
