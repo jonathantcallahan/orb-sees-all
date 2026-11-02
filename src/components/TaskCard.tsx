@@ -472,7 +472,8 @@ function AssessmentView({
   onMarkDone,
   onRemind,
 }: {
-  assessment: Assessment;
+  /** Claude's take on the task; until there is one (a task nobody has assessed), the plan box says so. */
+  assessment: Assessment | null;
   /** Plan steps tagged by who does them, shown inside the assessment. */
   steps: OutlineStep[];
   /** Approve & start and Open in Claude, under the steps. */
@@ -487,7 +488,7 @@ function AssessmentView({
   const orbName = useOrbName();
   return (
     <>
-      {assessment.needs_details && (
+      {assessment?.needs_details && (
         <div className="needs-details small">
           <strong>Needs more detail.</strong> {assessment.details_question}
           {onAddDetails && (
@@ -497,10 +498,14 @@ function AssessmentView({
           )}
         </div>
       )}
-      <div className={`automation ${assessment.automation}`}>
+      <div className={`automation ${assessment?.automation ?? "unplanned"}`}>
         <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className="automation-kind">Plan</span>
-          {orbRole(assessment.automation, orbName) && <span className="automation-role timestamp">{orbRole(assessment.automation, orbName)}</span>}
+          {assessment ? (
+            orbRole(assessment.automation, orbName) && <span className="automation-role timestamp">{orbRole(assessment.automation, orbName)}</span>
+          ) : (
+            <span className="automation-role timestamp">{planning ? "Planning…" : steps.length ? `${steps.length} steps` : "Plan not created"}</span>
+          )}
           <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
             <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -1753,8 +1758,8 @@ export function TaskCard({
                       <Spinner /> Claude is reviewing this task…
                     </div>
                   )}
-                  {/* No assessment to nest it in yet. */}
-                  <PlanOutline steps={outlineSteps} action={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} />
+                  {/* No assessment yet: the same collapsed Plan box, saying there's no plan yet. */}
+                  <AssessmentView assessment={null} steps={outlineSteps} actions={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} />
                 </>
               )}
 

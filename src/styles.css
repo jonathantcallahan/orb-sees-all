@@ -171,7 +171,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
    by 31 − 16 = 15px; it sits 20px lower than that, by choice. */
 .today-column .pressure { margin-top: 35px; }
 /* The stats bars tuck up into the empty lower edge of the orb's box, closer to the orb itself. */
-.today-column .pressure-bars { margin-top: -26px; margin-bottom: 16px; position: relative; }
+.today-column .pressure-bars { margin-top: -18px; margin-bottom: 16px; position: relative; }
 .pressure-blob { width: 100%; height: 285px; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
@@ -941,16 +941,17 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
    Declined meetings aren't shown. */
 .event-block.rsvp-needs_action { background: var(--grey-bg); border-color: var(--border); color: var(--muted); }
 .event-block.rsvp-needs_action:hover { background: color-mix(in srgb, var(--text) 10%, var(--surface)); }
-.event-block.rsvp-tentative {
-  background:
-    repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent) 0 4px, transparent 4px 9px),
-    var(--surface);
+/* A "maybe": thin, evenly spaced diagonal lines, drawn as smooth vector lines (a gradient renders
+   a 1px diagonal as stair-stepped pixels). The lines are a masked layer under the block's text. */
+.event-block.rsvp-tentative { background: var(--surface); isolation: isolate; }
+.event-block.rsvp-tentative::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M-4 4L4-4M0 16L16 0M12 20L20 12' stroke='black' stroke-width='1' shape-rendering='geometricPrecision'/%3E%3C/svg%3E") repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Cpath d='M-4 4L4-4M0 16L16 0M12 20L20 12' stroke='black' stroke-width='1' shape-rendering='geometricPrecision'/%3E%3C/svg%3E") repeat;
+  transition: background 0.15s ease;
 }
-.event-block.rsvp-tentative:hover {
-  background:
-    repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 32%, transparent) 0 4px, transparent 4px 9px),
-    var(--surface);
-}
+.event-block.rsvp-tentative:hover { background: var(--surface); }
+.event-block.rsvp-tentative:hover::before { background: color-mix(in srgb, var(--muted) 70%, transparent); }
 
 /* Light the orb casts on the wall: big, faint, blurred patches of its colors drifting slowly behind
    the page. Centered on the orb (the first column's center, about 158px down), above nothing. */

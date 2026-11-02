@@ -16,8 +16,9 @@ import { useJobStatus } from "../useAppData";
 /** Pixels per minute on the day grid (72px an hour). */
 const PX_PER_MIN = 1.2;
 /** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
-const EVENT_INSET_TOP = 2;
 const EVENT_INSET_BOTTOM = 2;
+/** The hour line is a 1px rule drawn below its mark, so the top gap counts it to match the bottom. */
+const EVENT_INSET_TOP = EVENT_INSET_BOTTOM + 1;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 /** "meet.google.com" from a call link, tolerating a malformed URL from the model. */
