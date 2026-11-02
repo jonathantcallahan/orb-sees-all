@@ -230,12 +230,22 @@ function Untrack({ name, onConfirm }: { name: string; onConfirm: () => Promise<v
   );
 }
 
-const VERDICT_LABEL: Record<BlockerCheck["verdict"], string> = {
-  still_blocking: "Still blocking",
-  resolved: "Resolved elsewhere",
-  partly_resolved: "Partly resolved",
-  not_blocking: "Not really a blocker",
-  unclear: "Unclear",
+const VERDICT_LABEL: Record<"blocker" | "active", Record<BlockerCheck["verdict"], string>> = {
+  blocker: {
+    still_blocking: "Still blocking",
+    resolved: "Resolved elsewhere",
+    partly_resolved: "Partly resolved",
+    not_blocking: "Not really a blocker",
+    unclear: "Unclear",
+  },
+  // Active work is checked the same way; the verdicts mean in progress, done, partly done, stalled.
+  active: {
+    still_blocking: "Still in progress",
+    resolved: "Done",
+    partly_resolved: "Partly done",
+    not_blocking: "Not really underway",
+    unclear: "Unclear",
+  },
 };
 
 /** "Double check": Claude looks for whether a blocker is real and already solved elsewhere. */
@@ -254,12 +264,22 @@ function CheckAction({ checking, onCheck, label = "Double check" }: { checking: 
   );
 }
 
-function CheckResult({ check, onResolve, onDismiss }: { check: StoredBlockerCheck; onResolve: () => void; onDismiss: () => void }) {
+function CheckResult({
+  check,
+  kind,
+  onResolve,
+  onDismiss,
+}: {
+  check: StoredBlockerCheck;
+  kind: "blocker" | "active";
+  onResolve: () => void;
+  onDismiss: () => void;
+}) {
   const clearable = check.verdict === "resolved" || check.verdict === "not_blocking";
   return (
     <div className={`check-result ${check.verdict}`} onClick={(e) => e.stopPropagation()}>
       <div className="check-head small">
-        <span className="check-verdict">{VERDICT_LABEL[check.verdict]}</span>
+        <span className="check-verdict">{VERDICT_LABEL[kind][check.verdict]}</span>
         <span className="timestamp">checked {ago(check.at)}</span>
       </div>
       <p className="small">{check.summary}</p>
@@ -269,7 +289,7 @@ function CheckResult({ check, onResolve, onDismiss }: { check: StoredBlockerChec
         <span className="check-buttons">
           {clearable && (
             <button className="link-button small" onClick={onResolve}>
-              Mark resolved
+              {kind === "active" ? "Mark done" : "Mark resolved"}
             </button>
           )}
           <button className="link-button small muted" onClick={onDismiss}>
@@ -367,7 +387,7 @@ function WorkItem({
   kind: "blocker" | "active";
   /** The channel to post a reminder (blockers) or update request (active work) in, and any already sent. */
   remind?: { channelId: string; reminder: Reminder | undefined; onSent: () => void };
-  /** For blockers: run a double check, and its latest result. */
+  /** Run a double check, and its latest result; Mark done clears the item. */
   check?: {
     result: StoredBlockerCheck | undefined;
     onCheck: () => void;
@@ -410,7 +430,15 @@ function WorkItem({
               <button
                 className="link-button small more-link"
                 onClick={check.onResolve}
-                title={item.owners.some((o) => o.is_me) ? "Done: clear the blocker and mark your task done" : "They've done it: stop listing this as blocking"}
+                title={
+                  kind === "active"
+                    ? item.owners.some((o) => o.is_me)
+                      ? "Done: clear it and mark your task done"
+                      : "It's finished: stop listing it as active"
+                    : item.owners.some((o) => o.is_me)
+                      ? "Done: clear the blocker and mark your task done"
+                      : "They've done it: stop listing this as blocking"
+                }
               >
                 Mark done
               </button>
@@ -420,7 +448,7 @@ function WorkItem({
       </div>
       <span className="what">{item.what}</span>
       {check?.result && !hideResult && !checking && (
-        <CheckResult check={check.result} onResolve={check.onResolve} onDismiss={() => setHideResult(true)} />
+        <CheckResult check={check.result} kind={kind} onResolve={check.onResolve} onDismiss={() => setHideResult(true)} />
       )}
     </li>
   );
@@ -463,8 +491,15 @@ export function ProjectCard({
   const [tab, setTab] = useState<"blockers" | "active" | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const toggle = (next: "blockers" | "active") => setTab((current) => (current === next ? null : next));
-  // Blockers the user marked resolved after a double check stay hidden.
+  // Blockers and active work the user marked done stay hidden.
   const blockers = (s?.blockers ?? []).filter((b) => !stateOf(taskStates, blockerKey(b.id)).dismissed);
+  const active = (s?.active ?? []).filter((a) => !stateOf(taskStates, blockerKey(a.id)).dismissed);
+  // Clears an item, and finishes the user's own task for it (the same id) along with it.
+  const markDone = async (item: Blocker) => {
+    await setTaskState(blockerKey(item.id), { dismissed: true });
+    if (item.owners.some((o) => o.is_me)) await setTaskState(item.id, { status: "done" });
+    onChange();
+  };
   const channelCount = activeChannels(project).length;
 
   return (
@@ -514,10 +549,10 @@ export function ProjectCard({
                   {tab === "blockers" && <TabClose />}
                 </button>
               )}
-              {(s.active?.length ?? 0) > 0 && (
+              {active.length > 0 && (
                 <button role="tab" aria-selected={tab === "active"} className={`work-tab${tab === "active" ? " open" : ""}`} onClick={() => toggle("active")}>
-                  Active {s.active.length}
-                  {s.active.some((a) => a.owners.some((o) => o.is_me)) && <MineDot />}
+                  Active {active.length}
+                  {active.some((a) => a.owners.some((o) => o.is_me)) && <MineDot />}
                   {tab === "active" && <TabClose />}
                 </button>
               )}
@@ -538,12 +573,7 @@ export function ProjectCard({
                   check={{
                     result: blockerChecks[b.id],
                     onCheck: () => checkBlocker(projectName(project), project.channel_id, b, reminders[b.id]).then(onChange, () => {}),
-                    onResolve: async () => {
-                      await setTaskState(blockerKey(b.id), { dismissed: true });
-                      // Your own blockers are also tasks on your list (same id); finishing one finishes both.
-                      if (b.owners.some((o) => o.is_me)) await setTaskState(b.id, { status: "done" });
-                      onChange();
-                    },
+                    onResolve: () => markDone(b),
                   }}
                 />
               ))}
@@ -552,14 +582,19 @@ export function ProjectCard({
 
           {aboutOpen && <ProfileModal project={project} onClose={() => setAboutOpen(false)} onChange={onChange} />}
 
-          {tab === "active" && s.active?.length > 0 && (
+          {tab === "active" && active.length > 0 && (
             <ul className="work-items tab-panel" role="tabpanel" title="">
-              {s.active.map((a) => (
+              {active.map((a) => (
                 <WorkItem
                   key={a.id}
                   item={a}
                   kind="active"
                   remind={{ channelId: project.channel_id, reminder: reminders[a.id], onSent: onChange }}
+                  check={{
+                    result: blockerChecks[a.id],
+                    onCheck: () => checkBlocker(projectName(project), project.channel_id, a, reminders[a.id], "active").then(onChange, () => {}),
+                    onResolve: () => markDone(a),
+                  }}
                 />
               ))}
             </ul>

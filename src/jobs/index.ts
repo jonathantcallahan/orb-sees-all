@@ -378,12 +378,13 @@ export function checkBlocker(
   channelId: string,
   blocker: Blocker,
   reminder?: { at: string; link: string | null } | null,
+  kind: "blocker" | "active" = "blocker",
 ): Promise<void> {
   return track(`check:${blocker.id}`, (status) =>
     logged("check", blocker.id, async () => {
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: checkBlockerPrompt({ projectName, channelId, blocker, reminder, userId: await db.getSetting("slack_user_id") }),
+        prompt: checkBlockerPrompt({ projectName, channelId, blocker, reminder, kind, userId: await db.getSetting("slack_user_id") }),
         schema: BlockerCheck,
         tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead, ...TOOLS.driveRead],
         model: await model(),

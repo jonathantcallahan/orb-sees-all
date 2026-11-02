@@ -404,9 +404,12 @@ export interface CheckBlockerInput {
   userId: string | null;
   /** A reminder the user already posted about it, so the check looks for replies. */
   reminder?: { at: string; link: string | null } | null;
+  /** A blocker, or active work that's underway. */
+  kind?: "blocker" | "active";
 }
 
 export function checkBlockerPrompt(p: CheckBlockerInput): string {
+  if (p.kind === "active") return checkActivePrompt(p);
   return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}${profile}) has this item listed as blocking the "${p.projectName}" project (Slack channel ${p.channelId}):
 ${JSON.stringify(p.blocker)}
 ${p.reminder ? `\nThe user posted a reminder about it on ${p.reminder.at}${p.reminder.link ? ` (${p.reminder.link})` : ""}. Start there: read the replies to it and anything the owners said since.\n` : ""}
@@ -419,6 +422,25 @@ verdict: "still_blocking" (nothing resolves it), "resolved" (it was answered, do
 summary: two or three sentences explaining the verdict, naming where you found the answer if it was resolved.
 evidence: the threads, emails, tickets and docs that support the verdict, with links. ${LINK_TITLE}
 next_step: if it's still blocking or partly resolved, the single action that would clear it; otherwise null.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"verdict": "still_blocking"|"resolved"|"partly_resolved"|"not_blocking"|"unclear", "summary": string, "evidence": [{"title": string, "link": string}], "next_step": string|null}`;
+}
+
+/** The same double check for active work: is it still underway, finished, or stalled? */
+function checkActivePrompt(p: CheckBlockerInput): string {
+  return `The user (${p.userId ? `Slack user ${p.userId}, ` : ""}${profile}) has this item listed as active work underway on the "${p.projectName}" project (Slack channel ${p.channelId}):
+${JSON.stringify(p.blocker)}
+${p.reminder ? `\nThe user asked for an update on it on ${p.reminder.at}${p.reminder.link ? ` (${p.reminder.link})` : ""}. Start there: read the replies to it and anything the owners said since.\n` : ""}
+Double check it. Dig deeper than the project channel:
+1. Read the message that raised it and its thread (the link), and the latest messages in ${p.channelId}.
+2. Search for whether it has finished or moved elsewhere: Slack across channels and DMs (slack_search_public_and_private, using the key terms and the owners' names, since it started), email (search_threads), Jira (jira_search for its tickets and their status), GitHub links in the threads, and Google Drive (search_files for the doc it's producing).
+3. Decide where it stands, and whether the named owners are the right people.
+
+verdict: "still_blocking" (it's still in progress), "resolved" (it's finished: shipped, merged, delivered or closed), "partly_resolved" (some of it is done), "not_blocking" (it isn't really underway: stalled, dropped, never started, or owned by someone else), or "unclear" (not enough evidence either way).
+summary: two or three sentences explaining the verdict, naming where you found it.
+evidence: the threads, emails, tickets, PRs and docs that support the verdict, with links. ${LINK_TITLE}
+next_step: if it's still in progress or partly done, the next thing that would move it forward, or who to ask; otherwise null.
 
 ${READ_ONLY}
 ${JSON_ONLY} Shape: {"verdict": "still_blocking"|"resolved"|"partly_resolved"|"not_blocking"|"unclear", "summary": string, "evidence": [{"title": string, "link": string}], "next_step": string|null}`;
