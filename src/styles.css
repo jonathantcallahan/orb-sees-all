@@ -1432,3 +1432,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .onboarding-progress { display: flex; justify-content: center; gap: 14px; margin-bottom: 4px; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .onboarding-progress .done { color: var(--muted); }
 .onboarding-progress .current { color: var(--text); }
+
+/* The setup checklist opened from onboarding ("More help") sits above onboarding's black screen. */
+body:has(.onboarding) .modal-backdrop:has(.setup-modal) { z-index: 110; }

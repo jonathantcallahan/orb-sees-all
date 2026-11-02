@@ -68,11 +68,49 @@ fn search_path() -> std::ffi::OsString {
     std::env::join_paths(parts).unwrap_or_default()
 }
 
-fn passthrough_env() -> Vec<(&'static str, String)> {
-    PASSTHROUGH_ENV
+/// Network and certificate settings Claude Code may need to reach claude.ai on a company network
+/// (a proxy, a company root certificate), and where its config lives if moved. Never credentials.
+const NETWORK_ENV: &[&str] = &[
+    "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+    "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_USE_SYSTEM_CA", "CLAUDE_CONFIG_DIR",
+];
+
+/// Those settings from the user's login shell, read once. An app opened from Finder doesn't get what
+/// the shell profile exports, so Claude Code would run without the proxy or certificate that their
+/// Terminal has. Gives up after a few seconds if the profile hangs.
+#[cfg(not(windows))]
+fn login_shell_env() -> &'static Vec<(String, String)> {
+    static ENV: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    ENV.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let out = Command::new(shell).args(["-ilc", "env"]).stdin(Stdio::null()).stderr(Stdio::null()).output();
+            let _ = tx.send(out);
+        });
+        let Ok(Ok(out)) = rx.recv_timeout(Duration::from_secs(4)) else { return vec![] };
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .filter(|(k, _)| NETWORK_ENV.contains(k))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    })
+}
+
+fn passthrough_env() -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = PASSTHROUGH_ENV
         .iter()
-        .filter_map(|key| std::env::var(key).ok().map(|value| (*key, value)))
-        .collect()
+        .chain(NETWORK_ENV)
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key.to_string(), value)))
+        .collect();
+    #[cfg(not(windows))]
+    for (k, v) in login_shell_env() {
+        if !env.iter().any(|(have, _)| have == k) {
+            env.push((k.clone(), v.clone()));
+        }
+    }
+    env
 }
 
 /// A child process with only the passthrough environment, the search path, and (on Windows) no
@@ -85,6 +123,9 @@ fn command(exe: &Program, args: &[String], dir: &PathBuf, path: &std::ffi::OsStr
         .env_clear()
         .envs(passthrough_env())
         .env("PATH", path)
+        // Newer Claude Code doesn't wait for MCP servers to connect in a headless run, so a run can
+        // start, and even finish, before the claude.ai connectors (Slack, Gmail, Calendar) arrive.
+        .env("MCP_CONNECTION_NONBLOCKING", "false")
         .stdin(if stdin { Stdio::piped() } else { Stdio::null() });
     #[cfg(windows)]
     {
