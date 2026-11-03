@@ -35,7 +35,7 @@ const TRANSLUCENCY = /* glsl */ `
  * Porcelain's studio: a mid-gray room, so the body shades gently from light to shadow instead of
  * washing out, with a few softbox strips the glaze mirrors as crisp highlights.
  */
-function porcelainStudio(): THREE.Scene {
+export function porcelainStudio(): THREE.Scene {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0.24, 0.24, 0.25);
   const box = (w: number, h: number, k: number, pos: [number, number, number]) => {

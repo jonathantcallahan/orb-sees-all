@@ -1,3 +1,4 @@
+import { PLAN_RULES, WRITING_RULES } from "./baseLessons";
 import { z } from "zod";
 import { runCliStreaming, type StreamingCliRunner } from "./cli";
 
@@ -12,27 +13,42 @@ export const TOOLS = {
     `${SLACK}slack_read_channel`,
     `${SLACK}slack_read_thread`,
     `${SLACK}slack_search_public_and_private`,
+    `${SLACK}slack_search_public`,
     `${SLACK}slack_search_channels`,
     `${SLACK}slack_read_user_profile`,
     `${SLACK}slack_search_users`,
+    `${SLACK}slack_list_channel_members`,
+    `${SLACK}slack_read_canvas`,
+    `${SLACK}slack_read_file`,
+    `${SLACK}slack_read_list`,
+    `${SLACK}slack_get_reactions`,
   ],
-  gmailRead: [`${GMAIL}search_threads`, `${GMAIL}get_thread`, `${GMAIL}get_message`],
-  calendarRead: [`${GCAL}list_calendars`, `${GCAL}list_events`, `${GCAL}get_event`, `${GCAL}search_events`],
+  gmailRead: [`${GMAIL}search_threads`, `${GMAIL}get_thread`, `${GMAIL}get_message`, `${GMAIL}list_labels`],
+  calendarRead: [`${GCAL}list_calendars`, `${GCAL}list_events`, `${GCAL}get_event`, `${GCAL}search_events`, `${GCAL}suggest_time`],
   driveRead: [
     "mcp__claude_ai_Google_Drive__search_files",
     "mcp__claude_ai_Google_Drive__read_file_content",
     "mcp__claude_ai_Google_Drive__get_file_metadata",
+    "mcp__claude_ai_Google_Drive__list_recent_files",
+    // The contents of Google Docs, Sheets and Slides, and Claude Docs (the artifacts people share
+    // from Claude): reading only.
+    "mcp__claude_ai_Google_Docs__read_doc",
+    "mcp__claude_ai_Google_Sheets__get_spreadsheet",
+    "mcp__claude_ai_Google_Sheets__get_values",
+    "mcp__claude_ai_Google_Slides__read_presentation",
+    "mcp__claude_ai_Google_Slides__read_slide_page",
+    "mcp__claude_ai_Google_Slides__read_slide_page_thumbnail",
+    "mcp__claude_ai_Claude_Docs__read",
+    "mcp__claude_ai_Claude_Docs__query",
+    "mcp__claude_ai_Claude_Docs__guide",
   ],
   jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
   /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
   slackSend: [`${SLACK}slack_send_message`],
-  // An internal knowledge-base connector (U-Know at Unity). Optional: if it isn't connected,
-  // Claude just doesn't see these tools.
-  uknow: [
-    "mcp__claude_ai_U-Know__ask_uknow",
-    "mcp__claude_ai_U-Know__ask_uknow_session",
-    "mcp__claude_ai_U-Know__list_knowledge_bases",
-  ],
+  /** Creating a Google Doc, used only for a doc the user reviewed and clicked Create on. */
+  docCreate: ["mcp__claude_ai_Google_Drive__create_file"],
+  /** Creating a calendar event, used only for an invite the user reviewed and clicked Create on. */
+  eventCreate: [`${GCAL}create_event`, `${GCAL}suggest_time`],
 };
 
 // User settings can route Claude Code through a gateway (ANTHROPIC_BASE_URL and
@@ -41,19 +57,77 @@ export const TOOLS = {
 // them for the app's runs only.
 const USE_CLAUDE_AI_LOGIN = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" } });
 
-// Belt and braces: built-in tools that could touch the machine are denied outright.
-const DISALLOWED = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent"];
+// Belt and braces: built-in tools that could touch the machine are denied outright. So is U-Know,
+// a company knowledge-base connector, which runs no longer use.
+const DISALLOWED = [
+  "Bash",
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+  "Agent",
+  ...["ask_uknow", "ask_uknow_session", "list_knowledge_bases"].map((t) => `mcp__claude_ai_U-Know__${t}`),
+];
 
 /**
  * Tools a working session must not even see: everything that posts, drafts or changes something in
- * Slack, Gmail, Calendar or Jira. Orb does the sending once the user approves, so with these gone a
+ * Slack, Gmail, Calendar, Drive or Jira. Orb does the sending once the user approves, so with these gone a
  * session's only way to send is to hand the message to Orb.
  */
 const SESSION_DISALLOWED = [
-  ...["slack_send_message", "slack_send_message_draft", "slack_schedule_message", "slack_create_canvas", "slack_update_canvas", "slack_add_reaction", "slack_create_conversation", "slack_create_list", "slack_add_list_record", "slack_update_list", "slack_update_list_record"].map((t) => `${SLACK}${t}`),
-  ...["create_draft", "send_message", "send_draft", "delete_draft"].map((t) => `${GMAIL}${t}`),
+  ...[
+    "slack_send_message",
+    "slack_send_message_draft",
+    "slack_schedule_message",
+    "slack_create_canvas",
+    "slack_update_canvas",
+    "slack_add_reaction",
+    "slack_create_conversation",
+    "slack_create_list",
+    "slack_add_list_record",
+    "slack_update_list",
+    "slack_update_list_record",
+    "slack_get_file_upload_url",
+    "slack_complete_file_upload",
+  ].map((t) => `${SLACK}${t}`),
+  ...[
+    "create_draft",
+    "update_draft",
+    "send_message",
+    "send_draft",
+    "delete_draft",
+    "reply",
+    "forward",
+    "trash_message",
+    "trash_thread",
+    "untrash_message",
+    "untrash_thread",
+    "mark_message_spam",
+    "mark_thread_spam",
+    "unmark_message_spam",
+    "unmark_thread_spam",
+    "label_message",
+    "label_thread",
+    "unlabel_message",
+    "unlabel_thread",
+    "update_message_labels",
+    "create_label",
+    "update_label",
+    "delete_label",
+    "apply_sensitive_message_label",
+    "apply_sensitive_thread_label",
+  ].map((t) => `${GMAIL}${t}`),
   ...["create_event", "update_event", "delete_event", "respond_to_event"].map((t) => `${GCAL}${t}`),
   ...["jira_create_issue", "jira_update_issue", "jira_add_comment", "jira_transition_issue", "jira_delete_issue", "jira_edit_comment"].map((t) => `mcp__mcp-jira__${t}`),
+  // Editing Google Docs, Sheets and Slides, and Claude Docs.
+  "mcp__claude_ai_Google_Docs__update_doc",
+  ...["update_spreadsheet", "update_values", "update_formulas", "insert_dimension"].map((t) => `mcp__claude_ai_Google_Sheets__${t}`),
+  "mcp__claude_ai_Google_Slides__update_presentation",
+  ...["create", "update", "delete", "batch", "export"].map((t) => `mcp__claude_ai_Claude_Docs__${t}`),
+  // With these visible, a session asked for a doc tries to make it itself and stalls on the
+  // permission instead of handing it to Orb.
+  ...["create_file", "copy_file", "update_file", "share_file", "trash_file"].map((t) => `mcp__claude_ai_Google_Drive__${t}`),
 ];
 
 /** Corrections the user has given in the global chat; every run is told them. */
@@ -70,10 +144,21 @@ export function notesPrompt(): string {
     : "";
 }
 
+/** Claude Code's own read-only file tools, given when a run has code folders to read (see codeArgs). */
+export const CODE_TOOLS = ["Read", "Grep", "Glob"];
+
+/** Folders of code a run may read: --add-dir for each, and the read-only file tools to read them with. */
+export function codeArgs(dirs: string[] | undefined): { args: string[]; tools: string[] } {
+  if (!dirs?.length) return { args: [], tools: [] };
+  return { args: ["--add-dir", ...dirs], tools: CODE_TOOLS };
+}
+
 export interface ClaudeOptions<T> {
   prompt: string;
   schema: z.ZodType<T>;
   tools: string[];
+  /** Code folders the run may read (local checkouts and GitHub mirrors). */
+  dirs?: string[];
   model?: string;
   maxTurns?: number;
   /** Called with a plain-language description of each step Claude takes. */
@@ -120,6 +205,29 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
       return "Reading a meeting";
     case "list_calendars":
       return "Finding your calendars";
+    case "slack_read_canvas":
+    case "slack_read_file":
+    case "slack_read_list":
+      return "Reading something shared in Slack";
+    case "slack_list_channel_members":
+    case "slack_get_reactions":
+      return "Checking who's in a Slack conversation";
+    case "read_doc":
+      return "Reading a Google Doc";
+    case "get_spreadsheet":
+    case "get_values":
+      return "Reading a spreadsheet";
+    case "read_presentation":
+    case "read_slide_page":
+    case "read_slide_page_thumbnail":
+      return "Reading slides";
+    // Claude Docs: the artifacts people share from Claude.
+    case "read":
+    case "query":
+    case "guide":
+      return "Reading a Claude doc";
+    case "list_recent_files":
+      return "Looking at recent Drive files";
     case "search_files":
       return "Searching Google Drive";
     case "read_file_content":
@@ -129,9 +237,12 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
       return str("jql") ? `Searching Jira for ${quoted(str("jql"))}` : "Searching Jira";
     case "jira_get_issue":
       return str("issue_key") ? `Reading ${str("issue_key")}` : "Reading a Jira issue";
-    case "ask_uknow":
-    case "ask_uknow_session":
-      return "Asking U-Know";
+    case "Read":
+      return str("file_path") ? `Reading ${str("file_path").split("/").pop()}` : "Reading the code";
+    case "Grep":
+      return str("pattern") ? `Searching the code for ${quoted(str("pattern"))}` : "Searching the code";
+    case "Glob":
+      return "Looking through the code";
     default:
       return "Working";
   }
@@ -195,8 +306,11 @@ function reportLine(line: string, onStatus: (s: string) => void) {
  * The command line for a one-shot run. The prompt itself goes on stdin and the system prompt in a
  * file (see CliInput), so the arguments stay short on every platform.
  */
-export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTurns" | "tools">, resumeSession?: string): string[] {
+export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTurns" | "tools" | "dirs">, resumeSession?: string): string[] {
+  const code = codeArgs(opts.dirs);
+  const tools = [...opts.tools, ...code.tools];
   return [
+    ...code.args,
     ...(resumeSession ? ["--resume", resumeSession] : []),
     "-p",
     "--output-format",
@@ -209,7 +323,7 @@ export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTur
     "--max-turns",
     String(opts.maxTurns ?? 40),
     // A job with no tools (like the daily reading) must not pass a bare --allowedTools.
-    ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
+    ...(tools.length ? ["--allowedTools", ...tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
   ];
@@ -286,7 +400,13 @@ export const SESSION_DISPLAY = [
   "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't open with a title or heading line; start straight in with what you have to say. Don't use markdown: no headings, bold or italics, bullet or numbered lists, tables, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
   "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
   "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
-  "You can't post to Slack or send anything yourself: this session's send tools are turned off, and Orb does the sending once I approve. When a Slack message is ready, even one I've told you to send, hand it to Orb as a block: a line `[orb] send step N to <#channel-name, or the permalink of the thread to reply in>`, then the message exactly as it should be posted, then a line `[orb] end`. Then write `[orb] step N waiting: review and send the message` and stop. Orb tells you once it's sent, with its link.",
+  "You can't post to Slack or send anything yourself: this session's send tools are turned off, and Orb does the sending once I approve. When a Slack message is ready, even one I've told you to send, hand it to Orb as a block: a line `[orb] send step N to <#channel-name, or the permalink of the thread to reply in> (<where that is, in words: '#channel-name', 'DM with Ana' or 'group DM with Ana, Ben'>)`, then the message exactly as it should be posted, then a line `[orb] end`. Then write `[orb] step N waiting: review and send the message` and stop. Orb tells you once it's sent, with its link.",
+  "Don't try to save memories, notes or files (you can't write files here). When I state a lasting preference about how I work or how you should plan, write or prioritize (\"don't make tasks for hypothetical future work\"), hand it to Orb on its own line: `[orb] remember <scope>: <the preference, as an instruction>`, where scope is plans, writing, tasks, priority, projects or global. Orb keeps it and applies it to every later plan, refresh and session; tell me it's saved.",
+  "You can read my Google Calendar (list, search and open events, and find free time with suggest_time), so use it whenever a step depends on my schedule or a meeting; don't say you lack calendar access. You can't create, change or answer events yourself, but Orb can: when I want a meeting scheduled, find a time that works for everyone: get each attendee's email address (slack_search_users, then slack_read_user_profile, or from my email), then call suggest_time with all of them, me included, over the next few working days in working hours (or the window I asked for), and take the earliest slot it gives that's free for every one of them. Never guess a time or pick one from my calendar alone. Then hand the invite to Orb as a block: a line `[orb] event step N: <the event's title>` (or `[orb] event: <title>` when it isn't a plan step), then lines `when: <date, start and end time, e.g. 2026-11-04 14:00-14:30>`, `who: <attendees' email addresses, comma separated>` (look them up in Slack or my email if you need to; leave the line out for a hold on my own calendar), `meet: yes` for a video call, then a blank line and the description, then `[orb] end`. Tell me in a line that the time is free for everyone, or who you couldn't check. Then, if it's a plan step, write `[orb] step N waiting: review and create the invite`, and stop. Orb shows it to me to review, creates it and sends the invites, then tells you its link.",
+  "You can't create Google Docs yourself either: Drive's write tools are turned off here, so whenever I ask for a doc (\"make this a Google doc\", \"put the plan in a doc\"), never try a Drive tool or tell me it needs a permission; hand it to Orb. When a doc is ready (a brief, a summary, a spec), hand it to Orb as a block: a line `[orb] doc step N: <the doc's title>` (or `[orb] doc: <title>` when it isn't a plan step), then the doc's content in Markdown (headings, lists and tables are fine there), then a line `[orb] end`. Then, if it's a plan step, write `[orb] step N waiting: review and create the doc`, and stop. Orb shows it to me to review and creates it in my Google Drive, then tells you its link.",
+  "Think things through before you agree with something or draft a reply on it. Test what you're told (by a colleague, a doc or a search result) against what you know of the task: the numbers involved, who asked and why, what's been done before. Search Slack and Jira for precedent, and when a claim doesn't fit (a limit far below what's needed, a process that doesn't explain why the person reached out), say so and dig before writing anything. Don't hand me a draft that just restates an answer you haven't checked.",
+  `How to get plans and messages right (my own lessons, given with each turn, win where they differ): ${[...PLAN_RULES, ...WRITING_RULES].join(" ")}`,
+  "Find answers yourself before asking anyone. Search the code you can read (Read, Grep, Glob over the folders you're given), Jira, Slack, my email and Drive, and keep at it across sources before concluding something isn't written down. Never draft a question to a colleague, or add one to a message, for something those sources can answer (whether tests cover a flow, how code behaves, a status, a decision, an owner, a link). Ask a person only for their decision, their opinion, or what only they know or haven't done yet, and then say in the message what you already checked. If you find you can't reach a source (a folder, a tool), tell me plainly which and why rather than routing the question to a person.",
   "Orb also shows the plan's steps with their progress, so keep that list true to what's actually happening.",
   "When something in our conversation finishes a step, even out of order or one of mine, report it done straight away. When a step is no longer needed, write `[orb] step N skipped: <why>` on its own line.",
   "When a step can't move until someone else acts (an answer, an approval, a fix from another team), write `[orb] step N blocked: <who or what, in a few words>`. That's different from waiting, which is for things I need to do. Report the step started or done again once it moves.",
@@ -303,13 +423,17 @@ export async function runSessionTurn(
     resume?: string;
     /** More for the system prompt this turn, after SESSION_DISPLAY (e.g. the steps as Orb shows them). */
     context?: string;
+    /** Code folders the session may read (local checkouts and GitHub mirrors). */
+    dirs?: string[];
     onStatus?: (s: string) => void;
     /** Claude's text so far this turn, as it's written (streamed), each time it grows. */
     onText?: (text: string) => void;
   },
   run: StreamingCliRunner = runCliStreaming,
 ): Promise<SessionTurn> {
+  const code = codeArgs(opts.dirs);
   const args = [
+    ...code.args,
     ...(opts.resume ? ["--resume", opts.resume] : []),
     // The prompt (the user's message) goes on stdin and the system prompt in a file; see CliInput.
     "-p",
@@ -323,7 +447,7 @@ export async function runSessionTurn(
     ...(opts.effort ? ["--effort", opts.effort] : []),
     "--max-turns",
     String(opts.maxTurns ?? 80),
-    ...(opts.tools.length ? ["--allowedTools", ...opts.tools] : []),
+    ...([...opts.tools, ...code.tools].length ? ["--allowedTools", ...opts.tools, ...code.tools] : []),
     "--disallowedTools",
     ...DISALLOWED,
     ...SESSION_DISALLOWED,

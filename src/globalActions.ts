@@ -33,6 +33,8 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
       return `${a.tracked ? "Track" : "Stop tracking"} "${project(a.project_id)}"`;
     case "add_project_context":
       return `Add to the context of "${project(a.project_id)}": ${a.entries.join(" · ")}`;
+    case "add_project_repos":
+      return `Read code for "${project(a.project_id)}" from ${[...a.github, ...a.local].join(", ")}`;
     case "add_note":
       return `Remember: ${a.text}`;
     case "update_profile":
@@ -109,6 +111,17 @@ async function apply(a: GlobalAction): Promise<string> {
       await db.setProjectState(a.project_id, a.tracked ? "tracked" : "ignored");
       if (a.tracked) quiet(refreshProject(a.project_id));
       return a.tracked ? "It's on the board and being read." : "It's off the board.";
+    case "add_project_repos": {
+      const p = await db.getProject(a.project_id);
+      if (!p) throw new Error("Unknown project");
+      const github = a.github.map((r) => r.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "")).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r));
+      await db.updateProjectConfig(a.project_id, {
+        hidden: p.hidden,
+        local_repos: [...new Set([...p.local_repos, ...a.local.map((d) => d.trim()).filter(Boolean)])],
+        gh_repos: [...new Set([...p.gh_repos, ...github])],
+      });
+      return "Mapped. Plans and chats about this project can read its code now.";
+    }
     case "add_project_context": {
       const current = (await db.listFocus()).get(a.project_id);
       const entries = a.entries.map((e) => e.trim()).filter(Boolean);

@@ -42,7 +42,6 @@ const CONNECTORS: { id: string; label: string; purpose: string; required: boolea
   { id: "calendar", label: "Google Calendar", purpose: "Today's meetings and prep", required: true, match: (n) => n === "claude.ai Google Calendar" },
   { id: "drive", label: "Google Drive", purpose: "Research when planning a task", required: false, match: (n) => n === "claude.ai Google Drive" },
   { id: "jira", label: "Jira", purpose: "Tickets when planning and checking tasks", required: false, match: (n) => n === "mcp-jira" },
-  { id: "uknow", label: "Company knowledge base", purpose: "Company context when planning", required: false, match: (n) => /U-Know/i.test(n) },
 ];
 
 /** The "init" line of a stream-json transcript: the session's tools and MCP servers. */

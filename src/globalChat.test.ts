@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { notesPrompt, setStandingNotes } from "./claude";
 import { globalChatPrompt } from "./openInClaude";
-import { parseActions, readableMessages, readableReply } from "./sessions";
+import { currentSends, parseActions, readableMessages, readableReply, rememberedLessons, unsentMessages } from "./sessions";
 
 const block = (body: string) => ({ header: "[orb] action", body });
 
@@ -52,5 +52,33 @@ describe("standing notes", () => {
     expect(notesPrompt()).toContain("- Refunds is paused until Q3");
     expect(notesPrompt().split("\n- ")).toHaveLength(2);
     setStandingNotes([]);
+  });
+});
+
+describe("handed-off messages", () => {
+  const send = (to: string, body: string) => ({ header: `[orb] send to ${to}`, body });
+  it("drops drafts from before the plan changed", () => {
+    const sends = currentSends([send("#a", "old draft"), { header: "[orb] plan", body: "1. New step" }, send("#b", "new draft")]);
+    expect(sends.map((s) => s.text)).toEqual(["new draft"]);
+  });
+  it("keeps only the latest draft for a destination, and none set aside", () => {
+    const sends = currentSends([send("#a", "first"), send("#a", "second"), send("#b", "other")]);
+    const open = unsentMessages(sends, { startedAt: 0, dismissedKeys: [sends[2].key] });
+    expect(open.map((s) => s.text)).toEqual(["second"]);
+  });
+});
+
+describe("remembered preferences", () => {
+  it("reads a session's [orb] remember lines as scoped lessons", () => {
+    expect(
+      rememberedLessons([
+        "[orb] step 2 done",
+        "[orb] remember plans: Don't add tasks for hypothetical future work",
+        "[orb] remember: Keep plans short",
+      ]),
+    ).toEqual([
+      { scope: "plans", text: "Don't add tasks for hypothetical future work" },
+      { scope: "plans", text: "Keep plans short" },
+    ]);
   });
 });

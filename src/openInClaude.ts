@@ -216,6 +216,7 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
     '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
     '- {"type": "add_project_context", "project_id": "C111", "entries": ["one plain statement about it", "Not part of it: …"]}: adds to the project\'s context, which every refresh keeps to. Use it when I say what a project is or isn\'t about, or anything else that should shape how it\'s read.',
+    '- {"type": "add_project_repos", "project_id": "C111", "github": ["owner/name"], "local": ["/Users/me/code/repo"]}: where a project\'s code lives, so plans and chats can read it. Offer it when a question needs the code and the project has no repos listed.',
     '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
     '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
     '- {"type": "add_task", "title": "...", "project_id": "C111" or null}: a new task of my own.',

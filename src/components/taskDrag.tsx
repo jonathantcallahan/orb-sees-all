@@ -329,7 +329,10 @@ export function useTaskDrag(id: string, card: React.RefObject<HTMLElement | null
 
   return {
     attrs: {
-      onPointerDown: (e: React.PointerEvent) => card.current && api?.press(e, id, zone, card.current),
+      // Only presses on the card itself: windows opened from it (its chat, a review) are portaled
+      // elsewhere in the page but still bubble here through React, and selecting text in them
+      // mustn't pick the card up.
+      onPointerDown: (e: React.PointerEvent) => card.current && card.current.contains(e.target as Node) && api?.press(e, id, zone, card.current),
       "data-task-id": id,
       "data-zone": zone,
     },

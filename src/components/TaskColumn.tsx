@@ -254,9 +254,9 @@ export function TaskColumn({
     ? []
     : (calendar?.events ?? [])
         .filter((ev) => ev.my_response !== "declined")
-        // Prep for a meeting that's over is moot, unless you've already worked on it.
+        // Prep for a meeting that's over is moot: it goes, unless you're in the middle of it.
         .flatMap((ev) =>
-          ev.prep.filter((p) => new Date(ev.end) > new Date() || taskStates.has(p.id)).map((p) => ({
+          ev.prep.filter((p) => new Date(ev.end) > new Date() || taskStates.get(p.id)?.status === "in_progress").map((p) => ({
             id: p.id,
             title: p.title,
             link: p.link ?? null,
@@ -342,10 +342,10 @@ export function TaskColumn({
     </DropZone>
   );
 
-  // All tasks, in your order (priority order for anything you haven't arranged).
-  const allTasks = applyOrder(
-    byPriority(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest, ...prep.rest]),
-    order.all,
+  // All tasks, by priority, most urgent first; within a priority, in the order you arranged them
+  // (dragging moves a task among those of its own priority).
+  const allTasks = byPriority(
+    applyOrder(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest, ...prep.rest], order.all),
   );
 
   // Dropping a task puts it where you let go: in Today or All tasks, before the card it landed above.

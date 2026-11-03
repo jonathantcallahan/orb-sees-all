@@ -1,3 +1,4 @@
+import { baseSection, PLAN_RULES, TASK_RULES, WRITING_RULES } from "./baseLessons";
 import type { IndexEntry } from "./taskIndex";
 import type { Learning } from "./feedback";
 
@@ -17,10 +18,18 @@ const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
 /** How every link title should read: what it is, not where it lives. */
 const LINK_TITLE = `Each title is a short, descriptive label of what the link is, two to five words, e.g. "Ben's Q3 numbers ask", "Pricing decision thread", "Export spec doc", "CPS-6931 export ticket". Never the channel name, the document's file name verbatim, or the URL.`;
 
-const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive, Jira and the company's internal knowledge base plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Anything else that sends, files or changes something (email, Jira tickets, docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.`;
+/**
+ * The user's standing rule: asking someone is the last resort. Claude can read the code, Jira,
+ * Slack, email and Drive, which answers most questions without bothering anyone.
+ */
+export const FIND_IT_FIRST = `Find answers before asking anyone. Claude can read the project's code (local checkouts and GitHub), Jira, Slack history, email and Google Drive, which answers most questions (what's covered by tests, how something behaves, who owns what, what was decided, where a link or build is). So don't plan a step that asks someone for something these sources can tell; plan the research step instead, and ask a person only for what genuinely isn't written down anywhere: their decision, their opinion, something they alone know, or something not yet done (a build not yet made, an approval not yet given). When a question to someone remains, say what was checked first.`;
+
+const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive and Jira plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Drafting a Google Doc (a brief, a summary, a spec) is also Claude's: the user reviews it before it's created. Anything else that sends, files or changes something (email, Jira tickets, editing existing docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.
+
+${FIND_IT_FIRST}`;
 
 /** Shared definition of a task assessment, used by every prompt that produces tasks. */
-const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive, Jira and the company's internal knowledge base, but can't attend meetings, make the user's decisions, or speak for them without review.
+const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude can read and draft across Slack, email, Google Drive and Jira, but can't attend meetings, make the user's decisions, or speak for them without review.
   - automation: "human" = needs the user's judgment, relationships or presence (a decision, a negotiation, a 1:1); "assisted" = the user does it, but Claude can do much of the legwork (research, a first draft, a summary, a ticket write-up); "claude" = Claude could produce the finished result for the user to review and send (a status summary, a ticket from a clear spec, a reply that only restates facts).
   - suggestion: one sentence with a concrete first take: how to approach it, or what Claude would produce.
   - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.
@@ -155,7 +164,7 @@ ${JSON.stringify(p.profile)}`
 The project's channels: ${p.channels.map((c) => `#${c.name} (${c.channel_id})`).join(", ")}. Read only these channels, apart from the search below.
 
 ${known}
-${learningSection(p.learning, "project")}
+${baseSection("tasks")}${learningSection(p.learning, "project")}
 ${reading}
 ${elsewhere}
 ${repos}
@@ -223,7 +232,7 @@ ${JSON.stringify(p.previous)}
 
 Messages waiting on a quick reply from the last refresh:
 ${JSON.stringify(p.previousReplies)}
-${learningSection(p.learning, "tasks")}
+${baseSection("tasks")}${learningSection(p.learning, "tasks")}
 Look for new items since ${since.date}:
 - Slack messages awaiting the user's response, since ${replyWindow.date}. Check all of these, in every channel including project channels:
   - @-mentions: slack_search_public_and_private with "<@${p.userId}> after:${replyWindow.date}".
@@ -294,8 +303,8 @@ export function planPrompt(p: PlanPromptInput): string {
 
 Task: ${p.title}
 ${p.description ? `Description: ${p.description}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
-${learningSection(p.learning, "plan")}
-First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and ask the internal knowledge-base tool, if one is available, for company-specific context when the task depends on internal systems, teams or processes. Spend effort in proportion to the task: a quick reply needs little research.
+${baseSection("plan")}${learningSection(p.learning, "plan")}
+First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and the code when the task depends on how something is built. Spend effort in proportion to the task: a quick reply needs little research.
 
 Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
@@ -566,6 +575,9 @@ ${p.feedback.map((f) => JSON.stringify(f)).join("\n")}
 The current lessons (origin "user" ones were written or edited by the user: keep them exactly, and don't add lessons that repeat them):
 ${p.lessons.length ? p.lessons.map((l) => JSON.stringify(l)).join("\n") : "(none yet)"}
 
+Already built into the assistant for everyone, so don't make lessons that only restate these; a lesson is for what's particular to this user (their colleagues, channels, habits and style):
+${[...PLAN_RULES, ...WRITING_RULES, ...TASK_RULES].map((r) => `- ${r}`).join("\n")}
+
 Projects, for scoping lessons to one: ${JSON.stringify(p.projects)}
 
 Do two things.
@@ -575,4 +587,42 @@ Do two things.
    At most 30 lessons.
 
 ${JSON_ONLY} Shape: {"reasons": [{"id": number, "reason": string}], "lessons": [{"scope": string, "text": string, "evidence": [number]}]}`;
+}
+
+/** Creates a Google Doc the user reviewed and clicked Create on, from Markdown, in their Drive. */
+export function createDocPrompt(title: string, text: string): string {
+  return `Create a Google Doc in the user's Google Drive by calling create_file exactly once, with title "${title.replace(/"/g, "'")}", contentMimeType "text/markdown", and textContent set to the document below exactly as written: do not reword, shorten, add to, or reformat it. Don't create anything else, share it, or move it.
+
+Document (between the markers):
+<<<DOC
+${text}
+DOC>>>
+
+After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. sent is true once the doc exists; link is its URL (https://docs.google.com/document/d/<id>/edit, built from the file id the tool returned).`;
+}
+
+/** Creates a calendar event the user reviewed: its title, then the when/who/meet lines and description as written. */
+export function createEventPrompt(title: string, text: string): string {
+  return `Create one event on the user's primary Google Calendar by calling create_event exactly once, from the invite below, which the user has reviewed. Title: "${title.replace(/"/g, "'")}". Take the start and end from its "when:" line (local time, no UTC offset), the attendees from its "who:" line (email addresses; skip anything that isn't one), add a Google Meet link only if it says "meet: yes", and use everything after the blank line as the description, exactly as written. Don't create anything else or change other events.
+
+First make sure the time still works: call suggest_time with all the attendees' emails over the event's day, with its length as the duration. If its start time is still among the free slots, create it as is. If not (someone has since been booked), use the earliest slot suggest_time gives that day or, failing that, the next working day, and set moved to the new start and end. If suggest_time itself fails, create it at the reviewed time anyway.
+
+Invite (between the markers):
+<<<INVITE
+${text}
+INVITE>>>
+
+After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null, "moved": string|null}. sent is true once the event exists; link is its htmlLink from the tool's result, if any; moved is the new time in words (e.g. "Wed Nov 4, 3:00–3:30pm") when you had to move it, else null.`;
+}
+
+/** An epic's child issues, each with its status and assignee. */
+export function epicChildrenPrompt(key: string): string {
+  return `List the child issues of the Jira epic ${key}: jira_search with \`parent = ${key} ORDER BY status ASC, updated DESC\` (fields summary, status, assignee; up to 50). If that finds nothing, try \`"Epic Link" = ${key}\`, then \`parentEpic = ${key}\`, since projects link issues to epics differently.
+
+If every search fails (an error, or access denied), don't report an empty list: set error to what went wrong, in a few words, and issues to []. Only report no issues when a search worked and found none.
+
+For each issue: key, title (its summary), status (Jira's status name), category ("done", "in_progress" or "todo", from the status's category), assignee (the person's display name, or null if unassigned) and link (its browse URL).
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"issues": [{"key": string, "title": string, "status": string, "category": "done"|"in_progress"|"todo", "assignee": string|null, "link": string|null}], "error": string|null}`;
 }

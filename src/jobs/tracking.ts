@@ -19,6 +19,8 @@ export interface TrackedItem {
   review?: "approved" | "changes" | "needed" | null;
   /** A short line under the title, e.g. "2 ahead, 5 behind main" or "7 of 12 done". */
   detail?: string | null;
+  /** Epic: how many child issues Jira counted. */
+  total?: number;
   /** When it last changed, ISO 8601. */
   updatedAt: string | null;
   /** When Orb last looked. */
@@ -155,6 +157,7 @@ export function epicItem(e: ProjectEpic): TrackedItem {
     url: e.link,
     state: e.status,
     detail: e.total ? `${e.done} of ${e.total} done` : null,
+    total: e.total ?? undefined,
     updatedAt: e.updated ?? null,
     checkedAt: now(),
   };

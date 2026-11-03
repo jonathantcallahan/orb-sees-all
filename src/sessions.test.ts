@@ -164,3 +164,87 @@ describe("discussing the plan", () => {
     expect(approvedPlanMessage()).toMatch(/^The plan's agreed\./);
   });
 });
+
+describe("docs handed to Orb", () => {
+  it("reads a doc that isn't a plan step", () => {
+    const [doc] = parseSends([{ header: "[orb] doc: Launch Test Plan", body: "# Test plan\n- Install the build\n- Check the filter" }]);
+    expect(doc).toMatchObject({ kind: "doc", to: "Launch Test Plan", text: "# Test plan\n- Install the build\n- Check the filter" });
+    expect(doc.step).toBeUndefined();
+  });
+});
+
+describe("events handed to Orb", () => {
+  const block = { header: "[orb] event step 2: Filter sync", body: "when: 2026-11-04 14:00-14:30\nwho: ana@example.com, ben@example.com\nmeet: yes\n\nWalk through the publisher filter." };
+  it("reads an invite for a plan step", () => {
+    const [ev] = parseSends([block]);
+    expect(ev).toMatchObject({ kind: "event", step: 2, to: "Filter sync" });
+    expect(ev.text).toContain("who: ana@example.com, ben@example.com");
+  });
+  it("keeps the invite out of the chat's text", () => {
+    expect(readableReply(`I found a time.\n${block.header}\n${block.body}\n[orb] end\nReview it when you can.`)).toBe("I found a time.\n\nReview it when you can.");
+  });
+});
+
+describe("Orb's notes to Claude", () => {
+  it("are left out of your messages in the chat", async () => {
+    const { readableMessages } = await import("./sessions");
+    const [m] = readableMessages([{ role: "user", text: "Should the test plan be a doc or a sheet?\n\n(From Orb: you can make Google Docs here, through me.)" }]);
+    expect(m.text).toBe("Should the test plan be a doc or a sheet?");
+  });
+});
+
+describe("the chat's order during a turn", () => {
+  const u = (text: string) => ({ role: "user" as const, text });
+  const a = (text: string) => ({ role: "assistant" as const, text });
+  it("keeps Claude's previous reply above your new message while the transcript catches up", async () => {
+    const { chatView } = await import("./sessions");
+    const before = [u("one"), a("reply one")];
+    const v = chatView(before, { base: 2, text: "two" }, { working: true, live: null, held: null });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one", "two"]);
+  });
+  it("counts a previous reply that lands late as before the turn", async () => {
+    const { chatView } = await import("./sessions");
+    // Sent while the transcript still lacked "reply one".
+    const v = chatView([u("one"), a("reply one")], { base: 1, text: "two" }, { working: true, live: "thinking about two", held: null });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one", "two"]);
+    expect(v.reply).toBe("thinking about two");
+  });
+  it("holds back the transcript's partial reply while the live one streams", async () => {
+    const { chatView } = await import("./sessions");
+    const v = chatView([u("one"), a("reply one"), u("two"), a("rep")], { base: 2, text: "two" }, { working: true, live: "reply two so far", held: null });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one", "two"]);
+    expect(v.reply).toBe("reply two so far");
+  });
+  it("keeps your message and the last live text after the turn until the transcript has them", async () => {
+    const { chatView } = await import("./sessions");
+    const v = chatView([u("one"), a("reply one")], { base: 2, text: "two" }, { working: false, live: null, held: "reply two" });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one", "two"]);
+    expect(v.reply).toBe("reply two");
+    expect(v.done).toBe(false);
+  });
+  it("lets go once the transcript has the whole turn", async () => {
+    const { chatView } = await import("./sessions");
+    const v = chatView([u("one"), a("reply one"), u("two"), a("reply two")], { base: 2, text: "two" }, { working: false, live: null, held: "reply two" });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one", "two", "reply two"]);
+    expect(v.reply).toBeNull();
+    expect(v.done).toBe(true);
+  });
+  it("handles a turn Orb started, with no message of yours", async () => {
+    const { chatView } = await import("./sessions");
+    const v = chatView([u("one"), a("reply one")], { base: 2, text: null }, { working: true, live: "carrying on", held: null });
+    expect(v.shown.map((m) => m.text)).toEqual(["one", "reply one"]);
+    expect(v.reply).toBe("carrying on");
+  });
+});
+
+describe("where a message goes", () => {
+  it("uses the session's words for it, and the conversation kind from a permalink otherwise", async () => {
+    const { parseSends, sendDestination } = await import("./sessions");
+    const [named] = parseSends([{ header: "[orb] send to https://example.slack.com/archives/G0123/p1700000000000100 (group DM with Ana, Ben)", body: "Hi" }]);
+    expect(named.to).toBe("https://example.slack.com/archives/G0123/p1700000000000100");
+    expect(sendDestination(named)).toBe("the thread in group DM with Ana, Ben");
+    expect(sendDestination({ to: "https://example.slack.com/archives/D0456/p1700000000000100" })).toBe("the thread in a DM");
+    expect(sendDestination({ to: "https://example.slack.com/archives/C0789/p1700000000000100" })).toBe("the thread in a channel");
+    expect(sendDestination({ to: "#launch-team" })).toBe("#launch-team");
+  });
+});

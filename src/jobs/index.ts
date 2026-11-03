@@ -2,14 +2,15 @@ import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projec
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { distillPrompt, epicCheckPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
+import { createDocPrompt, createEventPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { approvedPlanMessage, globalChatPrompt } from "../openInClaude";
-import { linkSession, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, Distilled, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
+import { codeFor, codeNote, githubReposOf, projectOfTask } from "../code";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
@@ -425,7 +426,22 @@ export function sendReminder(blockerId: string, channelId: string, text: string)
 /** Working sessions run on Opus 5.5 at medium effort: careful enough for multi-step work, without the cost of max effort on every turn. */
 const SESSION_MODEL = { model: "claude-opus-5-5", effort: "medium" } as const;
 
-const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow];
+/** A message asking for a Google Doc (or turning something into one). */
+const DOC_ASK = /\b(google\s*)?docs?\b|\bdocument\b/i;
+/** A message stating a lasting preference ("stop using…", "don't…", "always…", "from now on…"). */
+const PREFERENCE_ASK = /\b(stop|don'?t|do not|never|always|from now on|going forward|in future|next time)\b/i;
+const PREFERENCE_REMINDER =
+  ORB_NOTE +
+  " if this is a lasting preference, hand it to me on its own line as `[orb] remember <scope>: <the preference, as an instruction>` (scope: plans, writing, tasks, priority, projects or global). I save it and apply it to every later plan, refresh and session. You can't save memories or files yourself, so don't try or say you couldn't.)";
+
+/** A message asking to schedule something or about the calendar. */
+const EVENT_ASK = /\b(schedul\w*|invite|meeting|calendar|book (a|some) time|set up a (call|meeting|sync))\b/i;
+const EVENT_REMINDER =
+  ORB_NOTE + " you can read my calendar, find a time that's free for every attendee with suggest_time (look up their emails in Slack first, and never pick a time from my calendar alone), and have me create events: write the invite as a block, a line `[orb] event: <title>` (or `[orb] event step N: <title>`), then `when:`, `who:` and optionally `meet: yes` lines, a blank line, the description, and `[orb] end`. I show it to the user to review, create it and send the invites. Don't call create_event yourself, and don't say you lack calendar access.)";
+const DOC_REMINDER =
+  ORB_NOTE + " you can make Google Docs here, through me. Write the doc as a block, a line `[orb] doc: <title>` (or `[orb] doc step N: <title>` for a plan step), then its content in Markdown, then `[orb] end`. I show it to the user to review and create it in their Drive, then send you its link. Don't call any Drive or Docs tool, and don't say you can't make docs or that it needs a permission; if you said so earlier, that was wrong.)";
+
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead];
 
 /**
  * Runs the next turn of a task's working session in the background: the first turn from the start
@@ -447,6 +463,15 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
           .join("\n");
         // Sessions carry out plans and write messages for the user, so they get those lessons too.
         const lessons = await lessonsFor(["plans", "writing"]);
+        // The code they can read: the task's project's, or for the Demian chat every project's that's
+        // already on hand (it spans them all, so it doesn't clone).
+        // A task filed under no project gets the same as the Demian chat, so a question only the code
+        // answers never finds it missing.
+        const global = taskId.startsWith("global:");
+        const own = global ? null : await projectOfTask(taskId);
+        const everyProject = !own;
+        const codeProjects = everyProject ? (await db.listProjects()).filter((p) => p.state === "tracked") : [own];
+        const code = codeProjects.length ? await codeFor(codeProjects, !everyProject, everyProject ? 12 : 4) : [];
         const context = [
           taskId.startsWith("global:")
             ? await globalContext(link)
@@ -454,6 +479,7 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
               ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
               : "",
           lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "",
+          codeNote(code, everyProject ? [] : codeProjects),
         ]
           .filter(Boolean)
           .join("\n\n") || undefined;
@@ -475,7 +501,10 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
           if (wait <= 0) publish();
           else if (!flush) flush = window.setTimeout(publish, wait);
         };
-        const turn = await runSessionTurn({ prompt, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText }).finally(() => {
+        // Asked for a doc: say plainly how, every time. A session that once decided it can't make
+        // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
+        const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
+        const turn = await runSessionTurn({ prompt: asked, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
           // transcript's copy arrives.
           window.clearTimeout(flush);
@@ -513,7 +542,8 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
       const context = projectContext(p)
         .map((c) => `${c.text}${c.by === "you" ? " (mine)" : ""}`)
         .join("; ");
-      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}`;
+      const repos = [...p.local_repos, ...githubReposOf(p)];
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}. Code: ${repos.length ? repos.join(", ") : "none mapped"}`;
     });
   const calendar = await db.getCalendarDay(localDate(new Date()));
   const tasks = [
@@ -653,27 +683,44 @@ export async function continueTaskSession(taskId: string, message: string): Prom
 export function sendHandoff(taskId: string, send: PendingSend, text: string): Promise<void> {
   return track(`handoff:${taskId}`, (status) =>
     logged("send", taskId, async () => {
-      const thread = slackThread(send.to);
+      const doc = send.kind === "doc";
+      const event = send.kind === "event";
+      const thread = doc || event ? null : slackThread(send.to);
       const { data, costUsd } = await runClaude({
-        onStatus: (s) => status(s === "Working" ? "Posting to Slack" : s),
-        prompt: thread ? sendReplyPrompt(thread.channelId, thread.threadTs, text) : sendToChannelPrompt(send.to, text),
+        onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : "Posting to Slack") : s),
+        prompt: doc
+          ? createDocPrompt(send.to, text)
+          : event
+            ? createEventPrompt(send.to, text)
+            : thread
+              ? sendReplyPrompt(thread.channelId, thread.threadTs, text)
+              : sendToChannelPrompt(send.to, text),
         schema: SentMessage,
         // A channel by name needs looking up first.
-        tools: thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
+        tools: doc ? TOOLS.docCreate : event ? TOOLS.eventCreate : thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
         model: "sonnet",
         maxTurns: 6,
       });
-      if (!data.sent) throw new Error(data.error ?? "Slack didn't accept the message");
+      if (!data.sent)
+        throw new Error(data.error ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : "Slack didn't accept the message"));
       const link = (await db.getSessionLinks())[taskId];
+      // Its link, kept with the step it finished, for a chip beside that step.
+      const artifact = data.link
+        ? [{ ...(send.step ? { step: send.step } : {}), url: data.link, title: doc || event ? send.to : `Message in ${sendDestination(send)}` }]
+        : [];
       await db.updateSessionLink(taskId, {
         sentKeys: [...(link?.sentKeys ?? []), send.key],
+        artifacts: [...(link?.artifacts ?? []), ...artifact],
         ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
       });
-      const edited = text !== send.text ? ` I edited it first; this is what went out:\n\n${text}` : "";
+      const edited = text !== send.text ? ` I edited it first; this is what ${doc || event ? "it says" : "went out"}:\n\n${text}` : "";
       // How the user rewrote Claude's draft says something about how they write.
       if (text !== send.text)
         db.logFeedback({ kind: "message_edit", subject: "message", subject_id: taskId, before: { to: send.to, text: send.text }, after: { text } }).catch(() => {});
-      continueTaskSession(taskId, `I sent the message to ${send.to}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`).catch(() => {});
+      continueTaskSession(
+        taskId,
+        `${doc ? `I created the Google Doc "${send.to}"` : event ? `I created the event "${send.to}" and sent its invites${data.moved ? `, moved to ${data.moved} since the reviewed time was no longer free for everyone` : ""}` : `I sent the message to ${sendDestination(send)}${send.to.startsWith("http") ? ` (${send.to})` : ""}`}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`,
+      ).catch(() => {});
       return { value: undefined, costUsd };
     }),
   );
@@ -690,6 +737,25 @@ export function refreshTracking(projectId: string): Promise<void> {
     await db.saveProjectTracking(projectId, await collectTracking(repos, prior?.epics ?? []));
     bump();
   });
+}
+
+/** Reads an epic's child issues and their assignees from Jira, for its row in the tracking feed. */
+export function loadEpicChildren(key: string): Promise<void> {
+  return track(`epic:${key}`, (status) =>
+    logged("epic", key, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: epicChildrenPrompt(key),
+        schema: EpicChildren,
+        tools: TOOLS.jiraRead,
+        model: "sonnet",
+        maxTurns: 8,
+      });
+      await db.saveEpicChildren(key, data);
+      bump();
+      return { value: undefined, costUsd };
+    }),
+  );
 }
 
 /** Looks at one item in a project's tracking feed again: a PR or branch with gh, an epic through Jira. */
@@ -766,11 +832,17 @@ export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };
 export function planTask(task: PlanTask): Promise<void> {
   return track(`plan:${task.id}`, (status) =>
     logged("plan", task.id, async () => {
+      // The task's project code, so the plan can rest on how things are actually built.
+      const project = await projectOfTask(task.id);
+      if (project) status("Getting the code");
+      const code = project ? await codeFor([project]) : [];
+      const note = codeNote(code, project ? [project] : []);
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: planPrompt({ ...task, userId: await db.getSetting("slack_user_id"), learning: await planLearning() }),
+        dirs: code.map((c) => c.dir),
+        prompt: `${planPrompt({ ...task, userId: await db.getSetting("slack_user_id"), learning: await planLearning() })}${note ? `\n\n${note}` : ""}`,
         schema: TaskPlan,
-        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.uknow],
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead],
         model: await model(),
       });
       await db.saveTaskPlan(task.id, data, costUsd);

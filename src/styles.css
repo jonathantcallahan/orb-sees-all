@@ -822,6 +822,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .link-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .description-editor { min-height: 140px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); line-height: 1.5; }
 .edit-actions { justify-content: flex-end; gap: 8px; }
+/* A review window's editor: as tall as its text (set in ComposeModal), shrinking to fit the screen and
+   scrolling only then. */
+.compose-editor { flex: 0 1 auto; resize: none; overflow-y: auto; }
 .remind-status { margin-right: auto; }
 
 /* Multi-select filter: a pill that opens a checklist */
@@ -1015,7 +1018,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .setup-command { display: flex; gap: 10px; align-items: baseline; }
 .setup-connectors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; align-self: stretch; }
 .setup-connector { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; color: var(--text); }
-.setup-about { width: 100%; align-self: stretch; }
 .setup-status { flex: 1; }
 
 /* Once a session is under way, a step's circle marks it done by hand (for work the session didn't see). */
@@ -1064,7 +1066,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   white-space: pre-wrap; overflow-wrap: break-word;
 }
 .composer-caret {
-  position: absolute; width: 1.25px; margin-left: 2px; border-radius: 1px; pointer-events: none;
+  position: absolute; width: 1.25px; margin-left: 1px; border-radius: 1px; pointer-events: none;
   background: color-mix(in srgb, var(--text) 85%, transparent);
   animation: composer-blink 1.05s steps(1) 0.5s infinite;
 }
@@ -1194,6 +1196,33 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .chat-modal-foot .composer { border-radius: 18px; padding: 8px 8px 8px 14px; }
 .chat-modal-foot .composer textarea { font-size: 13.5px; }
 .chat-modal-foot .composer-send { width: 28px; height: 28px; }
+/* A task's chat, side by side: the plan's steps on the left (where each stands, and chips for what
+   finished it), the conversation on the right. */
+.chat-modal.split { width: min(1140px, 100%); }
+.chat-split { flex: 1; min-height: 0; display: flex; }
+.chat-steps {
+  width: 420px; flex-shrink: 0; overflow-y: auto; padding: 16px 18px 20px 20px;
+  border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px;
+}
+.chat-steps .chat-ask { margin: 0; }
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* A chat with no session behind it yet: why, and a way to start it. */
+.chat-empty { margin: auto 0; align-self: center; text-align: center; max-width: 420px; line-height: 1.5; }
+.chat-empty .link-button { margin-left: 4px; }
+.chat-steps-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-steps-list li { display: flex; gap: 9px; align-items: flex-start; padding: 6px 8px; margin: 0 -8px; border-radius: 8px; }
+.chat-steps-list li .step-circle { margin-top: 2px; flex-shrink: 0; }
+.chat-steps-list li.current { background: color-mix(in srgb, var(--amber) 9%, transparent); }
+.chat-step-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.chat-step-title { font-size: 12.5px; line-height: 1.45; color: var(--text); }
+.chat-steps-list li.step-done .chat-step-title, .chat-steps-list li.step-skipped .chat-step-title { color: var(--muted); }
+.chat-steps-list li.step-skipped .chat-step-title { text-decoration: line-through; }
+.chat-step-title .step-human { margin-left: 6px; font-size: 10px; color: var(--muted); }
+.chat-step-note { font-size: 11.5px; color: var(--muted); }
+.chat-steps-made { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.chat-steps-made-label { font-size: 11px; color: var(--muted); }
+/* Chips beside a step on the card. */
+.plan-outline-steps li > .link-chips { margin-left: 6px; }
 
 /* Settings: a centered modal of grouped rows, like macOS settings. Each group is one bordered
    card; rows split by hairlines, the name and a line on what it does on the left, the control
@@ -1287,7 +1316,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
 /* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth,
-   glossy white for Ophelia, soap-film clear for Oren.
+   glossy white for Ophelia, soap-film clear for Oren, milky frosted for Penelope, polished over opal for Edith, a soft glow for Ephedra.
    Its text is the refresh wheel's gray. */
 .glass-button {
   padding: 2px 10px; border-radius: 999px; font-size: 12px; color: var(--muted); cursor: pointer;
@@ -1321,6 +1350,36 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 :root[data-theme="dark"] .glass-button.look-porcelain { --glass-fill: rgb(255 255 255 / 0.14); --glass-fill-hover: rgb(255 255 255 / 0.2); --glass-edge: rgb(255 255 255 / 0.28); --glass-shine: rgb(255 255 255 / 0.35); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .glass-button.look-porcelain { --glass-fill: rgb(255 255 255 / 0.14); --glass-fill-hover: rgb(255 255 255 / 0.2); --glass-edge: rgb(255 255 255 / 0.28); --glass-shine: rgb(255 255 255 / 0.35); }
+}
+/* Ephedra: a soft glow, pastel at the rim. */
+.glass-button.look-aura {
+  --glass-blur: 10px; --glass-fill: rgb(255 255 255 / 0.5); --glass-fill-hover: rgb(255 255 255 / 0.68);
+  --glass-edge: rgb(255 255 255 / 0.85); --glass-shine: rgb(255 255 255 / 0.95);
+  --glass-fringe: inset 1px 0 3px rgb(170 230 200 / 0.3), inset -1px 0 3px rgb(255 190 220 / 0.3);
+}
+:root[data-theme="dark"] .glass-button.look-aura { --glass-fill: rgb(255 245 230 / 0.08); --glass-fill-hover: rgb(255 245 230 / 0.14); --glass-edge: rgb(255 240 230 / 0.22); --glass-shine: rgb(255 255 255 / 0.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-aura { --glass-fill: rgb(255 245 230 / 0.08); --glass-fill-hover: rgb(255 245 230 / 0.14); --glass-edge: rgb(255 240 230 / 0.22); --glass-shine: rgb(255 255 255 / 0.3); }
+}
+/* Edith: polished glass over opal, a faint play of color at the rim. */
+.glass-button.look-opal {
+  --glass-blur: 6px; --glass-fill: rgb(255 255 255 / 0.4); --glass-fill-hover: rgb(255 255 255 / 0.58);
+  --glass-edge: rgb(255 255 255 / 0.8); --glass-shine: rgb(255 255 255 / 0.95);
+  --glass-fringe: inset 1px 0 2px rgb(90 220 190 / 0.25), inset -1px 0 2px rgb(170 120 255 / 0.22);
+}
+:root[data-theme="dark"] .glass-button.look-opal { --glass-fill: rgb(200 230 255 / 0.08); --glass-fill-hover: rgb(200 230 255 / 0.14); --glass-edge: rgb(210 235 255 / 0.22); --glass-shine: rgb(255 255 255 / 0.3); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-opal { --glass-fill: rgb(200 230 255 / 0.08); --glass-fill-hover: rgb(200 230 255 / 0.14); --glass-edge: rgb(210 235 255 / 0.22); --glass-shine: rgb(255 255 255 / 0.3); }
+}
+/* Penelope: milky frosted glass with a hint of her colors at the rim. */
+.glass-button.look-resin {
+  --glass-blur: 12px; --glass-fill: rgb(255 255 255 / 0.55); --glass-fill-hover: rgb(255 255 255 / 0.72);
+  --glass-edge: rgb(255 255 255 / 0.75); --glass-shine: rgb(255 255 255 / 0.9);
+  --glass-fringe: inset 1px 0 2px rgb(170 210 255 / 0.25), inset -1px 0 2px rgb(240 240 90 / 0.25);
+}
+:root[data-theme="dark"] .glass-button.look-resin { --glass-fill: rgb(255 170 130 / 0.08); --glass-fill-hover: rgb(255 170 130 / 0.14); --glass-edge: rgb(255 200 180 / 0.22); --glass-shine: rgb(255 255 255 / 0.25); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .glass-button.look-resin { --glass-fill: rgb(255 170 130 / 0.08); --glass-fill-hover: rgb(255 170 130 / 0.14); --glass-edge: rgb(255 200 180 / 0.22); --glass-shine: rgb(255 255 255 / 0.25); }
 }
 .glass-button.look-glass {
   --glass-blur: 14px; --glass-fill: rgb(255 255 255 / 0.45); --glass-fill-hover: rgb(255 255 255 / 0.6);
@@ -1466,3 +1525,25 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 /* Project context: entries like the lessons list, with Add context under them. */
 .context-list { margin-top: 2px; }
 .context-add { align-self: flex-start; }
+/* Settings > Release notes */
+.release { display: flex; flex-direction: column; gap: 3px; }
+.release + .release, .reveal-inner > .release { margin-top: 10px; }
+.release-head { display: flex; align-items: baseline; gap: 8px; }
+.release-notes { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.5; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.release-more { align-self: flex-start; margin-top: 8px; }
+/* Talking through the plan: the plan as it stands, at the top of the chat. */
+
+/* An epic's issues, opened under its row in the tracking feed, with who each is assigned to. */
+.epic-toggle { margin-left: auto; }
+.epic-issues { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.epic-issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.epic-issue { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.epic-issue-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); align-self: center; }
+.epic-issue-dot.in_progress { background: var(--accent); }
+.epic-issue-dot.done { background: var(--green); }
+.epic-issue-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.epic-issue.done .epic-issue-title { color: var(--muted); }
+.epic-issue-key { color: var(--muted); }
+.epic-issue-assignee { flex-shrink: 0; color: var(--muted); }
+.epic-issue-assignee.unassigned { font-style: italic; opacity: 0.7; }
+.epic-issues-foot { display: flex; gap: 8px; align-items: baseline; }

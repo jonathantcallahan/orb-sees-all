@@ -115,13 +115,17 @@ void main() {
  */
 export const GLASS_SURFACE = /* glsl */ `
 ${BLOB}
+// How far the molten lobes and folds swing; a look can define it lower to keep a steadier outline.
+#ifndef SHELL_WILD
+#define SHELL_WILD 1.0
+#endif
 const float SHELL_RADIUS = 1.1;
 const float SHELL_SEED = 1.7;
 float shellRadius(vec3 n, float t) {
   float lobe = blob(n, t) * mix(0.3, 0.4, uStress) * 1.1;
   float drift = snoise(n * 0.75 + vec3(SHELL_SEED) + t * 0.22);
   float folds = sin(dot(n, normalize(vec3(0.3, 0.9, 0.2) + SHELL_SEED * 0.1)) * 1.7 + drift * 1.5 + t * 0.35);
-  return (SHELL_RADIUS + lobe + folds * 0.07 + drift * 0.1 + 0.14 * ripple(n) + 0.1 * shock(n) + 0.6 * ferro(n)) * squash(n);
+  return (SHELL_RADIUS + SHELL_WILD * (lobe + folds * 0.07 + drift * 0.1) + 0.14 * ripple(n) + 0.1 * shock(n) + 0.6 * ferro(n)) * squash(n);
 }
 float orbSurface(vec3 n) {
   return shellRadius(normalize(n), uTime * mix(0.32, 1.0, uStress));

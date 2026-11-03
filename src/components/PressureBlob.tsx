@@ -9,14 +9,17 @@ import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
 import { buildPorcelainOrb } from "./porcelainOrb";
 import { buildOrenOrb } from "./orenOrb";
+import { buildResinOrb } from "./resinOrb";
+import { buildOpalOrb } from "./opalOrb";
+import { buildAuraOrb } from "./auraOrb";
 
 /** Rotation speed in radians per second at stress 0 and 1. */
 const SPIN = { calm: 0.1, stressed: 2.2 };
 /** How far the orb turns toward the cursor, in radians (about 35 degrees). */
 const FACE_ANGLE = 0.6;
 
-/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain) and Oren (film). */
-export type OrbLook = "crystal" | "glass" | "porcelain" | "film";
+/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain), Oren (film), Penelope (resin), Edith (opal) and Ephedra (aura). */
+export type OrbLook = "crystal" | "glass" | "porcelain" | "film" | "resin" | "opal" | "aura";
 
 /** Mote colors for each look while Orb works: bright on a dark page, deeper on a light one. */
 /** How far above its surroundings a point must stand to count as a wave tip, per look (their waves differ in depth). */
@@ -25,6 +28,9 @@ const TIP: Record<OrbLook, [number, number]> = {
   crystal: [0.006, 0.03],
   porcelain: [0.006, 0.03],
   film: [0.006, 0.03],
+  resin: [0.006, 0.03],
+  opal: [0.006, 0.03],
+  aura: [0.006, 0.03],
 };
 
 const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [number, number, number] }> = {
@@ -32,6 +38,9 @@ const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [num
   crystal: { dark: [0.78, 0.9, 1.0], light: [0.3, 0.4, 0.72] },
   porcelain: { dark: [1.0, 0.97, 0.93], light: [0.55, 0.52, 0.5] },
   film: { dark: [0.55, 0.85, 1.0], light: [0.1, 0.4, 0.75] },
+  resin: { dark: [1.0, 0.92, 0.7], light: [0.85, 0.45, 0.6] },
+  opal: { dark: [0.7, 0.95, 0.9], light: [0.25, 0.5, 0.7] },
+  aura: { dark: [1.0, 0.97, 0.85], light: [0.55, 0.6, 0.75] },
 };
 
 /**
@@ -76,7 +85,7 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uWorking: { value: 0 },
     };
     const orb =
-      look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
+      look === "aura" ? buildAuraOrb(uniforms) : look === "opal" ? buildOpalOrb(uniforms, renderer) : look === "resin" ? buildResinOrb(uniforms) : look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
     if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
     // Motes off the wave tips while Orb works; they ride along as the orb turns.
@@ -148,8 +157,11 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     const aim = new THREE.Vector3();
     const toOrb = new THREE.Quaternion();
     document.addEventListener("pointerleave", onLeave);
-    // The molten orbs turn slowly, so their oozing reads as weight rather than spin.
-    const spinScale = 0.6;
+    // The molten orbs turn slowly, so their oozing reads as weight rather than spin. Penelope, a
+    // still piece of glass, turns slower still, a third of their pace.
+    // Edith, a stone, barely turns: about a tenth of their pace.
+    const spinScale = look === "resin" ? 0.2 : look === "opal" ? 0.06 : 0.6;
+    const upright = look === "opal";
 
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
@@ -200,11 +212,17 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       const burst = spinAge < 3 ? 6 * push * push * (3 - 2 * push) * Math.exp(-spinAge * 2.4) : 0;
       const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress + burst) * motion * spinScale;
       blob.rotation.y += dt * spin;
-      blob.rotation.x += dt * spin * 0.35;
+      // Edith stands upright: she turns only about her long axis (and leans toward the cursor with
+      // the facing group, coming back upright when it leaves); the others also tumble.
+      if (upright) blob.rotation.x -= blob.rotation.x * Math.min(dt * 3, 1);
+      else blob.rotation.x += dt * spin * 0.35;
       // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
       const ease = Math.min(dt * 4, 1);
       facing.rotation.y += (toward.x * FACE_ANGLE * motion - facing.rotation.y) * ease;
       facing.rotation.x += (toward.y * FACE_ANGLE * motion - facing.rotation.x) * ease;
+      // A look that sees part of itself through another part (Edith's stone through her glass)
+      // draws that part first.
+      if ("prerender" in orb) (orb.prerender as (r: THREE.WebGLRenderer, s: THREE.Scene, c: THREE.Camera) => void)(renderer, scene, camera);
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
     };
@@ -260,6 +278,25 @@ function glowColors(look: OrbLook, level: number): string[] {
       [[250, 248, 244], [255, 214, 210]],
       [[235, 238, 248], [250, 200, 205]],
       [[255, 250, 240], [255, 225, 200]],
+    ],
+    // Penelope: her pools of color, green-yellow, peach-pink and baby blue when calm, warming
+    // to yellow, rose and lavender under stress.
+    resin: [
+      [[180, 245, 60], [230, 235, 50]],
+      [[255, 200, 190], [245, 120, 140]],
+      [[200, 225, 245], [190, 175, 255]],
+    ],
+    // Ephedra: her pastel fields, green, blue and pink when calm, warming to peach and rose.
+    aura: [
+      [[180, 240, 190], [255, 205, 150]],
+      [[175, 210, 255], [240, 170, 220]],
+      [[255, 200, 225], [255, 160, 170]],
+    ],
+    // Edith: an opal's fire, green, blue and violet when calm, gold, orange and red under stress.
+    opal: [
+      [[90, 220, 180], [255, 170, 60]],
+      [[90, 140, 255], [240, 80, 60]],
+      [[180, 120, 255], [255, 120, 90]],
     ],
     // Oren: sea blue and aqua when calm, deepening to indigo under stress.
     film: [

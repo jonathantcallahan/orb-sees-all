@@ -310,6 +310,8 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("merge_projects"), from_id: z.string(), into_id: z.string() }),
   z.object({ type: z.literal("rename_project"), project_id: z.string(), name: z.string() }),
   z.object({ type: z.literal("set_project_tracking"), project_id: z.string(), tracked: z.boolean() }),
+  /** Where a project's code lives: local checkouts (folders) and GitHub repos (owner/name), added to what's mapped. */
+  z.object({ type: z.literal("add_project_repos"), project_id: z.string(), local: z.array(z.string()).default([]), github: z.array(z.string()).default([]) }),
   /** Context entries in the user's words about a project; refreshes keep to them. */
   z.object({ type: z.literal("add_project_context"), project_id: z.string(), entries: z.array(z.string()).min(1) }),
   z.object({ type: z.literal("add_note"), text: z.string() }),
@@ -333,7 +335,25 @@ export const Distilled = z.object({
   lessons: z.array(z.object({ scope: z.string(), text: z.string(), evidence: z.array(z.number()).default([]) })),
 });
 
-export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish() });
+/** An epic's child issues, with who each is assigned to. */
+export const EpicChildren = z.object({
+  issues: z.array(
+    z.object({
+      key: z.string(),
+      title: z.string(),
+      status: z.string(),
+      /** Done, In progress or To do, from the status's category. */
+      category: z.enum(["done", "in_progress", "todo"]).catch("todo"),
+      assignee: z.string().nullish(),
+      link: z.string().nullish(),
+    }),
+  ),
+  /** Why the issues couldn't be read (a failed or forbidden search), rather than there being none. */
+  error: z.string().nullish(),
+});
+export type EpicChildren = z.infer<typeof EpicChildren>;
+
+export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish(), moved: z.string().nullish() });
 
 export const DailyReading = z.object({
   reading: z.string(),

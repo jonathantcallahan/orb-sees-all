@@ -115,7 +115,7 @@ To work on the app with hot reload instead, run `pnpm tauri dev`.
 pnpm release 0.2.0
 ```
 
-That runs the tests and bumps the version in `package.json`, `tauri.conf.json` and `Cargo.toml`. Then it commits, tags `v0.2.0` and pushes. The tag starts the **Release** workflow (`.github/workflows/release.yml`). On a macOS runner, the workflow builds a universal app, signs the update bundle and publishes a GitHub release. The release includes the `.dmg` and `latest.json`, which is what installed copies check. Follow the build with `gh run watch`.
+Before releasing, add the version's notes to `src/releaseNotes.ts`; Settings shows them under **Release notes**. `pnpm release` then runs the tests and bumps the version in `package.json`, `tauri.conf.json` and `Cargo.toml`. Then it commits, tags `v0.2.0` and pushes. The tag starts the **Release** workflow (`.github/workflows/release.yml`). On a macOS runner, the workflow builds a universal app, signs the update bundle and publishes a GitHub release. The release includes the `.dmg` and `latest.json`, which is what installed copies check. Follow the build with `gh run watch`.
 
 Update bundles are signed with a key pair:
 

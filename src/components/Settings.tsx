@@ -1,10 +1,12 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { setStandingNotes } from "../claude";
+import { RELEASE_NOTES } from "../releaseNotes";
 import { label, recordCorrection } from "../feedback";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
-import { ORB_LOOK_NAMES } from "../orbLook";
+import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
 import { activeChannels, projectName } from "../projects";
 import { ago } from "../tasks";
 import type { Theme } from "../theme";
@@ -93,6 +95,63 @@ function LessonRow({ lesson, projects, onChange }: { lesson: db.Lesson; projects
         <CloseIcon />
       </button>
     </li>
+  );
+}
+
+/** Settings > Release notes: the version you're on and what changed lately; older versions open on request. */
+function ReleaseNotes() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [older, setOlder] = useState(false);
+  useEffect(() => {
+    getVersion().then(setVersion, () => {});
+  }, []);
+  const date = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" });
+  // Notes for versions newer than this copy (written ahead of a release) wait until it's out.
+  const newer = (a: string, b: string) => {
+    const [x, y] = [a, b].map((v) => v.split(".").map(Number));
+    for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+    return false;
+  };
+  const released = version ? RELEASE_NOTES.filter((r) => !newer(r.version, version)) : RELEASE_NOTES;
+  const recent = released.slice(0, 3);
+  const rest = released.slice(3);
+  const Version = ({ r }: { r: (typeof RELEASE_NOTES)[number] }) => (
+    <div className="release">
+      <div className="release-head">
+        <span className="setting-label">{r.version}</span>
+        <span className="timestamp">{date(r.date)}</span>
+        {r.version === version && <span className="timestamp">· you're on this one</span>}
+      </div>
+      <ul className="release-notes">
+        {r.notes.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+    </div>
+  );
+  return (
+    <section className="settings-section">
+      <h4>Release notes</h4>
+      <div className="settings-group">
+        <div className="setting-row stacked">
+          {recent.map((r) => (
+            <Version key={r.version} r={r} />
+          ))}
+          {rest.length > 0 && (
+            <>
+              <Reveal open={older}>
+                {rest.map((r) => (
+                  <Version key={r.version} r={r} />
+                ))}
+              </Reveal>
+              <button className="link-button small more-link release-more" onClick={() => setOlder(!older)}>
+                {older ? "Show fewer" : "Earlier versions"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -265,14 +324,6 @@ export function Settings({
     .reduce((sum, l) => sum + (l.cost_usd ?? 0), 0);
 
   const shown = projects.filter((p) => p.state !== "merged");
-  const ORB_HINTS: Record<OrbLook, string> = {
-    // Each orb's temperament: Demian, Roth, Ophelia, Oren.
-    crystal: "Inquisitive",
-    glass: "Brooding",
-    porcelain: "Creative",
-    film: "Ethereal",
-  };
-
   // Rendered into <body> so nothing on the page can clip or offset it.
   return createPortal(
     <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
@@ -327,12 +378,12 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <SettingRow label="Orb" hint={ORB_HINTS[orbLook]}>
+              <SettingRow label="Orb">
                 <Segmented
                   label="Orb"
                   value={orbLook}
                   onChange={onOrbLookChange}
-                  options={(["crystal", "glass", "porcelain", "film"] as OrbLook[]).map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
+                  options={ORB_LOOKS.map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
                 />
               </SettingRow>
             </div>
@@ -410,6 +461,8 @@ export function Settings({
               </SettingRow>
             </div>
           </section>
+
+          <ReleaseNotes />
 
           <section className="settings-section">
             <div className="settings-section-head">

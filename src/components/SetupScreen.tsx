@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
-import { setUserProfile } from "../prompts";
 import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { INSTALL_CLAUDE, isWindows, TERMINAL } from "../platform";
@@ -75,13 +74,13 @@ function ConnectorRow({ c }: { c: ConnectorCheck }) {
 
 /**
  * The first-run walkthrough: checks Claude Code, the claude.ai login and each connector, shows how
- * to fix whatever's missing and takes a line about the user; then the first refresh finds their projects. Opens by
+ * to fix whatever's missing; then the first refresh finds their projects. (Orb learns the user's role in
+ * the background, so it doesn't ask.) Opens by
  * itself until setup is done; Settings can open it again any time.
  */
 export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [report, setReport] = useState<SetupReport | null>(null);
   const [checking, setChecking] = useState(false);
-  const [about, setAbout] = useState("");
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -95,7 +94,6 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
 
   useEffect(() => {
     check();
-    db.getSetting("user_profile").then((t) => setAbout(t ?? ""), () => {});
   }, [check]);
 
   useEffect(() => {
@@ -112,8 +110,6 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
 
   // Refresh all finds the projects first, then reads them; the header shows its progress.
   const finish = async () => {
-    await db.setSetting("user_profile", about.trim());
-    setUserProfile(about);
     await db.setSetting("setup_done", "1");
     onDone();
   };
@@ -193,16 +189,6 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
             )}
           </Step>
 
-          <Step mark={about.trim() ? "ok" : "todo"} title="Tell Orb about you">
-            <textarea
-              className="setup-about"
-              rows={2}
-              value={about}
-              placeholder="e.g. a product manager on the payments team"
-              onChange={(e) => setAbout(e.target.value)}
-            />
-            <span className="muted">Claude uses this to judge what matters to you. You can change it in Settings.</span>
-          </Step>
         </ol>
 
         <footer className="plan-modal-actions">

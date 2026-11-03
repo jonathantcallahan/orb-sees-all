@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
 import { formatWhen } from "../scheduler";
@@ -164,6 +164,8 @@ export function ComposeModal({
   onCancel,
   onSend,
   actions,
+  sendLabel = "Send",
+  tall = false,
 }: {
   heading: string;
   /** Where it will go, shown until there's a status to report. */
@@ -178,12 +180,35 @@ export function ComposeModal({
   onSend?: () => void;
   /** Extra footer actions, beside Cancel (e.g. Copy, Open thread). */
   actions?: ReactNode;
+  /** The primary button's label; Send by default. */
+  sendLabel?: string;
+  /** A taller editor, for a whole document. */
+  tall?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
+  // The editor grows to show all the text; only when the window would then be taller than the
+  // screen does it stop growing and scroll (the modal's max height lets it shrink back to fit).
+  const editor = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const fit = () => {
+      const el = editor.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight)}px`;
+    };
+    fit();
+    // Again once layout has settled (fonts, styles), and whenever the window changes size.
+    const frame = requestAnimationFrame(fit);
+    window.addEventListener("resize", fit);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", fit);
+    };
+  }, [text]);
 
   // Portaled to <body>; clicks still bubble through React, so stop them before they select the project.
   return createPortal(
@@ -199,9 +224,10 @@ export function ComposeModal({
           <h2>{heading}</h2>
         </header>
         <textarea
+          ref={editor}
           autoFocus
-          className="description-editor"
-          rows={6}
+          className="description-editor compose-editor"
+          rows={tall ? 18 : 6}
           value={text}
           disabled={busy}
           onChange={(e) => onChange(e.target.value)}
@@ -216,8 +242,8 @@ export function ComposeModal({
             {onSend ? "Cancel" : "Close"}
           </button>
           {onSend && (
-            <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title={`Send (${MOD}↩)`}>
-              Send
+            <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title={`${sendLabel} (${MOD}↩)`}>
+              {sendLabel}
             </button>
           )}
         </footer>

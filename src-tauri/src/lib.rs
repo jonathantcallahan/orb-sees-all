@@ -1,8 +1,10 @@
 mod sessions;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -345,6 +347,223 @@ fn tell_once_still_running(app: &AppHandle) {
         .show();
 }
 
+/// How old a GitHub mirror may get before it's fetched again.
+const MIRROR_MAX_AGE: Duration = Duration::from_secs(12 * 60 * 60);
+
+/// A read-only copy of a GitHub repo's default branch, for Claude to read code from: a shallow
+/// clone (through gh, so private repos work with the user's GitHub sign-in) under the app's data
+/// folder, refreshed when it's more than 12 hours old by cloning afresh and swapping it in. Returns
+/// its folder. `repo` must look like owner/name.
+#[tauri::command]
+async fn mirror_repo(app: AppHandle, repo: String) -> Result<String, String> {
+    let valid = |part: &str| !part.is_empty() && part != "." && part != ".." && part.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    let Some((owner, name)) = repo.split_once('/') else { return Err(format!("Not a GitHub repo: {repo}")) };
+    if !valid(owner) || !valid(name) {
+        return Err(format!("Not a GitHub repo: {repo}"));
+    }
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("repos");
+    let dir = root.join(owner).join(name);
+    let fresh = dir
+        .join(".git")
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < MIRROR_MAX_AGE);
+    if fresh {
+        return Ok(dir.to_string_lossy().into_owned());
+    }
+    let path = search_path();
+    let gh = resolve("gh", &path).ok_or("gh not found on PATH")?;
+    let parent = dir.parent().ok_or("bad repo folder")?.to_path_buf();
+    std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
+    // A clone cut short (the app quit mid-way) leaves its staging folder behind; clear those first.
+    if let Ok(entries) = std::fs::read_dir(&parent) {
+        let prefix = format!(".{name}-");
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    let staging = parent.join(format!(".{name}-{}", nanos()));
+    let target = staging.to_string_lossy().into_owned();
+    let dir2 = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = command(&gh, &["repo".into(), "clone".into(), repo.clone(), target, "--".into(), "--depth".into(), "1".into(), "--single-branch".into()], &parent, &path, false)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let _ = std::fs::remove_dir_all(&staging);
+            // A stale copy still beats none.
+            if dir2.exists() {
+                return Ok(dir2.to_string_lossy().into_owned());
+            }
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        if dir2.exists() {
+            std::fs::remove_dir_all(&dir2).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&staging, &dir2).map_err(|e| e.to_string())?;
+        Ok(dir2.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Where the user's own clones of GitHub repos are: "owner/name" (lowercase) to the checkout's
+/// folder, from each checkout's origin remote. Looked for in the home folder and the usual places
+/// people keep code, two levels down, skipping system and dependency folders. Rebuilt at most every
+/// ten minutes.
+fn checkout_index() -> HashMap<String, String> {
+    static INDEX: Mutex<Option<(Instant, HashMap<String, String>)>> = Mutex::new(None);
+    let mut cached = INDEX.lock().unwrap();
+    if let Some((at, index)) = cached.as_ref() {
+        if at.elapsed() < Duration::from_secs(600) {
+            return index.clone();
+        }
+    }
+    let mut index = HashMap::new();
+    if let Some(home) = home_dir() {
+        // Never into macOS's protected folders (Desktop, Documents, Downloads): reading them asks the
+        // user's permission, and an unsigned app is asked again after every update. Code mapped in
+        // Settings can live anywhere.
+        const SKIP: &[&str] = &[
+            "Library", "Applications", "Pictures", "Movies", "Music", "Public", "node_modules", "AppData", ".Trash", "Desktop", "Documents", "Downloads",
+        ];
+        // The home folder itself, then where people and tools put code: Xcode-era Developer, the
+        // usual hand-made folders, and on Windows Visual Studio's (source/repos) and GitHub
+        // Desktop's (Documents/GitHub, which Windows doesn't guard).
+        let mut roots = vec!["", "code", "Code", "dev", "src", "projects", "Projects", "repos", "git", "GitHub", "Developer", "workspace"];
+        if cfg!(windows) {
+            roots.extend(["source/repos", "Documents/GitHub", "Documents/code", "OneDrive/Documents/GitHub"]);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut visit = |dir: &Path, index: &mut HashMap<String, String>| {
+            let Some(config) = git_config(dir) else { return false };
+            for repo in github_remotes(&config) {
+                index.entry(repo).or_insert_with(|| dir.to_string_lossy().into_owned());
+            }
+            true
+        };
+        for root in roots {
+            let base = if root.is_empty() { home.clone() } else { home.join(root) };
+            let Ok(entries) = std::fs::read_dir(&base) else { continue };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let path = entry.path();
+                if name.starts_with('.') || SKIP.contains(&name.as_str()) || !path.is_dir() || !seen.insert(path.clone()) {
+                    continue;
+                }
+                if visit(&path, &mut index) {
+                    continue;
+                }
+                // One level further: an org or group folder of checkouts.
+                if let Ok(inner) = std::fs::read_dir(&path) {
+                    for sub in inner.flatten() {
+                        let sub_name = sub.file_name().to_string_lossy().into_owned();
+                        let sub_path = sub.path();
+                        if !sub_name.starts_with('.') && sub_name != "node_modules" && sub_path.is_dir() && seen.insert(sub_path.clone()) {
+                            visit(&sub_path, &mut index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    *cached = Some((Instant::now(), index.clone()));
+    index
+}
+
+/// A checkout's git config. `.git` is usually a folder; in a worktree or submodule it's a file
+/// pointing at the real git folder ("gitdir: …"), whose config (or, for a worktree, its main
+/// repository's) holds the remotes.
+fn git_config(dir: &Path) -> Option<String> {
+    let dot_git = dir.join(".git");
+    if dot_git.is_dir() {
+        return std::fs::read_to_string(dot_git.join("config")).ok();
+    }
+    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let target = pointer.trim().strip_prefix("gitdir:")?.trim();
+    let gitdir = if Path::new(target).is_absolute() { PathBuf::from(target) } else { dir.join(target) };
+    std::fs::read_to_string(gitdir.join("config"))
+        .ok()
+        .or_else(|| std::fs::read_to_string(gitdir.join("commondir")).ok().and_then(|c| std::fs::read_to_string(gitdir.join(c.trim()).join("config")).ok()))
+}
+
+/// "owner/name" (lowercase) of a GitHub remote URL, in https or ssh form.
+fn github_repo(url: &str) -> Option<String> {
+    let rest = url.split_once("github.com").map(|(_, r)| r)?;
+    let path = rest.trim_start_matches([':', '/'].as_ref()).trim_end_matches('/').trim_end_matches(".git");
+    let mut parts = path.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    (!owner.is_empty() && !name.is_empty()).then(|| format!("{}/{}", owner, name).to_lowercase())
+}
+
+/// Every GitHub repo a git config's remotes point at, origin first: a fork's checkout (origin the
+/// fork, upstream the original) counts as a checkout of both.
+fn github_remotes(config: &str) -> Vec<String> {
+    let mut origin = Vec::new();
+    let mut others = Vec::new();
+    let mut section = "";
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            section = line;
+        } else if section.starts_with("[remote ") {
+            if let Some(url) = line.strip_prefix("url").map(|r| r.trim_start_matches([' ', '='].as_ref()).trim()) {
+                if let Some(repo) = github_repo(url) {
+                    if section == r#"[remote "origin"]"# { origin.push(repo) } else { others.push(repo) }
+                }
+            }
+        }
+    }
+    origin.extend(others);
+    origin
+}
+
+/// "owner/name" (lowercase) of a git config's origin remote on GitHub, if it has one.
+#[cfg(test)]
+fn origin_repo(config: &str) -> Option<String> {
+    let mut section = "";
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            section = line;
+        } else if section == r#"[remote "origin"]"# {
+            if let Some(url) = line.strip_prefix("url").map(|r| r.trim_start_matches([' ', '='].as_ref()).trim()) {
+                return github_repo(url);
+            }
+        }
+    }
+    None
+}
+
+/// The user's own checkouts of these GitHub repos, where they have one: (repo as given, folder).
+#[tauri::command]
+async fn find_checkouts(repos: Vec<String>) -> Vec<(String, String)> {
+    let index = tauri::async_runtime::spawn_blocking(checkout_index).await.unwrap_or_default();
+    repos.into_iter().filter_map(|r| index.get(&r.to_lowercase()).map(|dir| (r, dir.clone()))).collect()
+}
+
+/// The folders that exist, of the ones given (project repos the user mapped may have moved).
+#[tauri::command]
+fn existing_dirs(paths: Vec<String>) -> Vec<String> {
+    let home = home_dir();
+    paths
+        .into_iter()
+        .filter_map(|p| {
+            let expanded = match (p.strip_prefix("~/"), &home) {
+                (Some(rest), Some(h)) => h.join(rest),
+                _ => PathBuf::from(&p),
+            };
+            expanded.is_dir().then(|| expanded.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 /// Opens a terminal window running one of setup's own steps, so onboarding can walk someone through
 /// installing Claude Code or signing in without typing commands. Only these fixed steps run: the
 /// frontend names one, it never supplies a command.
@@ -500,6 +719,9 @@ pub fn run() {
             run_cli,
             run_cli_stream,
             open_setup_terminal,
+            mirror_repo,
+            existing_dirs,
+            find_checkouts,
             sessions::find_session,
             sessions::read_session_progress
         ])
@@ -585,6 +807,42 @@ fn hide_window_buttons(window: &tauri::WebviewWindow) {
         if let Some(button) = ns_window.standardWindowButton(kind) {
             button.setHidden(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod checkout_tests {
+    use super::origin_repo;
+
+    #[test]
+    fn reads_the_origin_repo_in_https_and_ssh_form() {
+        let https = "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = https://github.com/Acme-Corp/billing-dashboard.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
+        assert_eq!(origin_repo(https).as_deref(), Some("acme-corp/billing-dashboard"));
+        let ssh = "[remote \"upstream\"]\n\turl = git@github.com:someone/else.git\n[remote \"origin\"]\n\turl = git@github.com:Acme-Corp/editor-plugin\n";
+        assert_eq!(origin_repo(ssh).as_deref(), Some("acme-corp/editor-plugin"));
+        assert_eq!(origin_repo("[remote \"origin\"]\n\turl = https://gitlab.com/a/b.git\n"), None);
+    }
+
+    #[test]
+    fn counts_a_fork_as_a_checkout_of_the_original_too() {
+        let fork = "[remote \"origin\"]\n\turl = https://github.com/someone/editor-plugin.git\n[remote \"upstream\"]\n\turl = https://github.com/Acme-Corp/editor-plugin.git\n";
+        assert_eq!(super::github_remotes(fork), vec!["someone/editor-plugin", "acme-corp/editor-plugin"]);
+    }
+
+    #[test]
+    fn follows_a_worktree_to_its_repository() {
+        let root = std::env::temp_dir().join(format!("orb-worktree-{}", std::process::id()));
+        let main_git = root.join("main").join(".git");
+        let wt_git = main_git.join("worktrees").join("wt");
+        std::fs::create_dir_all(&wt_git).unwrap();
+        std::fs::write(main_git.join("config"), "[remote \"origin\"]\n\turl = git@github.com:Acme-Corp/web-ui.git\n").unwrap();
+        std::fs::write(wt_git.join("commondir"), "../..\n").unwrap();
+        let wt = root.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", wt_git.display())).unwrap();
+        let config = super::git_config(&wt).unwrap();
+        assert_eq!(super::github_remotes(&config), vec!["acme-corp/web-ui"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 

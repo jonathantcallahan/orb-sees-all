@@ -18,7 +18,7 @@ describe("setup checks", () => {
     ].join("\n");
     const checks = connectorChecks(findInit(stdout)!.mcp_servers!);
     const state = Object.fromEntries(checks.map((c) => [c.id, c.state]));
-    expect(state).toEqual({ slack: "connected", gmail: "needs_auth", calendar: "missing", drive: "missing", jira: "failed", uknow: "connected" });
+    expect(state).toEqual({ slack: "connected", gmail: "needs_auth", calendar: "missing", drive: "missing", jira: "failed" });
     expect(checks.find((c) => c.id === "jira")?.rawStatus).toBe("failed");
   });
 

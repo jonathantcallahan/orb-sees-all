@@ -161,7 +161,7 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                     // Hand-offs ("[orb] send …"), plan updates ("[orb] plan") and proposed changes ("[orb] action")
                     // carry a block of text up to "[orb] end".
                     let lower = trimmed.to_ascii_lowercase();
-                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") {
+                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") || lower.starts_with("[orb] doc") || lower.starts_with("[orb] event") {
                         open = Some((trimmed.to_string(), Vec::new()));
                     }
                 }

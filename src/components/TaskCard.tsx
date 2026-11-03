@@ -11,13 +11,13 @@ import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, ty
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, useScrambled } from "./common";
-import { readableReply, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { chatView, readableReply, sendDestination, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { label, recordCorrection, taskSnapshot } from "../feedback";
 import * as db from "../db";
 import { CLAUDE_ICON } from "../linkIcons";
-import { collectLinks, linkKind } from "../links";
+import { collectLinks, linkKind, type TaskLink } from "../links";
 import type { DuplicateCandidate } from "../duplicates";
 
 export interface CardTask {
@@ -399,6 +399,20 @@ interface OutlineStep {
   by: "claude" | "you" | null;
   /** What the linked Claude session last reported for this step. */
   progress?: StepProgress;
+  /** What finished it (a message sent, a doc or event created), as chips beside it. */
+  links?: TaskLink[];
+}
+
+/** What Orb sent or created for a session, as chips: those for each step (1-based), and the rest. */
+function artifactChips(link: SessionLink | undefined): { byStep: Map<number, TaskLink[]>; loose: TaskLink[] } {
+  const byStep = new Map<number, TaskLink[]>();
+  const loose: TaskLink[] = [];
+  for (const a of link?.artifacts ?? []) {
+    const chip = { url: a.url, title: a.title, kind: linkKind(a.url) };
+    if (a.step) byStep.set(a.step, [...(byStep.get(a.step) ?? []), chip]);
+    else loose.push(chip);
+  }
+  return { byStep, loose };
 }
 
 function PlanOutline({
@@ -449,6 +463,7 @@ function PlanOutline({
                   )}
                 </span>
               </HoverTip>
+              {step.links && step.links.length > 0 && <LinkChips links={step.links} />}
               {onRemind && step.progress?.state === "blocked" && (
                 <button className="link-button small step-remind" onClick={() => onRemind(i)}>
                   Remind
@@ -524,22 +539,54 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   const [text, setText] = useState(send.text);
   const [error, setError] = useState<string | null>(null);
   const sending = useJobStatus(`handoff:${taskId}`);
-  const where = send.to.startsWith("http") ? "the thread" : send.to;
+  const doc = send.kind === "doc";
+  const event = send.kind === "event";
+  // Something to create (a doc or an event) rather than a message to send.
+  const creates = doc || event;
+  const where = sendDestination(send);
+  // An event's "when:" line, shown on the card; and whether it invites anyone.
+  const when = event ? send.text.match(/^when:\s*(.+)$/im)?.[1] : undefined;
+  const invites = event && /^who:\s*\S/im.test(send.text);
   return (
     <div className="handoff small">
       <div className="handoff-head">
-        <span className="handoff-label">Ready to send to {where}</span>
-        <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
-          {sending ? "Sending…" : "Review & send"}
-        </button>
+        <span className="handoff-label">
+          {doc ? `Ready to create a Google Doc: ${send.to}` : event ? `Ready to create an event: ${send.to}` : send.to.startsWith("http") ? `Ready to reply in ${where}` : `Ready to send to ${where}`}
+        </span>
+        <span className="action-buttons">
+          {!sending && (
+            <button
+              className="cta-ghost"
+              title={creates ? "Don't create this one" : "Don't send this one"}
+              onClick={async () => {
+                const link = (await db.getSessionLinks())[taskId];
+                await db.updateSessionLink(taskId, { dismissedKeys: [...(link?.dismissedKeys ?? []), send.key] });
+                onChange();
+              }}
+            >
+              Not this
+            </button>
+          )}
+          <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
+            {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
+          </button>
+        </span>
       </div>
-      <div className="muted handoff-preview">{send.text.split("\n")[0]}</div>
+      <div className="muted handoff-preview">{when ?? send.text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
       {open && (
         <ComposeModal
-          heading={`Send to ${where}`}
-          note={`Posts in ${where} as you.`}
+          heading={creates ? `Create "${send.to}"` : send.to.startsWith("http") ? `Reply in ${where}` : `Send to ${where}`}
+          note={
+            doc
+              ? "Creates a Google Doc in your Drive, only visible to you until you share it."
+              : event
+                ? `Creates the event on your calendar${invites ? " and sends invites to everyone on the who line" : ""}. If the time is no longer free for everyone, it moves to the next time that is.`
+                : `Posts in ${where} as you.`
+          }
+          sendLabel={doc ? "Create doc" : event ? (invites ? "Create & invite" : "Create event") : "Send"}
+          tall={doc}
           text={text}
-          status={sending ? `${sending}…` : error ? `Couldn't send: ${error}` : null}
+          status={sending ? `${sending}…` : error ? `Couldn't ${creates ? "create it" : "send"}: ${error}` : null}
           failed={!!error && !sending}
           busy={!!sending}
           onChange={setText}
@@ -597,11 +644,22 @@ function ClaudeText({ text }: { text: string }) {
 }
 
 /**
- * A thin cursor for a textarea, drawn by us: WebKit's own caret can't be made thinner or moved off
- * the text. A hidden copy of the textarea, laid out the same, finds where the cursor falls; the
- * textarea hides its native caret (see .composer textarea).
+ * The reply box's thin cursor. WebKit (the app's engine on macOS) can't draw a thinner caret, and
+ * no browser lets CSS set caret width, so the native one is hidden and this draws its own.
+ *
+ * Where it goes comes from a mirror: a hidden copy of the textarea, styled the same (the same CSS
+ * rules, plus its computed box and type copied over), holding the text before the cursor and then a
+ * span with the rest, as component/textarea-caret-position does. The rest matters: it makes the
+ * mirror wrap exactly as the textarea does, so a cursor mid-word near the edge lands where the
+ * textarea draws that word. The span's first line box is the cursor's spot.
+ *
+ * It moves on everything that moves the real cursor: typing, input-method composition, clicks and
+ * drags, arrow keys (selectionchange), scrolling, the box resizing and fonts finishing loading. It's
+ * placed just after the event, never inside it (a state update during the textarea's own input
+ * event re-renders it with the old value and drops the keystroke). It hides while text is selected,
+ * where the selection highlight shows the cursor's place.
  */
-function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string) {
+function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string, disabled = false) {
   const mirror = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState<{ x: number; y: number; h: number } | null>(null);
   const last = useRef<string>("");
@@ -609,50 +667,96 @@ function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string) 
     const el = ref.current;
     const m = mirror.current;
     let next: { x: number; y: number; h: number } | null = null;
-    if (el && m && document.activeElement === el && el.selectionStart === el.selectionEnd) {
-      // The mirror takes the textarea's own type and spacing, whatever size this box uses.
+    // Only in a box you can type in: a disabled one (while Claude answers) shows no cursor, wherever
+    // focus was left.
+    if (el && m && !el.disabled && document.activeElement === el && el.selectionStart === el.selectionEnd) {
       const cs = getComputedStyle(el);
-      Object.assign(m.style, { font: cs.font, letterSpacing: cs.letterSpacing, lineHeight: cs.lineHeight, padding: cs.padding, textIndent: cs.textIndent, width: `${el.clientWidth}px` });
-      // Measure in the mirror: the text up to the cursor, then a marker where the cursor is.
-      const before = el.value.slice(0, el.selectionStart);
-      if (m.firstChild?.textContent !== before || m.childNodes.length !== 2) {
-        m.replaceChildren(document.createTextNode(before), Object.assign(document.createElement("span"), { textContent: "\u200b" }));
-      }
+      // Longhands only: WebKit can report shorthands like font as empty.
+      for (const prop of MIRRORED) m.style.setProperty(prop, cs.getPropertyValue(prop));
+      // Wrapping width: the textarea's content box, without its scrollbar.
+      m.style.width = `${el.clientWidth}px`;
+      m.style.boxSizing = "border-box";
+      const at = el.selectionStart;
+      const rest = el.value.slice(at);
+      m.replaceChildren(document.createTextNode(el.value.slice(0, at)), Object.assign(document.createElement("span"), { textContent: rest || "." }));
       const mark = m.lastChild as HTMLElement;
-      // Text starts a few pixels in (.composer textarea's text-indent); an empty box's cursor sits
-      // at the very start, so the placeholder reads to the right of it.
-      // The marker's own box spans the font's ascent to descent, where the text's glyphs sit, so the
-      // cursor takes its top and height (a pixel trimmed from each end), not the line's.
-      const top = mark.offsetTop - el.scrollTop + 1;
-      const h = Math.max(8, mark.offsetHeight - 2);
-      next = { x: el.value ? mark.offsetLeft : -2, y: top, h };
+      // The first line box of what follows the cursor: its left edge is the cursor, its height the
+      // font's ascent to descent (a pixel trimmed from each end), where the glyphs sit.
+      const box = mark.getClientRects()[0];
+      const origin = m.getBoundingClientRect();
+      if (box) {
+        const top = box.top - origin.top - el.scrollTop + 1;
+        const h = Math.max(8, box.height - 2);
+        // Only when it lies wholly inside the visible text: a cursor scrolled out of view (or measured
+        // against a box that has since shrunk) is not drawn, rather than drawn outside the box.
+        if (top >= -1 && top + h <= el.clientHeight + 1) next = { x: el.value ? box.left - origin.left : -2, y: top, h };
+      }
     }
     // Only a real move re-renders; this keeps typing light.
-    const key = next ? `${next.x}:${next.y}:${next.h}` : "";
+    const key = next ? `${Math.round(next.x * 2)}:${Math.round(next.y * 2)}:${Math.round(next.h)}` : "";
     if (key === last.current) return;
     last.current = key;
     setCaret(next);
   };
-  useLayoutEffect(() => place(), [text]);
+  const timer = useRef(0);
+  const later = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(place, 0);
+  };
+  useLayoutEffect(later, [text, disabled]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // Placed on the next frame, never inside the event: a state update while the textarea's own
-    // input event is still being handled re-renders it with the old value and drops the keystroke.
-    let frame = 0;
-    const later = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(place);
-    };
-    const events = ["focus", "blur", "keyup", "mouseup", "select", "scroll"] as const;
+    const events = ["focus", "blur", "input", "keydown", "keyup", "pointerdown", "pointerup", "select", "scroll", "compositionupdate", "compositionend"] as const;
     events.forEach((e) => el.addEventListener(e, later));
+    // Arrow keys, word jumps and drags move the cursor without an input event.
+    const onSelection = () => document.activeElement === el && later();
+    document.addEventListener("selectionchange", onSelection);
+    const resized = new ResizeObserver(later);
+    resized.observe(el);
+    document.fonts?.ready.then(later);
     return () => {
-      cancelAnimationFrame(frame);
+      window.clearTimeout(timer.current);
       events.forEach((e) => el.removeEventListener(e, later));
+      document.removeEventListener("selectionchange", onSelection);
+      resized.disconnect();
     };
   }, []);
   return { mirror, caret };
 }
+
+/** What the caret's mirror copies from the textarea, so it lays text out the same way. */
+const MIRRORED = [
+  "direction",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "border-top-width",
+  "border-right-width",
+  "border-bottom-width",
+  "border-left-width",
+  "border-style",
+  "font-style",
+  "font-variant",
+  "font-weight",
+  "font-stretch",
+  "font-size",
+  "font-size-adjust",
+  "line-height",
+  "font-family",
+  "font-kerning",
+  "font-feature-settings",
+  "font-variation-settings",
+  "text-align",
+  "text-transform",
+  "text-indent",
+  "text-decoration",
+  "text-rendering",
+  "letter-spacing",
+  "word-spacing",
+  "tab-size",
+] as const;
 
 /** How long each example prompt shows in the reply box before the next scrambles in. */
 const HINT_MS = 4500;
@@ -685,7 +789,7 @@ function Composer({
   const shownHint = hints[hint % hints.length] ?? "";
   const scrambledHint = useScrambled(shownHint);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const { mirror, caret } = useThinCaret(ref, text);
+  const { mirror, caret } = useThinCaret(ref, text, disabled);
   const fit = () => {
     const el = ref.current;
     if (!el) return;
@@ -806,6 +910,13 @@ export interface SessionAsk {
   step: number | null;
   title: string;
   note?: string;
+  /**
+   * The plan's steps, with where each stands and what finished it. Given, the chat lays out side by
+   * side: the steps on the left, the conversation on the right.
+   */
+  steps?: OutlineStep[];
+  /** What Orb sent or created that isn't tied to a step, listed under the steps. */
+  artifacts?: TaskLink[];
 }
 
 /**
@@ -867,104 +978,162 @@ export function SessionChat({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  // What you just sent shows at once, until the transcript catches up with it.
-  const [sent, setSent] = useState<string | null>(null);
-  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.text;
+  // The turn under way, if any (see chatView): from your send, or from Orb setting the session to
+  // work itself. Everything before where it began stays put while it runs.
+  const [turn, setTurn] = useState<ChatTurn | null>(null);
+  // Whether the session has started on this turn yet (until then, it's queued: still busy).
+  const [turnStarted, setTurnStarted] = useState(false);
+  const live = useJobStatus(`live:${taskId}`);
+  // The last live text, kept after the turn ends until the transcript's copy lands.
+  const [held, setHeld] = useState<string | null>(null);
   useEffect(() => {
-    if (sent && lastUser === sent) setSent(null);
-  }, [lastUser]);
+    if (live) setHeld(live);
+  }, [live]);
+  useEffect(() => {
+    if (!working) return;
+    setTurnStarted(true);
+    setTurn((t) => t ?? { base: messages.length, text: null });
+  }, [working]);
   const send = (message: string) => {
-    setSent(message);
+    setTurn({ base: messages.length, text: message });
+    setTurnStarted(false);
+    setHeld(null);
     if (onSend) onSend(message);
     else continueTaskSession(taskId, message).then(onChange, onChange);
     onChange();
   };
-  // While Claude answers, its reply streams in as it's written; the transcript's copy of this turn
-  // (which lags) is held back until the turn ends, so nothing shows twice.
-  // When the turn ends, the streamed reply stays up until the transcript's copy arrives, so it
-  // doesn't blink out in between.
-  const live = useJobStatus(`live:${taskId}`);
-  const [held, setHeld] = useState<{ text: string; count: number } | null>(null);
+  const view = chatView(messages, turn, { working: !!working, live: live ?? null, held });
+  const endTurn = () => {
+    setTurn(null);
+    setHeld(null);
+  };
   useEffect(() => {
-    if (live) setHeld({ text: live, count: messages.length });
-    else setHeld((h) => (h && messages.length > h.count ? null : h));
-  }, [live]);
+    if (view.done) endTurn();
+  }, [view.done]);
+  // A turn that ended without the transcript ever showing it (cut short, or worded differently)
+  // is let go after a while, so the chat never sits on a stale copy.
   useEffect(() => {
-    if (held && !live && messages.length > held.count) setHeld(null);
-  }, [messages.length]);
-  const streaming = live ?? (held ? held.text : null);
-  const liveText = useSmoothText(streaming ? readableReply(streaming) : "");
-  const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
-  // Everything up to your last message (none, on a first turn) while a reply is forming.
-  const settled = working || (held && !live) ? messages.slice(0, lastUserAt + 1) : messages;
-  const shown = sent ? [...settled, { role: "user" as const, text: sent }] : settled;
+    if (!turn || working || live || (turn.text !== null && !turnStarted)) return;
+    const t = setTimeout(endTurn, 20_000);
+    return () => clearTimeout(t);
+  }, [turn, working, live, turnStarted]);
+  const shown = view.shown;
+  const liveText = useSmoothText(view.reply ? readableReply(view.reply) : "");
   // Keep the newest message in view as the conversation grows.
   const scroller = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [shown.length, working, toSend.length, liveText.length]);
-  const busy = !!working || !!sent;
+  // Answering, or your message is queued and the session hasn't picked it up yet.
+  const busy = !!working || (!!turn && turn.text !== null && !turnStarted);
+
+  // With the plan's steps, the chat sits beside them: steps on the left, the conversation on the right.
+  const split = !!ask?.steps?.length;
+  const head = (
+    <header className="chat-modal-head">
+      <span className="chat-modal-title">
+        {title}
+        {subtitle && <span className="chat-modal-subtitle">{subtitle}</span>}
+      </span>
+      <span className="chat-modal-head-actions">
+        {headAction}
+        <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
+          <CloseIcon />
+        </button>
+      </span>
+    </header>
+  );
+  const askBox = ask && (
+    <div className="chat-ask">
+      <span className="chat-ask-step">
+        {!plain && <StepCircle state="waiting" />}
+        {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
+      </span>
+      {ask.note && <p className="chat-ask-note">{ask.note}</p>}
+      {askAction && <div className="chat-ask-action">{askAction}</div>}
+    </div>
+  );
+  const conversation = (
+    <>
+      <div className="chat-log" ref={scroller}>
+        {!shown.length && !busy && empty}
+        {shown.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="chat-turn you">
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="chat-turn claude">
+              <ClaudeText text={m.text} />
+            </div>
+          ),
+        )}
+        {liveText && (
+          <div className="chat-turn claude">
+            <ClaudeText text={liveText} />
+          </div>
+        )}
+        {/* Under Claude's reply as it forms, as in a Claude session: its working glyph and what it's doing. */}
+        {busy && (
+          <div className="chat-working" role="status">
+            <ClaudeSpark />
+            <ScrambleText text={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"} />
+          </div>
+        )}
+        {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
+        {!busy && extra}
+      </div>
+      {canReply && (
+        <footer className="chat-modal-foot">
+          <Composer onSend={send} autoFocus disabled={busy} placeholder={placeholder} />
+        </footer>
+      )}
+    </>
+  );
 
   return createPortal(
     <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
-      <div className={`modal chat-modal${plain ? " plain" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
-        <div className="chat-modal-top">
-          <header className="chat-modal-head">
-            <span className="chat-modal-title">
-              {title}
-              {subtitle && <span className="chat-modal-subtitle">{subtitle}</span>}
-            </span>
-            <span className="chat-modal-head-actions">
-              {headAction}
-              <button className="icon-button" onClick={onClose} title="Close" aria-label="Close">
-                <CloseIcon />
-              </button>
-            </span>
-          </header>
-          {ask && (
-            <div className="chat-ask">
-              <span className="chat-ask-step">
-                {!plain && <StepCircle state="waiting" />}
-                {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
-              </span>
-              {ask.note && <p className="chat-ask-note">{ask.note}</p>}
-              {askAction && <div className="chat-ask-action">{askAction}</div>}
+      <div className={`modal chat-modal${plain ? " plain" : ""}${split ? " split" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
+        {split ? (
+          <>
+            <div className="chat-modal-top">{head}</div>
+            <div className="chat-split">
+              <aside className="chat-steps">
+                {(ask!.step || ask!.note || askAction || ask!.title !== "The plan") && askBox}
+                <ol className="chat-steps-list">
+                  {ask!.steps!.map((st, i) => (
+                    <li key={`${i}:${st.title}`} className={[st.progress && `step-${st.progress.state}`, ask!.step === i + 1 && "current"].filter(Boolean).join(" ") || undefined}>
+                      <StepCircle state={st.progress?.state} />
+                      <span className="chat-step-body">
+                        <span className="chat-step-title">
+                          {st.title}
+                          {st.by === "you" && st.progress?.state !== "done" && st.progress?.state !== "skipped" && <span className="step-human">Human</span>}
+                        </span>
+                        {st.progress?.state === "blocked" && st.progress.note && <span className="chat-step-note">Blocked: {st.progress.note}</span>}
+                        {st.links && st.links.length > 0 && <LinkChips links={st.links} />}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                {ask!.artifacts && ask!.artifacts.length > 0 && (
+                  <div className="chat-steps-made">
+                    <span className="chat-steps-made-label">Made in this chat</span>
+                    <LinkChips links={ask!.artifacts} />
+                  </div>
+                )}
+              </aside>
+              <div className="chat-main">{conversation}</div>
             </div>
-          )}
-        </div>
-        <div className="chat-log" ref={scroller}>
-          {!shown.length && !busy && empty}
-          {shown.map((m, i) =>
-            m.role === "user" ? (
-              <div key={i} className="chat-turn you">
-                {m.text}
-              </div>
-            ) : (
-              <div key={i} className="chat-turn claude">
-                <ClaudeText text={m.text} />
-              </div>
-            ),
-          )}
-          {(busy || held) && liveText && (
-            <div className="chat-turn claude">
-              <ClaudeText text={liveText} />
+          </>
+        ) : (
+          <>
+            <div className="chat-modal-top">
+              {head}
+              {askBox}
             </div>
-          )}
-          {/* Under Claude's reply as it forms, as in a Claude session: its working glyph and what it's doing. */}
-          {busy && (
-            <div className="chat-working" role="status">
-              <ClaudeSpark />
-              <ScrambleText text={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"} />
-            </div>
-          )}
-          {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
-          {!busy && extra}
-        </div>
-        {canReply && (
-          <footer className="chat-modal-foot">
-            <Composer onSend={send} autoFocus disabled={busy} placeholder={placeholder} />
-          </footer>
+            {conversation}
+          </>
         )}
       </div>
     </div>,
@@ -1254,6 +1423,7 @@ export function TaskCard({
   // Every plan step, tagged by who does it; with no plan yet, the steps the assessment says Claude can do.
   // They're numbered in this order in the session's prompt, so its "[orb] step N" reports line up.
   // Once the session revises the plan (a decision in the chat changed it), its version replaces them.
+  const chips = artifactChips(sessionLink);
   const outlineSteps: OutlineStep[] = (
     progress?.plan
       ? progress.plan
@@ -1261,7 +1431,7 @@ export function TaskCard({
         ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
         : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
   )
-    .map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title) }))
+    .map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title), links: chips.byStep.get(i + 1) }))
     // A step after a blocked one can't be waiting on you yet; it starts once the block clears.
     .map((st, i, all) =>
       st.progress?.state === "waiting" && all.slice(0, i).some((earlier) => earlier.progress?.state === "blocked") ? { ...st, progress: undefined } : st,
@@ -1325,6 +1495,18 @@ export function TaskCard({
     if (anyBlocked && task.status !== "blocked" && task.status !== "done") setTaskState(task.id, { status: "blocked" }).then(onChange);
     else if (!anyBlocked && changed && task.status === "blocked") setTaskState(task.id, { status: "in_progress" }).then(onChange);
   }, [anyBlocked]);
+  // Every step finished (done, or skipped as no longer needed, with at least one done): the task is
+  // done. Only as the last step finishes, so a task you reopen afterwards stays open.
+  const allStepsDone =
+    outlineSteps.length > 0 &&
+    outlineSteps.every((st) => st.progress?.state === "done" || st.progress?.state === "skipped") &&
+    outlineSteps.some((st) => st.progress?.state === "done");
+  const wereAllDone = useRef(allStepsDone);
+  useEffect(() => {
+    const justFinished = allStepsDone && !wereAllDone.current;
+    wereAllDone.current = allStepsDone;
+    if (justFinished && !discussing && task.status !== "done") setTaskState(task.id, { status: "done" }).then(onChange);
+  }, [allStepsDone]);
   const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
   const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
   const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];
@@ -1335,12 +1517,7 @@ export function TaskCard({
    */
   const [chatFor, setChatFor] = useState<number | null>(null);
   const openChat = () => setChatFor(waitingIndex >= 0 ? waitingIndex + 1 : 0);
-  // The chat closes once its step is resolved: Claude has moved on from it, or it's been marked done.
-  const chatStepState = chatFor ? outlineSteps[chatFor - 1]?.progress?.state : undefined;
-  useEffect(() => {
-    if (chatFor === null || chatFor === DISCUSS) return;
-    if (chatFor > 0 ? chatStepState === "done" || chatStepState === "started" : toSend.length === 0 && !sessionWorking) setChatFor(null);
-  }, [chatFor, chatStepState, toSend.length, sessionWorking]);
+  // The chat stays open until you close it, whatever the session does meanwhile.
   const chatAsk: SessionAsk | null =
     chatFor === null
       ? null
@@ -1348,17 +1525,31 @@ export function TaskCard({
         ? {
             step: null,
             title: "Talking through the plan",
+            // The plan as it now stands: it follows the session's revisions as you agree changes.
+            steps: outlineSteps,
+            artifacts: chips.loose,
             note: discussing
               ? "Ask about any step or change it. The steps on the card follow what you agree; approve when you're happy."
               : "The plan's approved and Claude is carrying it out.",
           }
-        : chatFor > 0
-        ? { step: chatFor, title: outlineSteps[chatFor - 1]?.title ?? "", note: outlineSteps[chatFor - 1]?.progress?.note }
-        : { step: null, title: "Review and send the message Claude wrote" };
+        : (() => {
+            // What's waiting on you now (the chat follows it as the session moves on), else the plan.
+            const at = waitingIndex >= 0 ? waitingIndex + 1 : null;
+            return {
+              step: at,
+              title: at ? (outlineSteps[at - 1]?.title ?? "") : toSend.length ? "Review and send what Claude wrote" : "The plan",
+              note: at ? outlineSteps[at - 1]?.progress?.note : undefined,
+              steps: outlineSteps,
+              artifacts: chips.loose,
+            };
+          })();
   // Discuss plan opens the session in a talk-it-through mode and the chat with it; Approve & start
   // then tells that same session to begin, with the plan as agreed.
   const discussPlan = async () => {
-    if (!discussing && assessment) {
+    // Also when an earlier start never got going (the app quit before Claude answered): it's marked
+    // as being discussed, but there's no session to talk to.
+    const unstarted = discussing && !sessionLink?.sessionId && !sessionWorking;
+    if ((!discussing || unstarted) && assessment) {
       const prompt = discussPrompt(
         { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
         assessment.suggestion,
@@ -1462,6 +1653,16 @@ export function TaskCard({
                 <button className="cta-primary" disabled={!!sessionWorking} onClick={approvePlan}>
                   Approve & start
                 </button>
+              ) : undefined
+            }
+            empty={
+              !sessionLink.sessionId && !sessionWorking ? (
+                <div className="chat-empty small muted">
+                  {sessionLink.lastError ? `Claude couldn't start: ${sessionLink.lastError}` : "Claude hasn't started on this yet."}{" "}
+                  <button className="link-button small" onClick={() => (chatFor === DISCUSS ? discussPlan() : approveAndStart())}>
+                    Start it
+                  </button>
+                </div>
               ) : undefined
             }
             onClose={() => setChatFor(null)}

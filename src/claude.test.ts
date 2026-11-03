@@ -128,7 +128,6 @@ describe("streaming", () => {
   it("describes tools from every connector", () => {
     expect(describeTool("mcp__claude_ai_Gmail__search_threads", { query: "from:sean" })).toBe('Searching email for "from:sean"');
     expect(describeTool("mcp__claude_ai_Google_Calendar__list_events", {})).toBe("Reading your calendar");
-    expect(describeTool("mcp__claude_ai_U-Know__ask_uknow", {})).toBe("Asking U-Know");
     expect(describeTool("mcp__something__unknown", {})).toBe("Working");
   });
 });
@@ -182,5 +181,25 @@ describe("runSessionTurn effort", () => {
     await runSessionTurn({ prompt: "p", tools: [], model: "claude-opus-5-5", effort: "medium" }, run);
     const args = run.mock.calls[0][1];
     expect(args.join(" ")).toContain("--model claude-opus-5-5 --effort medium");
+  });
+});
+
+describe("code access", () => {
+  it("adds the code folders and only Claude Code's read-only file tools", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: ["mcp__x__read"], dirs: ["/code/a", "/code/b"] }, run);
+    const args = run.mock.calls[0][1];
+    expect(args.slice(0, 3)).toEqual(["--add-dir", "/code/a", "/code/b"]);
+    const allowed = args.slice(args.indexOf("--allowedTools") + 1, args.indexOf("--disallowedTools"));
+    expect(allowed).toEqual(["mcp__x__read", "Read", "Grep", "Glob"]);
+    // Writing and shell tools stay off.
+    expect(args.slice(args.indexOf("--disallowedTools"))).toEqual(expect.arrayContaining(["Bash", "Edit", "Write"]));
+  });
+
+  it("gives no file tools when there's no code", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
+    expect(run.mock.calls[0][1]).not.toContain("--add-dir");
+    expect(run.mock.calls[0][1]).not.toContain("Read");
   });
 });

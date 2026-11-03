@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { runCli } from "../cli";
 import * as db from "../db";
-import { dataVersion, recheckTrackedItem, refreshTracking } from "../jobs";
+import { dataVersion, loadEpicChildren, recheckTrackedItem, refreshTracking } from "../jobs";
+import type { StoredEpicChildren } from "../db";
 import type { ProjectTracking, TrackedItem } from "../jobs/tracking";
 import { linkKind } from "../links";
 import { ago } from "../tasks";
@@ -36,10 +37,71 @@ function RecheckButton({ projectId, item }: { projectId: string; item: TrackedIt
   );
 }
 
-function Row({ projectId, item }: { projectId: string; item: TrackedItem }) {
-  const state = item.kind === "epic" ? item.state : (STATE_LABEL[item.state] ?? item.state);
+/**
+ * An epic's issues, opened under its row: each with its status and who it's assigned to. Read from
+ * Jira the first time it's opened (and again on its refresh button); kept until then.
+ */
+function EpicIssues({ epicKey, stored, expected }: { epicKey: string; stored: StoredEpicChildren | undefined; expected?: number }) {
+  const loading = useJobStatus(`epic:${epicKey}`);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    setError(null);
+    loadEpicChildren(epicKey).catch((e) => setError((e as Error).message));
+  };
+  useEffect(() => {
+    if (!stored) load();
+  }, [epicKey]);
+  if (!stored)
+    return (
+      <div className="epic-issues small muted">
+        {error ? <span className="error">Couldn't read its issues: {error}</span> : <><Spinner /> {loading ?? "Reading its issues"}…</>}
+      </div>
+    );
   return (
-    <li className={`tracking-item ${item.kind}`}>
+    <div className="epic-issues small">
+      {stored.issues.length === 0 ? (
+        stored.error || expected ? (
+          <span className="error">
+            Couldn't read its {expected ? `${expected} ` : ""}issues{stored.error ? `: ${stored.error}` : ""}.
+          </span>
+        ) : (
+          <span className="muted">No issues under this epic.</span>
+        )
+      ) : (
+        <ul className="epic-issue-list">
+          {stored.issues.map((i) => (
+            <li key={i.key} className={`epic-issue ${i.category}`}>
+              <span className={`epic-issue-dot ${i.category}`} title={i.status} />
+              {i.link ? (
+                <ExternalLink href={i.link} className="epic-issue-title">
+                  <span className="epic-issue-key">{i.key}</span> {i.title}
+                </ExternalLink>
+              ) : (
+                <span className="epic-issue-title">
+                  <span className="epic-issue-key">{i.key}</span> {i.title}
+                </span>
+              )}
+              <span className={`epic-issue-assignee${i.assignee ? "" : " unassigned"}`}>{i.assignee ?? "Unassigned"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="epic-issues-foot timestamp">
+        read {ago(stored.at)}
+        <button className="link-button small more-link" disabled={!!loading} onClick={load}>
+          {loading ? "Reading…" : "Read again"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row({ projectId, item, children }: { projectId: string; item: TrackedItem; children?: Record<string, StoredEpicChildren> }) {
+  const state = item.kind === "epic" ? item.state : (STATE_LABEL[item.state] ?? item.state);
+  const [open, setOpen] = useState(false);
+  const epicKey = item.kind === "epic" ? item.id.slice("epic:".length) : null;
+  return (
+    <li className={`tracking-item ${item.kind}${open ? " open" : ""}`}>
       <LinkIcon kind={item.kind === "epic" ? linkKind(item.url) : "github"} />
       <div className="tracking-main">
         <div className="tracking-title-line">
@@ -54,7 +116,13 @@ function Row({ projectId, item }: { projectId: string; item: TrackedItem }) {
           {item.detail && <span className="muted">{item.detail}</span>}
           {item.repo && item.kind !== "branch" && <span className="muted">{item.repo.split("/")[1]}</span>}
           {item.updatedAt && <span className="timestamp">{ago(item.updatedAt)}</span>}
+          {epicKey && (
+            <button className="link-button small more-link epic-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>
+              {open ? "Hide issues" : "Show issues"}
+            </button>
+          )}
         </div>
+        {epicKey && open && <EpicIssues epicKey={epicKey} stored={children?.[epicKey]} expected={item.total ?? (Number(item.detail?.match(/of (\d+) done/)?.[1]) || undefined)} />}
       </div>
       <RecheckButton projectId={projectId} item={item} />
     </li>
@@ -71,8 +139,10 @@ export function TrackingFeed({ projectId }: { projectId: string }) {
   const [github, setGithub] = useState<boolean | null>(null);
   const [all, setAll] = useState(false);
   const checking = useJobStatus(`tracking:${projectId}`);
+  const [children, setChildren] = useState<Record<string, StoredEpicChildren>>({});
   useEffect(() => {
     db.getProjectTracking().then((t) => setTracking(t[projectId] ?? null), () => setTracking(null));
+    db.getEpicChildren().then(setChildren, () => {});
   }, [projectId, version]);
   useEffect(() => {
     runCli("gh", ["auth", "status"]).then((out) => setGithub(out.code === 0), () => setGithub(false));
@@ -104,7 +174,7 @@ export function TrackingFeed({ projectId }: { projectId: string }) {
       ) : (
         <ul className="tracking-list">
           {shown.map((item) => (
-            <Row key={item.id} projectId={projectId} item={item} />
+            <Row key={item.id} projectId={projectId} item={item} children={children} />
           ))}
         </ul>
       )}

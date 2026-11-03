@@ -66,6 +66,46 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [1.0, 0.96, 0.95],
     ],
   },
+  // Ephedra's mist is her pastels: mint and sky when calm, through lilac to peach and rose.
+  aura: {
+    deep: [
+      [0.62, 0.88, 0.78],
+      [0.78, 0.72, 0.95],
+      [1.0, 0.66, 0.66],
+    ],
+    wisp: [
+      [0.9, 0.98, 0.95],
+      [0.94, 0.9, 1.0],
+      [1.0, 0.88, 0.86],
+    ],
+  },
+  // Edith's mist is her opal fire: sea green and blue when calm, through violet to warm coral.
+  opal: {
+    deep: [
+      [0.3, 0.75, 0.7],
+      [0.45, 0.45, 0.95],
+      [0.95, 0.45, 0.35],
+    ],
+    wisp: [
+      [0.8, 0.97, 0.95],
+      [0.84, 0.84, 1.0],
+      [1.0, 0.85, 0.8],
+    ],
+  },
+  // Penelope's mist is her green-yellow pool's color: lime when calm, warming toward a full yellow
+  // under stress, as the pool does.
+  resin: {
+    deep: [
+      [0.62, 0.9, 0.16],
+      [0.74, 0.9, 0.14],
+      [0.9, 0.9, 0.12],
+    ],
+    wisp: [
+      [0.88, 1.0, 0.7],
+      [0.92, 1.0, 0.68],
+      [1.0, 1.0, 0.7],
+    ],
+  },
 };
 
 const smooth = (e0: number, e1: number, x: number) => {

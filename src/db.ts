@@ -1,6 +1,6 @@
 import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
 import { foldProfile, projectName, type DiscoveryPlan, type ProjectChannel } from "./projects";
 import type { ProjectTracking } from "./jobs/tracking";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
@@ -266,7 +266,8 @@ type Store =
   | "blocker_checks"
   | "reminders"
   | "not_duplicates"
-  | "project_tracking";
+  | "project_tracking"
+  | "epic_children";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -327,6 +328,10 @@ export async function setPriorityOverride(taskId: string, priority: Priority | n
 /** Claude Code sessions Orb opened for tasks, keyed by task id. */
 /** Each project's tracking feed (epics, PRs, branches), by project id. */
 export const getProjectTracking = () => getRows<ProjectTracking>("project_tracking");
+/** An epic's child issues as last read from Jira, by epic key. */
+export type StoredEpicChildren = EpicChildren & { at: string };
+export const getEpicChildren = () => getRows<StoredEpicChildren>("epic_children");
+export const saveEpicChildren = (key: string, children: EpicChildren) => putRow("epic_children", key, { ...children, at: nowIso() });
 export const saveProjectTracking = (projectId: string, tracking: ProjectTracking) => putRow("project_tracking", projectId, tracking);
 
 export const getSessionLinks = () => getRows<SessionLink>("session_links");
@@ -680,22 +685,38 @@ export interface Lesson {
   updated_at: string;
 }
 
+/** A lesson's text, for spotting the same lesson twice (case, spacing and end punctuation aside). */
+const lessonKey = (text: string) => text.toLowerCase().replace(/\s+/g, " ").replace(/[.!\s]+$/, "").trim();
+
 export async function listLessons(): Promise<Lesson[]> {
   const rows = await (await db()).select<(Omit<Lesson, "evidence"> & { evidence: string })[]>("SELECT * FROM lessons ORDER BY scope, id");
-  return rows.map((r) => ({ ...r, evidence: json<number[]>(r.evidence) ?? [] }));
+  const lessons = rows.map((r) => ({ ...r, evidence: json<number[]>(r.evidence) ?? [] }));
+  // A learned lesson that only repeats one the user wrote is left out: theirs is the one that counts.
+  const yours = new Set(lessons.filter((l) => l.origin === "user").map((l) => lessonKey(l.text)));
+  return lessons.filter((l) => l.origin === "user" || !yours.has(lessonKey(l.text)));
 }
 
 /** Replaces the learned lessons with a new set; the ones the user wrote or edited stay as they are. */
 export async function replaceLearnedLessons(lessons: { scope: string; text: string; evidence: number[] }[]) {
   const d = await db();
   await d.execute("DELETE FROM lessons WHERE origin = 'learned'");
-  for (const l of lessons)
+  // Never one that repeats a lesson the user wrote.
+  const yours = new Set((await d.select<{ text: string }[]>("SELECT text FROM lessons WHERE origin = 'user'")).map((l) => lessonKey(l.text)));
+  for (const l of lessons.filter((x) => !yours.has(lessonKey(x.text))))
     await d.execute("INSERT INTO lessons (scope, text, evidence, origin, updated_at) VALUES ($1, $2, $3, 'learned', $4)", [
       l.scope,
       l.text,
       JSON.stringify(l.evidence),
       nowIso(),
     ]);
+}
+
+/** A lesson the user stated (in a chat); it's theirs, so distilling never rewrites it. */
+export async function addLesson(scope: string, text: string) {
+  const d = await db();
+  const have = await d.select<{ id: number }[]>("SELECT id FROM lessons WHERE scope = $1 AND lower(text) = lower($2)", [scope, text]);
+  if (have.length) return;
+  await d.execute("INSERT INTO lessons (scope, text, evidence, origin, updated_at) VALUES ($1, $2, '[]', 'user', $3)", [scope, text, nowIso()]);
 }
 
 /** The user's edit of a lesson; it's theirs from then on. */
