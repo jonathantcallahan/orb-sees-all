@@ -420,7 +420,7 @@ export function Settings({
               </SettingRow>
               <SettingRow
                 label="Ask why after a change"
-                hint="After you change a task or project, Demian can ask why, so it learns the reason. Skipped ones it works out for itself."
+                hint="After you change a task or project, Demian can ask why, so it learns the reason."
               >
                 <Segmented
                   label="Ask why after a change"
@@ -438,47 +438,41 @@ export function Settings({
                 />
               </SettingRow>
               <div ref={learnings} />
-              {notes.length > 0 && (
-                <div className="setting-row stacked">
-                  <div className="setting-text">
-                    <span className="setting-label">What Demian knows</span>
-                    <span className="setting-hint">Corrections you gave in the chat. Every refresh takes them into account.</span>
-                  </div>
-                  <ul className="notes-list">
-                    {notes.map((note, i) => (
-                      <li key={i} className="small">
-                        <span>{note}</span>
-                        <button
-                          className="icon-button"
-                          aria-label="Forget this"
-                          title="Forget this"
-                          onClick={async () => {
-                            const next = notes.filter((_, j) => j !== i);
-                            setNotes(next);
-                            setStandingNotes(next);
-                            await db.saveNotes(next);
-                          }}
-                        >
-                          <CloseIcon />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {lessons.length > 0 && (
+              {/* Everything Demian has learned, in one list: what you told the chat, then the lessons from your corrections. */}
+              {notes.length + lessons.length > 0 && (
                 <div className="setting-row stacked">
                   <button className="setting-text setting-toggle" onClick={() => setLessonsOpen(!lessonsOpen)} aria-expanded={lessonsOpen}>
                     <span className="setting-label">
-                      What Demian has learned <span className="timestamp">{lessons.length}</span>
+                      What Demian has learned <span className="timestamp">{notes.length + lessons.length}</span>
                       <svg className={`disclosure${lessonsOpen ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                         <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </span>
-                    <span className="setting-hint">Lessons from your corrections, used in every refresh, plan and message. Click one to reword it.</span>
+                    <span className="setting-hint">What you told the chat and lessons from your corrections, used in every refresh, plan and message. Click a lesson to reword it.</span>
                   </button>
                   <Reveal open={lessonsOpen}>
                     <ul className="notes-list">
+                      {notes.map((note, i) => (
+                        <li key={`note-${i}`} className="small">
+                          <span className="lesson">
+                            <span className="lesson-scope">You said</span>
+                            <span className="lesson-text" style={{ cursor: "default" }}>{note}</span>
+                          </span>
+                          <button
+                            className="icon-button"
+                            aria-label="Forget this"
+                            title="Forget this"
+                            onClick={async () => {
+                              const next = notes.filter((_, j) => j !== i);
+                              setNotes(next);
+                              setStandingNotes(next);
+                              await db.saveNotes(next);
+                            }}
+                          >
+                            <CloseIcon />
+                          </button>
+                        </li>
+                      ))}
                       {lessons.map((l) => (
                         <LessonRow key={l.id} lesson={l} projects={projects} onChange={reloadLessons} />
                       ))}
@@ -558,6 +552,8 @@ export function Settings({
             </Reveal>
           </section>
 
+          {/* For working on setup; hidden in released builds. */}
+          {import.meta.env.DEV && (
           <section className="settings-section">
             <div className="settings-group">
               <SettingRow label="Simulate onboarding" hint="Walk through the first-run screens as a new user sees them: each step missing in turn, then passing. Nothing is installed or changed.">
@@ -567,6 +563,7 @@ export function Settings({
               </SettingRow>
             </div>
           </section>
+          )}
         </div>
       </div>
     </div>,

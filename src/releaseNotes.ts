@@ -11,6 +11,11 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.8",
+    date: "2026-11-03",
+    notes: ["Settings shows everything Demian has learned in one list: what you told the chat and the lessons from your corrections."],
+  },
+  {
     version: "0.6.7",
     date: "2026-11-03",
     notes: [
