@@ -1,3 +1,4 @@
+import { withUpdate, type WatchedOutcome, type WatchedStatus, type WatchedTopic, type WatchedUpdate } from "./watched";
 import type { SessionLink } from "./sessions";
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
@@ -239,6 +240,103 @@ export async function updateProjectConfig(channelId: string, cfg: { hidden: bool
   );
 }
 
+// ---- watched topics
+
+type WatchedRow = { id: string; topic: string; details: string | null; project_id: string | null; outcomes: string; status: string | null; history: string | null; checked_at: string | null; created_at: string };
+const parseJson = <T>(raw: string | null, fallback: T): T => {
+  try {
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+export async function listWatchedTopics(): Promise<WatchedTopic[]> {
+  const rows = await (await db()).select<WatchedRow[]>("SELECT * FROM watched_topics ORDER BY created_at DESC");
+  return rows.map((r) => {
+    const status = parseJson<WatchedStatus | null>(r.status, null);
+    const history = parseJson<WatchedUpdate[]>(r.history, []);
+    return {
+      id: r.id,
+      topic: r.topic,
+      details: r.details,
+      projectId: r.project_id,
+      outcomes: parseJson<WatchedOutcome[]>(r.outcomes, []),
+      status,
+      // A topic checked before updates were kept starts with its latest one.
+      history: history.length || !status ? history : [{ ...status, at: r.checked_at ?? r.created_at }],
+      checkedAt: r.checked_at,
+      createdAt: r.created_at,
+    };
+  });
+}
+
+export async function addWatchedTopic(topic: string, details: string | null, outcomes: WatchedOutcome[], projectId: string | null = null): Promise<string> {
+  const id = `watch:${crypto.randomUUID()}`;
+  await (await db()).execute("INSERT INTO watched_topics (id, topic, details, outcomes, created_at, project_id) VALUES ($1, $2, $3, $4, $5, $6)", [
+    id,
+    topic,
+    details,
+    JSON.stringify(outcomes),
+    nowIso(),
+    projectId,
+  ]);
+  return id;
+}
+
+export async function getWatchedTopic(id: string): Promise<WatchedTopic | null> {
+  return (await listWatchedTopics()).find((t) => t.id === id) ?? null;
+}
+
+/**
+ * Changes only the fields given: Edit sends the title, details and project; a Discuss chat its
+ * conditional actions. So a check that finishes while the form is open keeps what it found.
+ */
+export async function updateWatchedTopic(id: string, f: { topic?: string; details?: string | null; projectId?: string | null; outcomes?: WatchedOutcome[] }) {
+  const sets: string[] = [];
+  const values: unknown[] = [id];
+  const set = (column: string, value: unknown) => {
+    values.push(value);
+    sets.push(`${column} = $${values.length}`);
+  };
+  if (f.topic !== undefined) set("topic", f.topic);
+  if (f.details !== undefined) set("details", f.details);
+  if (f.projectId !== undefined) set("project_id", f.projectId);
+  if (f.outcomes !== undefined) set("outcomes", JSON.stringify(f.outcomes));
+  if (!sets.length) return;
+  await (await db()).execute(`UPDATE watched_topics SET ${sets.join(", ")} WHERE id = $1`, values);
+}
+
+/** Saves a check's result: the topic's status, and what it found for each outcome it looked into. */
+export async function saveWatchedCheck(id: string, status: WatchedStatus, found: { id: string; occurred: boolean; evidence?: string | null; link?: string | null }[]) {
+  const topic = await getWatchedTopic(id);
+  if (!topic) return;
+  const outcomes = topic.outcomes.map((o) => {
+    const f = found.find((x) => x.id === o.id);
+    // Once seen, an event stays seen: a later check that misses it doesn't undo it.
+    return f && !o.occurred ? { ...o, occurred: f.occurred, evidence: f.evidence ?? null, link: f.link ?? null } : o;
+  });
+  const at = nowIso();
+  await (await db()).execute("UPDATE watched_topics SET status = $2, outcomes = $3, checked_at = $4, history = $5 WHERE id = $1", [
+    id,
+    JSON.stringify(status),
+    JSON.stringify(outcomes),
+    at,
+    JSON.stringify(withUpdate(topic.history, { ...status, at })),
+  ]);
+}
+
+/** Records the task made from an outcome. */
+export async function setOutcomeTask(id: string, outcomeId: string, taskId: string) {
+  const topic = await getWatchedTopic(id);
+  if (!topic) return;
+  const outcomes = topic.outcomes.map((o) => (o.id === outcomeId ? { ...o, taskId } : o));
+  await (await db()).execute("UPDATE watched_topics SET outcomes = $2 WHERE id = $1", [id, JSON.stringify(outcomes)]);
+}
+
+/** Where the last list of conditional actions a topic's Discuss chat wrote is kept, so it's applied once. */
+export const watchedActionsKey = (id: string) => `watch_actions_applied:${id}`;
+
 // ---- settings and key/value snapshots
 
 export async function getSetting(key: string): Promise<string | null> {
@@ -296,7 +394,8 @@ type Store =
   | "reminders"
   | "not_duplicates"
   | "project_tracking"
-  | "epic_children";
+  | "epic_children"
+  | "merged_from";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -429,15 +528,29 @@ export async function addTaskAlias(ref: string, taskId: string, how: "refined" |
   await conn.execute("UPDATE task_sources SET task_id = $1 WHERE task_id = $2", [canonical, ref]);
 }
 
+/** A task folded into another, kept under the kept task's id so its card can say so and Separate can undo it. */
+export interface MergedTask {
+  id: string;
+  title: string;
+  at: string;
+}
+
+/** What was merged into each task, by the kept task's id. */
+export const getMergedFrom = () => getRows<MergedTask[]>("merged_from");
+
 /**
  * Merges task `dropId` into `keepId` (both canonical ids): drop becomes another source of keep, so
  * it folds into keep's card everywhere. Keep's own data stands; anything it lacks that drop had (a
- * priority you set, a session, an edited or refined description, a plan, a Today slot) carries over.
+ * priority you set, a session, an edited or refined description, a plan, a Today slot) carries over,
+ * copied rather than moved, so separating them again leaves drop as it was. `dropTitle` is kept with
+ * the merge, for the card's "Merged in" note.
  */
-export async function mergeTasks(keepId: string, dropId: string) {
+export async function mergeTasks(keepId: string, dropId: string, dropTitle: string) {
   if (keepId === dropId) return;
   const conn = await db();
   await addTaskAlias(dropId, keepId, "merged");
+  const merged = (await getMergedFrom())[keepId] ?? [];
+  await putRow("merged_from", keepId, [...merged.filter((m) => m.id !== dropId), { id: dropId, title: dropTitle, at: nowIso() }]);
   await conn.execute(
     `INSERT OR IGNORE INTO task_data (store, task_id, value, updated_at)
      SELECT store, $1, value, $3 FROM task_data
@@ -451,6 +564,19 @@ export async function mergeTasks(keepId: string, dropId: string) {
   const states = await getTaskStates();
   const dropToday = states.get(dropId)?.todayOn;
   if (dropToday && !states.get(keepId)?.todayOn) await setTaskState(keepId, { todayOn: dropToday });
+}
+
+/**
+ * Undoes a merge: `dropId` is its own task again (its data was copied into keep, not moved, so it's
+ * all still there), and the pair is remembered as different work, so neither a refresh nor the
+ * merge pass joins them again. Sources a refresh had folded into drop before the merge stay with keep.
+ */
+export async function separateTasks(keepId: string, dropId: string) {
+  await (await db()).execute("DELETE FROM task_sources WHERE ref = $1 AND task_id = $2", [dropId, keepId]);
+  await markNotDuplicate(keepId, dropId);
+  const rest = ((await getMergedFrom())[keepId] ?? []).filter((m) => m.id !== dropId);
+  if (rest.length) await putRow("merged_from", keepId, rest);
+  else await deleteRow("merged_from", keepId);
 }
 
 /** Pairs the user said aren't duplicates, as "a|b" with a < b. */
@@ -530,6 +656,11 @@ export async function retitleManualTask(id: string, title: string, original: str
   if (briefs[id]) return;
   briefs[id] = original;
   await setSetting("task_briefs", JSON.stringify(briefs));
+}
+
+/** Gives a task of the user's own a description, only if it still has none. */
+export async function describeManualTaskIfEmpty(id: string, description: string) {
+  await (await db()).execute("UPDATE manual_tasks SET description = $1 WHERE id = $2 AND (description IS NULL OR trim(description) = '')", [description, id]);
 }
 
 export async function updateManualTask(id: string, fields: { title: string; description: string | null }) {

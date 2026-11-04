@@ -11,6 +11,19 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.10",
+    date: "2026-11-04",
+    notes: [
+      "Watched topics, in a tab of their own: tell Demian what to keep an eye on, and what to do if something happens or doesn't happen by a date. It checks each topic every refresh, keeps a list of updates with their sources, and offers Create and open task when an action is ready. Discuss a topic to change its actions, or hover it and click ↻ to check just that one.",
+      "Messages you send yourself in Slack with #demian can do anything the Demian chat can: add a task, watch a topic, create or change a project, add context to a project or task. Demian replies in the message's thread with what it did. It's off until you turn it on in Settings, and checks every 5 minutes.",
+      "Tasks that are the same work are merged into one, after each refresh and when you add a task. A merged task says what was merged into it, and Separate undoes it.",
+      "Task titles stay short, with the detail in the description; long titles you wrote are shortened once, keeping your text as the brief.",
+      "A blocked step marks its task blocked. Meeting prep is its own source in the task filters. Times show only for today; earlier days show just the day.",
+      "Settings explains each option in a tooltip.",
+      "Fixes: the bottom border of calendar events, and the calendar scrolling away from now early in the morning.",
+    ],
+  },
+  {
     version: "0.6.9",
     date: "2026-11-03",
     notes: [

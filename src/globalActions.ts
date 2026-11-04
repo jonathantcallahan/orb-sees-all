@@ -6,7 +6,7 @@
  */
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, checkBlocker, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading } from "./jobs";
+import { assessPendingTasks, checkBlocker, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
 import { projectContext, projectName } from "./projects";
 import { blockerKey } from "./tasks";
 import { setUserProfile } from "./prompts";
@@ -19,6 +19,21 @@ const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 type Names = (id: string) => string;
 /** A project's blocker or active item, by project and item id, as the project shows it; null if it isn't there. */
 type Items = (projectId: string, itemId: string) => string | null;
+
+/** Names for describing changes: projects, channels, and a project's open items, from the projects as they are now. */
+export function actionNames(projects: db.Project[]): { project: Names; channel: Names; item: Items } {
+  return {
+    project: (id) => {
+      const p = projects.find((x) => x.channel_id === id);
+      return p ? projectName(p) : id;
+    },
+    channel: (id) => projects.flatMap((p) => p.channels).find((c) => c.channel_id === id)?.name ?? id,
+    item: (projectId, itemId) => {
+      const s = projects.find((x) => x.channel_id === projectId)?.snapshot;
+      return [...(s?.blockers ?? []), ...(s?.active ?? [])].find((b) => b.id === itemId)?.what ?? null;
+    },
+  };
+}
 
 const channelList = (names: string[]) => names.map((n) => `#${n.replace(/^#/, "")}`).join(", ");
 
@@ -67,6 +82,10 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
       ]
         .filter(Boolean)
         .join(", ");
+    case "add_task_context":
+      return `Add to "${a.title ?? "this task"}": ${a.text}`;
+    case "watch_topic":
+      return `Watch: ${a.text}`;
     case "plan_today":
       return a.today ? `Move "${a.title ?? "this task"}" into Today's tasks` : `Take "${a.title ?? "this task"}" off Today's tasks`;
     case "set_task_status":
@@ -78,6 +97,21 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
         ? `Refresh "${project(a.project_id)}"`
         : { all: "Refresh everything", project: "Refresh the project", briefing: "Rebuild the daily briefing", calendar: "Refresh the calendar", tasks: "Refresh tasks and inbox" }[a.what];
   }
+}
+
+/**
+ * A Slack, email, project or meeting-prep task's own description, by id: null when it has none,
+ * undefined when no such task is on the board now.
+ */
+async function taskDescription(taskId: string): Promise<string | null | undefined> {
+  const [projects, adhoc, calendar] = await Promise.all([db.listProjects(), db.getAdhoc(), db.getCalendarDay(localDate(new Date()))]);
+  const found =
+    projects.flatMap((p) => p.snapshot?.my_tasks ?? []).find((t) => t.id === taskId) ??
+    adhoc.tasks.find((t) => t.id === taskId) ??
+    (calendar?.day.events ?? []).flatMap((ev) => ev.prep).find((p) => p.id === taskId);
+  if (!found) return undefined;
+  // Meeting prep has no description of its own.
+  return (found as { description?: string | null }).description ?? null;
 }
 
 const STATUS_WORDS = { blocked: "blocked", at_risk: "at risk", on_track: "on track", idle: "idle" } as const;
@@ -214,6 +248,30 @@ async function apply(a: GlobalAction): Promise<string> {
       quiet(assessPendingTasks());
       // Its id, so the chat can change it in later cards without waiting for the task list.
       return `Added "${a.title}" to your tasks${a.today ? ", in Today's tasks" : ""} (id ${id}).`;
+    }
+    case "add_task_context": {
+      const text = a.text.trim();
+      const add = (current: string | null | undefined) => (current?.trim() ? `${current.trim()}\n\n${text}` : text);
+      const mine = (await db.listManualTasks()).find((t) => t.id === a.task_id);
+      if (mine) {
+        // As the card's description edit does: the old assessment was of the old text, so it's done again.
+        await db.updateManualTask(mine.id, { title: mine.title, description: add(mine.description) });
+        await db.clearAssessment(mine.id);
+        quiet(assessPendingTasks());
+        return "Added to its description; it's being looked at again with it.";
+      }
+      // Other tasks are rewritten by each refresh, so the description goes in as the user's edit of
+      // the one the card shows (their earlier edit, else the refreshed one, else the original).
+      const original = await taskDescription(a.task_id);
+      if (original === undefined) throw new Error("That task isn't on your list any more");
+      const [overrides, refined] = await Promise.all([db.getDescriptionOverrides(), db.getRefinedDescriptions()]);
+      await db.saveDescriptionOverride(a.task_id, add(overrides[a.task_id] ?? refined[a.task_id] ?? original));
+      return "Added to its description.";
+    }
+    case "watch_topic": {
+      // As the Watched topics box does: added at once, then filled in (title, project, conditional actions) and checked.
+      await watchFromText(a.text.trim());
+      return "Watching it; it's in Watched topics, being filled in and checked.";
     }
     case "plan_today":
       await db.setTaskState(a.task_id, { todayOn: a.today ? localDate(new Date()) : null });

@@ -7,6 +7,7 @@ import { NO_FILTER, NO_PROJECT_FILTER, type AssistanceFilter, type DueFilter, ty
 const SOURCES: [TaskSource, string][] = [
   ["project", "Projects"],
   ["request", "Requests"],
+  ["meeting", "Meeting prep"],
   ["own", "Ungrouped"],
 ];
 

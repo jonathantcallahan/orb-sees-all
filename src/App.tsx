@@ -14,6 +14,8 @@ import { WhyPrompt } from "./components/WhyPrompt";
 import { isWindows, MOD } from "./platform";
 import { ProjectCard, ProjectDetail } from "./components/ProjectCard";
 import { revealTask } from "./components/TaskCard";
+import { WatchedTopics } from "./components/WatchedTopics";
+import { needsYou } from "./watched";
 import { Inbox } from "./components/Inbox";
 import { ChatDockProvider } from "./components/chatDock";
 import { useDetailTab, type DetailTab } from "./viewMode";
@@ -22,9 +24,9 @@ import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
 import { getNotes, getSetting, markInterruptedJobs, setSetting } from "./db";
 import { setStandingNotes } from "./claude";
-import { maybeDistill, maybeRunMorning, refreshAll } from "./jobs";
+import { maybeDistill, maybeRunMorning, pollSelfDm, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
-import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
+import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, stateOf, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
 import { projectStatus, projectName } from "./projects";
 import { useTheme } from "./theme";
@@ -48,6 +50,10 @@ function useScheduler() {
     // The Rust side emits a tick every minute, which reaches the webview even
     // while the window is hidden; the interval and focus check are backups.
     const interval = setInterval(check, 60_000);
+    // Your own Slack DM, for messages tagged #demian: checked every few minutes once turned on in Settings (see pollSelfDm).
+    const pollDm = () => pollSelfDm().catch(() => {});
+    pollDm();
+    const dmInterval = setInterval(pollDm, 30_000);
     const onVisible = () => document.visibilityState === "visible" && check();
     document.addEventListener("visibilitychange", onVisible);
     const unlisteners = [listen("scheduler-tick", check), listen("tray-refresh-all", refreshAllSafely)];
@@ -71,6 +77,7 @@ function useScheduler() {
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       clearInterval(interval);
+      clearInterval(dmInterval);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("wheel", onWheel);
@@ -162,6 +169,8 @@ export default function App() {
 
   if (!data) return <div className="loading">Loading…</div>;
 
+  // Watched topics that need you (an action ready, or set to Human): a dot on their area's icon.
+  const watchedNeedYou = data.watched.filter((t) => needsYou(t, stateOf(data.taskStates, t.id))).length;
   const projects = data.projects
     .filter((p) => !p.hidden)
     .sort((a, b) =>
@@ -232,11 +241,23 @@ export default function App() {
         <OrbGlow look={orbLook} level={load.level} />
         <TodayColumn pressure={load} orbLook={orbLook} working={running.length > 0} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
         <nav className="detail-rail" aria-label="Areas">
-          {DETAIL_TABS.map(({ id, label, rects }) => (
-            <button key={id} className={`detail-tab${tab === id ? " on" : ""}`} onClick={() => setTab(id)} title={label} aria-label={label} aria-current={tab === id ? "page" : undefined}>
-              {viewIcon(rects, tab !== id, 18)}
-            </button>
-          ))}
+          {DETAIL_TABS.map(({ id, label, rects, paths }) => {
+            // A watched topic that needs you puts a dot on its area's icon.
+            const dot = id === "watched" && watchedNeedYou > 0;
+            return (
+              <button
+                key={id}
+                className={`detail-tab${tab === id ? " on" : ""}`}
+                onClick={() => setTab(id)}
+                title={label}
+                aria-label={dot ? `${label}, ${watchedNeedYou} need you` : label}
+                aria-current={tab === id ? "page" : undefined}
+              >
+                {viewIcon(rects, tab !== id, 18, paths)}
+                {dot && <span className="tab-dot" aria-hidden />}
+              </button>
+            );
+          })}
         </nav>
         <div className="detail-panel">
           {tab === "updates" && (
@@ -261,6 +282,19 @@ export default function App() {
               </div>
             </ChatDockProvider>
           )}
+          {tab === "watched" && (
+            <WatchedTopics
+              topics={data.watched}
+              projects={projects.map((p) => ({ id: p.channel_id, name: projectName(p) }))}
+              states={data.taskStates}
+              running={running}
+              onViewTask={(id) => {
+                revealTask(id);
+                setTab("tasks");
+              }}
+              onChange={reload}
+            />
+          )}
           {tab === "tasks" && (
             <TaskColumn
           adhoc={data.adhoc}
@@ -281,6 +315,7 @@ export default function App() {
           refinedDescriptions={data.refinedDescriptions}
           taskBriefs={data.taskBriefs}
           notDuplicates={data.notDuplicates}
+          mergedFrom={data.mergedFrom}
           running={running}
           sideBySide
           headerExtra={<PressureBars pressure={load} />}
@@ -388,9 +423,10 @@ export default function App() {
 /**
  * The Detail view's areas, in the rail's order, each drawn like the layout icons (filled for the area
  * you're in, outlined for the others): Updates, one square split into three bands; Tasks, four small
- * squares making a larger one; Projects, a single square.
+ * squares making a larger one; Projects, a single square; Watched topics, a square split along its
+ * diagonal. An area with something waiting on you has a dot at its top right.
  */
-const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[] }[] = [
+const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[]; paths?: string[] }[] = [
   {
     id: "updates",
     label: "Updates",
@@ -411,6 +447,14 @@ const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[] }[] = [
     ],
   },
   { id: "projects", label: "Projects", rects: [[1, 1, 12, 12, 1.6]] },
+  {
+    id: "watched",
+    label: "Watched topics",
+    rects: [],
+    // A square with its top right corner cut off, the corner sitting apart as a small triangle.
+    // A square split along its diagonal into two halves, every corner rounded, the cut's too.
+    paths: ["M3 1H11.4Q13 1 13 2.6V11Q13 11.9 12.36 11.26L2.74 1.64Q2.1 1 3 1Z", "M1 3V11.4Q1 13 2.6 13H11Q11.9 13 11.26 12.36L1.64 2.74Q1 2.1 1 3Z"],
+  },
 ];
 
 type Rect = [x: number, y: number, w: number, h: number, r: number];
@@ -419,7 +463,7 @@ type Rect = [x: number, y: number, w: number, h: number, r: number];
  * A rail icon: filled for the area you're in; for the others, outlines drawn inside each block's
  * edge (inset by half the stroke), so neighboring blocks keep their gaps.
  */
-function viewIcon(rects: Rect[], outlined: boolean, size = 14) {
+function viewIcon(rects: Rect[], outlined: boolean, size = 14, paths: string[] = []) {
   // The outline is 1 screen pixel whatever size the icon is drawn at.
   const stroke = 14 / size;
   const inset = outlined ? stroke / 2 : 0;
@@ -436,6 +480,18 @@ function viewIcon(rects: Rect[], outlined: boolean, size = 14) {
           fill={outlined ? "none" : "currentColor"}
           stroke={outlined ? "currentColor" : "none"}
           strokeWidth={stroke}
+        />
+      ))}
+      {paths.map((d, i) => (
+        // An outlined path is drawn a little smaller about the center, so its stroke stays inside like a rect's.
+        <path
+          key={`p${i}`}
+          d={d}
+          transform={outlined ? `translate(7 7) scale(${(12 - stroke) / 12}) translate(-7 -7)` : undefined}
+          fill={outlined ? "none" : "currentColor"}
+          stroke={outlined ? "currentColor" : "none"}
+          strokeWidth={outlined ? stroke / ((12 - stroke) / 12) : 0}
+          strokeLinejoin="round"
         />
       ))}
     </svg>

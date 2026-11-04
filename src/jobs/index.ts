@@ -5,13 +5,16 @@ import * as db from "../db";
 import { createDocPrompt, createEventPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { approvedPlanMessage, globalChatPrompt } from "../openInClaude";
 import { linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
-import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
-import { blockerKey } from "../tasks";
+import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
+import { parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmOutcome } from "../selfDm";
+import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, GlobalAction, SameWork, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { blockerKey, longTitled, stateOf } from "../tasks";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { codeFor, codeNote, githubReposOf, projectOfTask } from "../code";
+import { acceptedMerges } from "../duplicates";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
@@ -311,6 +314,268 @@ export function refreshCalendar(): Promise<void> {
   );
 }
 
+/** Reads what the user wrote about a topic to watch into its fields. No tools: it only reads their words. */
+export async function parseWatchedEntry(text: string): Promise<WatchedEntry> {
+  const projects = (await db.listProjects()).filter((p) => !p.hidden).map((p) => ({ id: p.channel_id, name: projectName(p) }));
+  const { data } = await runClaude({ prompt: watchedEntryPrompt(text, new Date(), projects), schema: WatchedEntry, tools: [], model: "sonnet", maxTurns: 2 });
+  // Only a project they have: an id Claude made up is dropped.
+  return { ...data, project_id: projects.some((p) => p.id === data.project_id) ? data.project_id : null };
+}
+
+/**
+ * Watches a topic from what the user wrote: it's added at once (titled with their words), then
+ * Demian fills in its fields from them and checks it. If filling in fails, it stays as written.
+ * Filling in is one quick call with no tools, so it takes no slot in the queue: a refresh under way
+ * doesn't keep the card on "Generating title…".
+ */
+export async function watchFromText(text: string): Promise<string> {
+  const id = await db.addWatchedTopic(text, null, []);
+  bump();
+  track(
+    `watchfill:${id}`,
+    async (status) => {
+      status("Filling in your watched topic");
+      try {
+        const f = await parseWatchedEntry(text);
+        await db.updateWatchedTopic(id, {
+          topic: f.topic.trim() || text,
+          details: f.details?.trim() || null,
+          projectId: f.project_id ?? null,
+          outcomes: f.outcomes.map((o) => ({ id: crypto.randomUUID(), when: o.when, event: o.event, by: o.when === "not_by" ? (o.by ?? null) : null, then: o.then })),
+        });
+      } catch {
+        // Left as they wrote it; they can fill it in with Edit.
+      } finally {
+        bump();
+      }
+    },
+    false,
+  )
+    .then(() => checkWatchedTopic(id))
+    .catch(() => {});
+  return id;
+}
+
+/**
+ * Takes the conditional actions a topic's Discuss chat wrote (its "[orb] plan" lines) as the topic's
+ * own, once per new list, read against the topic as it is now. Lines it can't read change nothing.
+ * Returns whether anything changed.
+ */
+export async function applyDiscussedActions(id: string, lines: string[]): Promise<boolean> {
+  const topic = await db.getWatchedTopic(id);
+  if (!topic) return false;
+  const outcomes = actionsFromPlan(topic.outcomes, lines);
+  if (!outcomes) return false;
+  const key = db.watchedActionsKey(id);
+  const sig = lines.join("\n");
+  if ((await db.getSetting(key)) === sig) return false;
+  await db.updateWatchedTopic(id, { outcomes });
+  await db.setSetting(key, sig);
+  bump();
+  checkWatchedTopic(id).catch(() => {});
+  return true;
+}
+
+/** Checks one watched topic: its status, and whether each outcome it's still waiting on has happened. */
+export function checkWatchedTopic(id: string): Promise<void> {
+  return track(`watch:${id}`, (status) =>
+    logged("watch", id, async () => {
+      const topic = await db.getWatchedTopic(id);
+      if (!topic) return { value: undefined };
+      const project = topic.projectId ? (await db.listProjects()).find((p) => p.channel_id === topic.projectId) : null;
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: watchedTopicPrompt({
+          userId: await db.getSetting("slack_user_id"),
+          today: localDate(new Date()),
+          topic: topic.topic,
+          details: topic.details,
+          project: project ? { name: projectName(project), channels: activeChannels(project).map((c) => `#${c.name} (${c.channel_id})`) } : null,
+          checkedAt: topic.checkedAt,
+          lastSummary: topic.status?.summary ?? null,
+          outcomes: openOutcomes(topic).map((o) => ({ id: o.id, event: o.event, by: o.by })),
+        }),
+        schema: WatchedCheck,
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead],
+        // A focused look at one topic: the cheaper model is plenty.
+        model: "sonnet",
+        maxTurns: 30,
+      });
+      await db.saveWatchedCheck(id, { summary: data.summary, links: data.links.slice(0, 3) }, data.outcomes);
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/**
+ * Checks every topic still watched (not done, not unwatched), so each shows where it stands now;
+ * conditional actions are only looked into while still open.
+ */
+export async function checkWatchedTopics(): Promise<void> {
+  const states = await db.getTaskStates();
+  const topics = (await db.listWatchedTopics()).filter((t) => stillWatched(stateOf(states, t.id)));
+  await Promise.allSettled(topics.map((t) => checkWatchedTopic(t.id)));
+}
+
+let selfDmBusy = false;
+let selfDmLastRun = 0;
+
+/**
+ * Checks the user's own Slack DM for messages tagged #demian and does what each asks: anything the
+ * global chat can do (add a task, watch a topic, create or change a project, add context, ...),
+ * applied at once through applyAction, since tagging the message is the instruction. Then each
+ * message gets a reaction and a reply in its thread with what was done, or a question when Demian
+ * couldn't tell. The read only reads, and the reply text is the app's own account of what happened,
+ * posted as written. Runs outside the job queue and the status line, since it runs every few
+ * minutes: it never holds up a refresh, and the refresh log gets an entry only when it acts on
+ * something or starts failing.
+ */
+export async function pollSelfDm(now = new Date()): Promise<void> {
+  if (selfDmBusy) return;
+  const every = selfDmEvery(await db.getSetting("self_dm_every"));
+  if (every === "off" || now.getTime() - selfDmLastRun < Number(every) * 1000 - 2000) return;
+  const uid = await db.getSetting("slack_user_id");
+  if (!uid) return;
+  selfDmBusy = true;
+  selfDmLastRun = now.getTime();
+  const state = parseSelfDmState(await db.getSetting("self_dm_state"));
+  const oldest = selfDmOldest(state, now);
+  try {
+    const read = await runClaude({
+      prompt: selfDmPrompt(uid, oldest),
+      schema: SelfDmPoll,
+      tools: TOOLS.selfDmRead,
+      // A mechanical read, every few minutes: the cheapest model.
+      model: "haiku",
+      maxTurns: 8,
+    });
+    const { messages, state: next } = takeFromPoll(state, read.data, oldest, now, read.costUsd);
+    if (messages.length === 0) {
+      await db.setSetting("self_dm_state", JSON.stringify(next));
+      return;
+    }
+    // What each message asks for, against what the planner shows now (the global chat's context, with ids).
+    let asked: Awaited<ReturnType<typeof runClaude<SelfDmActions>>>;
+    try {
+      asked = await runClaude({
+        prompt: selfDmActionsPrompt(messages, await globalContext(undefined)),
+        schema: SelfDmActions,
+        tools: TOOLS.slackRead,
+        model: "sonnet",
+        maxTurns: 20,
+      });
+    } catch (e) {
+      // Tried again next check, from the same place; after a few failures in a row the messages are
+      // skipped, so a message Demian can't work out isn't retried forever. (A failed read doesn't count.)
+      const error = (e as Error).message;
+      const tries = state.tries + 1;
+      if (tries < SELF_DM_TRIES) {
+        if (error !== state.lastError) await db.logFinish(await db.logStart("selfdm", null), { error });
+        await db.setSetting("self_dm_state", JSON.stringify({ ...state, lastError: error, tries }));
+        return;
+      }
+      await db.logFinish(await db.logStart("selfdm", `Skipped ${messages.length} from your DM after ${tries} tries`), { error });
+      await db.setSetting("self_dm_state", JSON.stringify({ ...next, lastError: error }));
+      return;
+    }
+    // globalActions imports from this module, so it's loaded when first needed rather than at the top.
+    const { actionNames, applyAction, describeAction } = await import("../globalActions");
+    const names = actionNames(await db.listProjects());
+    const outcomes: SelfDmOutcome[] = [];
+    let addedTask = false;
+    for (const m of messages) {
+      const result = asked.data.results.find((r) => r.ts === m.ts);
+      const changes: SelfDmOutcome["changes"] = [];
+      for (const raw of result?.actions ?? []) {
+        const parsed = GlobalAction.safeParse(raw);
+        if (!parsed.success) {
+          changes.push({ ok: false, line: "Couldn't read one of the changes, so it wasn't made." });
+          continue;
+        }
+        const a = parsed.data;
+        try {
+          changes.push({ ok: true, line: await applyAction(a, m.text, describeAction(a, names.project, names.channel, names.item)) });
+          if (a.type === "add_task") addedTask = true;
+        } catch (e) {
+          changes.push({ ok: false, line: `Couldn't ${lowerFirst(describeAction(a, names.project, names.channel, names.item))}: ${(e as Error).message}` });
+        }
+      }
+      outcomes.push({ ts: m.ts, changes, question: result?.question?.trim() || null });
+    }
+    // Acted on: from here they're never read again, even if the reply below fails.
+    await db.setSetting("self_dm_state", JSON.stringify({ ...next, usd: next.usd + asked.costUsd }));
+    bump();
+    if (addedTask) assessPendingTasks().catch(() => {});
+    const done = outcomes.flatMap((o) => o.changes.filter((c) => c.ok).map((c) => c.line));
+    const log = await db.logStart("selfdm", `${messages.length} from your DM${done.length ? `: ${done.join(" ").slice(0, 200)}` : ""}`);
+    let replyCost = 0;
+    try {
+      const replies = selfDmReplies(outcomes);
+      const replied = await runClaude({ prompt: selfDmReplyPrompt(uid, replies), schema: SelfDmReplied, tools: TOOLS.selfDmReply, model: "haiku", maxTurns: replies.length * 2 + 2 });
+      replyCost = replied.costUsd;
+    } catch {
+      // The changes are made; the messages just aren't answered in Slack.
+    }
+    await db.logFinish(log, { costUsd: read.costUsd + asked.costUsd + replyCost });
+  } catch (e) {
+    // Nothing was acted on: the state stays where it was, so the next check reads the same messages again.
+    const message = (e as Error).message;
+    if (message !== state.lastError) {
+      const log = await db.logStart("selfdm", null);
+      await db.logFinish(log, { error: message });
+    }
+    await db.setSetting("self_dm_state", JSON.stringify({ ...state, lastError: message }));
+  } finally {
+    selfDmBusy = false;
+  }
+}
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
+/**
+ * Once: shortens the titles of the user's own tasks that run long, written before titles had a
+ * length rule. The original text stays as the task's brief (see retitleManualTask), and becomes its
+ * description when it has none, so nothing the user wrote is lost. Only a title still as it was is
+ * changed.
+ */
+export async function shortenLongTitles(): Promise<void> {
+  if (await db.getSetting("titles_shortened")) return;
+  const states = await db.getTaskStates();
+  const long = longTitled((await db.listManualTasks()).filter((t) => !states.get(t.id)?.done && !states.get(t.id)?.dismissed));
+  if (long.length) {
+    await logged("titles", `${long.length} tasks`, async () => {
+      const { data, costUsd } = await runClaude({
+        prompt: shortenTitlesPrompt(long.map((t) => ({ id: t.id, title: t.title }))),
+        schema: ShortTitles,
+        tools: [],
+        model: "sonnet",
+        maxTurns: 2,
+      });
+      for (const { id, title } of data.titles) {
+        const t = long.find((x) => x.id === id);
+        const short = title.trim();
+        if (!t || !short || short.length >= t.title.trim().length) continue;
+        await db.retitleManualTask(id, short, t.title);
+        await db.describeManualTaskIfEmpty(id, t.title);
+      }
+      return { value: undefined, costUsd };
+    });
+  }
+  await db.setSetting("titles_shortened", new Date().toISOString());
+}
+
+/**
+ * Given on every turn of a watched topic's chat, in place of a task's step list: the session-wide
+ * instructions are about tasks and their plans, and this chat's "plan" is the topic's conditional
+ * actions, in their own form.
+ */
+const WATCH_CHAT_CONTEXT = [
+  "This chat is about a topic I'm watching in my planner, not a task: there are no steps to carry out or report on, so write no `[orb] step` lines.",
+  "Its plan is the topic's conditional actions. When we agree to add, change or remove one, write the whole list as an `[orb] plan` block, one numbered line per action in exactly this form, and nothing else in the block:",
+  "`If <what happens> | hasn't happened by YYYY-MM-DD | then <what to do>` or `If <what happens> | has happened | then <what to do>`.",
+  "No [Me] markers and no task-style steps. My planner takes that list as the topic's actions and hides the block, so say in a sentence what changed.",
+].join(" ");
+
 /** Tasks per Claude call when assessing the user's own tasks. */
 const ASSESS_BATCH = 12;
 
@@ -320,6 +585,8 @@ const ASSESS_BATCH = 12;
  * rechecks between them, so tasks added mid-run are picked up.
  */
 export function assessPendingTasks(): Promise<void> {
+  // Tasks seen for the first time this run: once assessed, checked against the rest for the same work.
+  const fresh = new Set<string>();
   return track("assess", async (status) => {
     // Each task gets one try per run, so a result that still lacks steps can't loop forever.
     const tried = new Set<string>();
@@ -336,7 +603,10 @@ export function assessPendingTasks(): Promise<void> {
       );
       if (pending.length === 0) return;
       const batch = pending.slice(0, ASSESS_BATCH);
-      for (const t of batch) tried.add(t.id);
+      for (const t of batch) {
+        tried.add(t.id);
+        if (!assessed.has(t.id)) fresh.add(t.id);
+      }
       await logged("assess", `${batch.length} tasks`, async () => {
         const { data, costUsd } = await runClaude({
         onStatus: status,
@@ -362,7 +632,47 @@ export function assessPendingTasks(): Promise<void> {
         return { value: undefined, costUsd };
       });
     }
-  });
+    // After the assess job, not inside it, so the merge pass takes its own slot in the queue.
+  }).then(() => (fresh.size ? dedupeTasks([...fresh]).catch(() => {}) : undefined));
+}
+
+/**
+ * Folds open tasks that are the same work (SAME_WORK_RULE) into one card each: all of them after a
+ * full refresh (refreshes run side by side, so two can each add the same work), or only those
+ * matching `focus`, tasks just added. Each merge is recorded under the kept task so its card can
+ * show it and Separate can undo it; a pair the user separated is never merged again.
+ */
+export function dedupeTasks(focus?: string[]): Promise<void> {
+  return track(focus ? `dedupe:${focus.join(",")}` : "dedupe", (status) =>
+    logged("dedupe", focus ? `${focus.length} new` : "all open", async () => {
+      const index = await loadTaskIndex();
+      const open = new Set(index.map((e) => e.id));
+      const [aliases, manual, links, notDuplicates] = await Promise.all([db.getTaskAliases(), db.listManualTasks(), db.getSessionLinks(), db.getNotDuplicates()]);
+      const focusOpen = focus?.map((id) => aliases.get(id) ?? id).filter((id) => open.has(id));
+      if (index.length < 2 || (focus && !focusOpen?.length)) return { value: undefined };
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: sameWorkPrompt(index, focusOpen),
+        schema: SameWork,
+        tools: [],
+        // Judging meaning across many short entries: worth more than the cheapest model, no tools needed.
+        model: "sonnet",
+        maxTurns: 2,
+      });
+      const merges = acceptedMerges(data.groups, {
+        open,
+        mine: new Set(manual.map((t) => t.id)),
+        notDuplicates,
+        sessions: new Set(Object.entries(links).filter(([, l]) => !!l.sessionId).map(([id]) => id)),
+        aliases,
+        focus: focusOpen ? new Set(focusOpen) : undefined,
+      });
+      const titleOf = new Map(index.map((e) => [e.id, e.title]));
+      for (const m of merges) await db.mergeTasks(m.keep, m.drop, titleOf.get(m.drop) ?? m.drop);
+      if (merges.length) bump();
+      return { value: undefined, costUsd };
+    }),
+  );
 }
 
 /** Has Claude critically re-examine a task: captured right, still needed, not a duplicate. */
@@ -477,14 +787,21 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         // A task filed under no project gets the same as the Demian chat, so a question only the code
         // answers never finds it missing.
         const global = taskId.startsWith("global:");
-        const own = global ? null : await projectOfTask(taskId);
+        const watched = taskId.startsWith(WATCH_CHAT) ? await db.getWatchedTopic(taskId.slice(WATCH_CHAT.length)) : null;
+        const own = global
+          ? null
+          : watched
+            ? ((await db.listProjects()).find((p) => p.channel_id === watched.projectId) ?? null)
+            : await projectOfTask(taskId);
         const everyProject = !own;
         const codeProjects = everyProject ? (await db.listProjects()).filter((p) => p.state === "tracked") : [own];
         const code = codeProjects.length ? await codeFor(codeProjects, !everyProject, everyProject ? 12 : 4) : [];
         const context = [
           taskId.startsWith("global:")
             ? await globalContext(link)
-            : steps
+            : watched
+              ? WATCH_CHAT_CONTEXT
+              : steps
               ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
               : "",
           lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "",
@@ -996,11 +1313,17 @@ export function refreshAll(): Promise<void> {
         refreshCalendar(),
         refreshAdhoc(),
         assessPendingTasks(),
+        checkWatchedTopics(),
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
+      // Refreshes ran side by side, so two may have added the same work; and this catches any already there.
+      status("Merging duplicate tasks");
+      await dedupeTasks().catch(() => {});
       // The reading summarizes everything above, so it goes last.
       status("Writing the daily briefing");
       await refreshReading().catch(() => {});
+      // Once, for tasks written before titles had a length rule.
+      await shortenLongTitles().catch(() => {});
     },
     false,
   );

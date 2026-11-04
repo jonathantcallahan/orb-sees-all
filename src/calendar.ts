@@ -13,15 +13,15 @@ const minutesOfDay = (iso: string) => {
 
 /**
  * 8am to midnight, stretched to fit any meeting that starts earlier.
- * With \`now\`, the past is cut to the last hour: the grid starts exactly one hour
- * before now (mid-hour if need be), so earlier meetings are out of view.
+ * With \`now\`, it starts exactly one hour before now (mid-hour if need be), so earlier meetings are
+ * out of view and now is always in it, early in the morning too.
  */
 export function dayRange(events: Pick<CalendarEvent, "start" | "end">[], now?: Date): DayRange {
   let startHour = 8;
   // The day always runs to midnight, so the rest of the evening is there to see.
   const endHour = 24;
   for (const e of events) startHour = Math.min(startHour, Math.floor(minutesOfDay(e.start) / 60));
-  if (now) startHour = Math.max(startHour, Math.min((now.getHours() * 60 + now.getMinutes() - 60) / 60, endHour - 1));
+  if (now) startHour = Math.max(0, Math.min((now.getHours() * 60 + now.getMinutes() - 60) / 60, endHour - 1));
   return { startHour, endHour };
 }
 

@@ -317,6 +317,11 @@ describe("calendar layout", () => {
     expect(placed.map((p) => [p.event.id, p.top, p.height])).toEqual([["b", 15, 90]]);
   });
 
+  it("starts an hour before now early in the morning, before the usual 8am", () => {
+    expect(dayRange([ev("a", [10, 0], [11, 0])], new Date(2026, 9, 29, 6, 30))).toEqual({ startHour: 5.5, endHour: 24 });
+    expect(dayRange([], new Date(2026, 9, 29, 0, 20))).toEqual({ startHour: 0, endHour: 24 });
+  });
+
   it("clips a meeting that started before the grid", () => {
     const placed = layoutDay([ev("a", [11, 30], [13, 0])], { startHour: 12, endHour: 18 });
     expect(placed[0]).toMatchObject({ top: 0, height: 60 });
@@ -441,6 +446,12 @@ describe("task filters", () => {
 
   it("lets everything through with no filter", () => {
     expect(matchesFilter(t("done", null), NO_FILTER)).toBe(true);
+  });
+
+  it("filters meeting prep as its own source, apart from requests", () => {
+    const f: TaskFilter = { ...NO_FILTER, sources: ["meeting"] };
+    expect(matchesFilter({ ...t("todo", null), source: "meeting" }, f)).toBe(true);
+    expect(matchesFilter({ ...t("todo", null), source: "request" }, f)).toBe(false);
   });
 
   it("requires every filter that's set", () => {
@@ -664,7 +675,7 @@ describe("task briefs", () => {
   });
 });
 
-import { taskEstimate } from "./tasks";
+import { statusForBlockedSteps, taskEstimate } from "./tasks";
 describe("task estimates", () => {
   it("adds up the plan's per-step minutes once every step has one", () => {
     expect(taskEstimate({ steps: [{ minutes: 0 }, { minutes: 15 }, { minutes: 5 }] }, { estimate_minutes: 120 })).toBe(20);
@@ -701,5 +712,21 @@ describe("project status", () => {
     expect(projectStatus({ snapshot, last_refreshed_at: "2026-11-03T09:00:00Z", status_override: o })).toBe("blocked");
     expect(projectStatus({ snapshot, last_refreshed_at: "2026-11-03T11:00:00Z", status_override: o })).toBe("on_track");
     expect(projectStatus({ snapshot, last_refreshed_at: null, status_override: null })).toBe("on_track");
+  });
+});
+
+describe("a task's status as its plan's steps get blocked", () => {
+  it("blocks the task when a step is blocked, while the plan is still being discussed too", () => {
+    expect(statusForBlockedSteps(true, false, "todo", true)).toBe("blocked");
+    expect(statusForBlockedSteps(true, false, "in_progress", false)).toBe("blocked");
+    expect(statusForBlockedSteps(true, true, "blocked", false)).toBeNull();
+  });
+
+  it("moves it on once nothing is blocked, and leaves a done task alone", () => {
+    expect(statusForBlockedSteps(false, true, "blocked", false)).toBe("in_progress");
+    expect(statusForBlockedSteps(false, true, "blocked", true)).toBe("todo");
+    // Blocked by hand, with no step blocked before: left as the user set it.
+    expect(statusForBlockedSteps(false, false, "blocked", false)).toBeNull();
+    expect(statusForBlockedSteps(true, false, "done", false)).toBeNull();
   });
 });

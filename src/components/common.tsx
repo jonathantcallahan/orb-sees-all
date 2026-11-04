@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
 import { formatWhen } from "../scheduler";
 import type { ViewTask } from "../tasks";
+import type { StepState } from "../sessions";
 import { MOD } from "../platform";
 
 export function ExternalLink({
@@ -333,4 +334,233 @@ export function useScrambled(text: string, duration = SCRAMBLE_MS, from?: string
     return () => cancelAnimationFrame(frame);
   }, [text]);
   return shown;
+}
+
+/** How wide a tooltip can be, so one near the right edge is moved in to fit. */
+const TIP_WIDTH = 300;
+
+/**
+ * A (?) icon that explains something in a tooltip: on hover, or on focus from the keyboard. Clicking
+ * it does nothing else, so it can sit inside a button (a setting's label) without pressing it.
+ */
+export function InfoTip({ children, label = "More about this" }: { children: ReactNode; label?: string }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const show = (el: HTMLElement) => setAnchor(el.getBoundingClientRect());
+  const hide = () => setAnchor(null);
+  return (
+    <span
+      className="info-tip"
+      role="img"
+      tabIndex={0}
+      aria-label={label}
+      onMouseEnter={(e) => show(e.currentTarget)}
+      onMouseLeave={hide}
+      onFocus={(e) => show(e.currentTarget)}
+      onBlur={hide}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+      }}
+    >
+      {/* A solid gray disc with a white question mark. */}
+      <svg width="12" height="12" viewBox="0 0 14 14" aria-hidden>
+        <circle cx="7" cy="7" r="7" fill="currentColor" />
+        <path d="M5.1 5.3a1.9 1.9 0 1 1 2.75 1.7c-.55.28-.85.65-.85 1.2v.35" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="7" cy="10.6" r="0.85" fill="#fff" />
+      </svg>
+      {anchor &&
+        createPortal(
+          <div
+            className="card info-tip-body"
+            role="tooltip"
+            style={{ left: Math.max(8, Math.min(anchor.left - 8, window.innerWidth - TIP_WIDTH - 8)), top: anchor.bottom + 6, maxWidth: TIP_WIDTH }}
+          >
+            {children}
+          </div>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
+/**
+ * A plan step's marker: dashed when not started, turning while in progress, amber and still while waiting on you,
+ * checked when done, a red bar when blocked on someone else, struck through when skipped.
+ */
+export function StepCircle({ state, human = false }: { state?: StepState; human?: boolean }) {
+  return (
+    <svg className={`step-circle${state ? ` ${state}` : ""}${human ? " human" : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+      {state === "skipped" ? (
+        <>
+          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M3.2 8.8 8.8 3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </>
+      ) : state === "blocked" ? (
+        <>
+          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
+          <path d="M3.5 6h5" stroke="var(--bg)" strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      ) : state === "done" ? (
+        <>
+          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
+          <path d="M3.4 6.2 5.2 8l3.4-3.6" fill="none" stroke="var(--bg)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Shows `text` in a small card under its child while it's hovered (the webview doesn't show native
+ * title tooltips). With no text, renders the child alone.
+ */
+export function HoverTip({ text, whenClipped = false, children }: { text: string | null; whenClipped?: boolean; children: ReactNode }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  if (!text) return <>{children}</>;
+  return (
+    <span
+      className="hover-tip-anchor"
+      onMouseEnter={(e) => {
+        // `whenClipped`: only when the text in it (.clip-text) is cut short, since otherwise it's all there.
+        const clip = e.currentTarget.querySelector<HTMLElement>(".clip-text");
+        if (whenClipped && (!clip || clip.scrollWidth <= clip.clientWidth)) return;
+        setAnchor(e.currentTarget.getBoundingClientRect());
+      }}
+      onMouseLeave={() => setAnchor(null)}
+    >
+      {children}
+      {anchor &&
+        createPortal(
+          <div className="card meeting-card hover-tip small" role="tooltip" style={{ left: anchor.left, top: anchor.bottom + 6 }}>
+            {text}
+          </div>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
+/**
+ * Sizes a textarea to what's in it, growing and shrinking as it changes, so it never needs a scroll
+ * bar or a resize handle. Pass anything else that changes its height (a placeholder) too.
+ */
+export function useAutoGrow(...deps: unknown[]) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // scrollHeight leaves out the borders.
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, deps);
+  return ref;
+}
+
+const Chevron = () => (
+  <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden>
+    <path d="M1.5 3 4 5.5 6.5 3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/**
+ * A value you can change, as a badge the width of what it shows: clicking opens a small menu of
+ * the choices under it. Every changeable value drawn as a badge uses it, so they look and work
+ * alike. Escape or a click elsewhere closes the menu.
+ */
+export function BadgeSelect<T extends string>({
+  label,
+  value,
+  options,
+  empty = false,
+  arrow = true,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  /** Nothing chosen yet: the badge's text is muted. */
+  empty?: boolean;
+  /** The small arrow saying it opens a menu. */
+  arrow?: boolean;
+  onChange: (value: T) => void;
+}) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const close = () => setAnchor(null);
+  useEffect(() => {
+    if (!anchor) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menu.current?.contains(e.target as Node) && !button.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
+      button.current?.focus();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    // The chosen item takes focus, so the menu works from the keyboard.
+    menu.current?.querySelector<HTMLButtonElement>(".on, button")?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [anchor]);
+  const text = options.find((o) => o.value === value)?.label ?? value;
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className={`badge badge-select${empty ? " none" : ""}${anchor ? " open" : ""}`}
+        aria-label={`${label}: ${text}`}
+        aria-haspopup="menu"
+        aria-expanded={!!anchor}
+        onClick={(e) => (anchor ? close() : setAnchor(e.currentTarget.getBoundingClientRect()))}
+      >
+        {text}
+        {arrow && <Chevron />}
+      </button>
+      {anchor &&
+        createPortal(
+          <div
+            ref={menu}
+            className="card badge-menu"
+            role="menu"
+            aria-label={label}
+            style={{ left: Math.min(anchor.left, window.innerWidth - 240), top: anchor.bottom + 4 }}
+            onKeyDown={(e) => {
+              // Up and down move between the choices.
+              if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+              e.preventDefault();
+              const items = [...(menu.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+              const at = items.indexOf(document.activeElement as HTMLButtonElement);
+              items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+            }}
+          >
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={o.value === value}
+                className={`badge-menu-item${o.value === value ? " on" : ""}`}
+                onClick={() => {
+                  onChange(o.value);
+                  close();
+                  button.current?.focus();
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
 }

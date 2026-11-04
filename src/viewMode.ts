@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 
 /**
- * The app's one layout: the orb and calendar, then one area at a time (Updates, Tasks or
- * Projects), picked from a rail of icons. The open area is kept in localStorage, so it shows from
- * the first frame.
+ * The app's one layout: the orb and calendar, then one area at a time (Updates, Tasks, Projects
+ * or Watched topics), picked from a rail of icons. The open area is kept in localStorage, so it
+ * shows from the first frame.
  */
-export type DetailTab = "updates" | "tasks" | "projects";
+export type DetailTab = "updates" | "tasks" | "projects" | "watched";
 
 const TAB_KEY = "detail-tab";
 
@@ -21,7 +21,7 @@ export function showDetailTab(tab: DetailTab) {
 export function useDetailTab(): [DetailTab, (tab: DetailTab) => void] {
   const [tab, setTab] = useState<DetailTab>(() => {
     const t = localStorage.getItem(TAB_KEY);
-    return t === "tasks" || t === "projects" ? t : "updates";
+    return t === "tasks" || t === "projects" || t === "watched" ? t : "updates";
   });
   useEffect(() => localStorage.setItem(TAB_KEY, tab), [tab]);
   useEffect(() => {

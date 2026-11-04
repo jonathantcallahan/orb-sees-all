@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
+import { WATCH_CHAT } from "./watched";
 import { channelLabel } from "./projects";
 import { GlobalAction } from "./schema";
 
@@ -419,7 +420,8 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
         const after = messages.slice(lastUserAt + 1).filter((m) => m.role === "assistant");
         const now = stepsNow(lines, sends, recheck.current);
         // A plan the chat revised is a correction: what it was, what it became, and what was said.
-        if (now.plan?.length) {
+        // (A watched topic's chat restates its conditional actions this way; those aren't task plans.)
+        if (now.plan?.length && !taskId.startsWith(WATCH_CHAT)) {
           const steps = now.plan.map((st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`);
           const link = (await db.getSessionLinks())[taskId];
           if (link && link.loggedPlan?.join("\n") !== steps.join("\n")) {

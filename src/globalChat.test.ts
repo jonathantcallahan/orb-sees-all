@@ -82,3 +82,22 @@ describe("remembered preferences", () => {
     ]);
   });
 });
+
+describe("one list of changes for the chat and #demian messages", () => {
+  it("documents every change the planner can apply, the new ones included", async () => {
+    const { GLOBAL_ACTION_DOCS } = await import("./openInClaude");
+    const { GlobalAction } = await import("./schema");
+    const types = GlobalAction.options.map((o) => o.shape.type.value);
+    expect(types).toContain("watch_topic");
+    expect(types).toContain("add_task_context");
+    for (const t of types) expect(GLOBAL_ACTION_DOCS).toContain(`"type": "${t}"`);
+    expect(globalChatPrompt("global:x", "hi")).toContain(GLOBAL_ACTION_DOCS);
+  });
+
+  it("reads the new changes", async () => {
+    const { GlobalAction } = await import("./schema");
+    expect(GlobalAction.safeParse({ type: "watch_topic", text: "Legal sign-off by Friday" }).success).toBe(true);
+    expect(GlobalAction.safeParse({ type: "add_task_context", task_id: "m1", text: "Ana prefers Thursday" }).success).toBe(true);
+    expect(GlobalAction.safeParse({ type: "add_task_context", task_id: "m1", text: "" }).success).toBe(false);
+  });
+});

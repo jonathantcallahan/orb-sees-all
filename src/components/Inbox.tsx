@@ -3,7 +3,7 @@ import { addManualTask, setTaskState } from "../db";
 import { assessPendingTasks } from "../jobs";
 import type { QuickReply } from "../schema";
 import { stateOf, type TaskState } from "../tasks";
-import { localDate } from "../scheduler";
+import { formatWhen } from "../scheduler";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { ReplyChat } from "./ExplainChat";
 import { DockedChat, useChatDock } from "./chatDock";
@@ -55,16 +55,6 @@ export function Inbox({
   );
 }
 
-/** When a message came in: the time if it was today, otherwise just the day ("Yesterday", "Nov 1"). */
-function inboxWhen(received: string): string {
-  const d = new Date(received);
-  if (Number.isNaN(d.getTime())) return received;
-  const day = localDate(d);
-  if (day === localDate(new Date())) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (day === localDate(new Date(Date.now() - 86_400_000))) return "Yesterday";
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
 /** One inbox row. Draft response opens the reply chat (which picks up where it left off if reopened). */
 function InboxItem({ reply: r, onChange }: { reply: QuickReply; onChange: () => void }) {
   const [chatting, setChatting] = useState(false);
@@ -104,7 +94,7 @@ function InboxItem({ reply: r, onChange }: { reply: QuickReply; onChange: () => 
         </ExternalLink>
         {r.received && (
           <span className="inbox-time" title={new Date(r.received).toLocaleString()}>
-            {inboxWhen(r.received)}
+            {formatWhen(r.received)}
           </span>
         )}
         <button className="link-button small inbox-action" onClick={draft}>

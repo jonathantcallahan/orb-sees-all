@@ -689,6 +689,24 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/010_project_context.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "watched topics",
+            sql: include_str!("../migrations/011_watched_topics.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 12,
+            description: "watched topic project",
+            sql: include_str!("../migrations/012_watched_topic_project.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
+            description: "watched topic history",
+            sql: include_str!("../migrations/013_watched_topic_history.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

@@ -4,14 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { adoptAsTaskNote, claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
-import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, separateTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type MergedTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { approveDiscussedPlan, assessPendingTasks, checkTask, continueTaskSession, discussTaskPlan, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
-import { ago, formatMinutes, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
+import { ago, formatMinutes, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
-import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, useScrambled } from "./common";
-import { chatView, readableReply, sendDestination, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
+import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, useScrambled } from "./common";
+import { chatView, readableReply, sendDestination, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { InDock, useInDock, useTaskChatDock } from "./chatDock";
@@ -31,7 +31,7 @@ export interface CardTask {
   due?: string | null;
   requester?: string | null;
   follow_up?: FollowUp | null;
-  source: "manual" | "slack" | "email" | "project" | "meeting";
+  source: "manual" | "slack" | "email" | "project" | "meeting" | "watched";
   status: TaskStatus;
   /** YYYY-MM-DD the task was planned for, if it's in Today. */
   todayOn: string | null;
@@ -53,7 +53,7 @@ export interface CardTask {
   done: boolean;
 }
 
-const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null, meeting: "Meeting prep" } as const;
+const SOURCE_LABEL = { manual: null, slack: "Slack", email: "Email", project: null, meeting: "Meeting prep", watched: null } as const;
 
 /** A description cut to two lines with "…" and More when it runs longer; Less and Edit follow inline. */
 /**
@@ -222,6 +222,18 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const DISMISS = "dismiss";
 
+/**
+ * A watched topic's statuses: Watching, or Human when something needs you (shown on its own when an
+ * action is ready, or set by hand), and Done. Kept in the same task status field: Human is
+ * "waiting", Watching anything else that isn't done. Dismiss reads Unwatch.
+ */
+const WATCH_STATUS: { value: TaskStatus; label: string }[] = [
+  { value: "todo", label: "Watching" },
+  { value: "waiting", label: "Human" },
+  { value: "done", label: "Done" },
+];
+const watchStatusLabel = (status: TaskStatus) => (status === "done" ? "Done" : status === "waiting" ? "Human" : "Watching");
+
 /** Drag-and-drop payload type for moving tasks in and out of Today. */
 
 const PICKABLE: Priority[] = ["critical", "high", "medium", "low"];
@@ -264,7 +276,9 @@ function PriorityBadge({
           const to = e.target.value === AUTO ? null : (e.target.value as Priority);
           await setPriorityOverride(task.id, to);
           onChange();
-          recordCorrection(
+          // What Demian learns from is about tasks; a watched topic's priority isn't one.
+          if (task.source !== "watched")
+            recordCorrection(
             {
               kind: "priority_change",
               subject: "task",
@@ -291,6 +305,8 @@ function PriorityBadge({
 
 /** A dismissal, recorded with what the task was, so a refresh doesn't raise it again. */
 function recordDismiss(task: CardTask) {
+  // Dismissing a watched topic is unwatching it, not a lesson about tasks.
+  if (task.source === "watched") return;
   recordCorrection({ kind: "dismiss", subject: "task", subject_id: task.id, project_id: task.project?.id, before: taskSnapshot(task) }, label.dismiss(task.title));
 }
 
@@ -300,11 +316,18 @@ function recordDismiss(task: CardTask) {
  * saved, and goes once you've answered.
  */
 function StatusSelect({ task, human = false, onChange }: { task: CardTask; human?: boolean; onChange: () => void }) {
+  const watched = task.source === "watched";
+  const options = watched ? WATCH_STATUS : (Object.keys(STATUS_LABEL) as TaskStatus[]).map((value) => ({ value, label: STATUS_LABEL[value] }));
+  // A watched topic set to Human shows it like one whose action is ready.
+  const showHuman = human || (watched && task.status === "waiting");
   return (
-    <span className={`badge status-badge ${human ? "human" : task.status}`} title={human ? "Claude needs your input: open the chat" : undefined}>
-      {human ? "Human" : STATUS_LABEL[task.status]}
+    <span
+      className={`badge status-badge ${showHuman ? "human" : watched && task.status !== "done" ? "todo" : task.status}`}
+      title={human ? (watched ? "A conditional action is ready" : "Claude needs your input: open the chat") : undefined}
+    >
+      {showHuman ? "Human" : watched ? watchStatusLabel(task.status) : STATUS_LABEL[task.status]}
       <select
-        value={task.status}
+        value={watched && task.status !== "done" && task.status !== "waiting" ? "todo" : task.status}
         aria-label="Status"
         onChange={async (e) => {
           // Dismiss lives in the same menu: it hides the task rather than setting a status.
@@ -314,13 +337,13 @@ function StatusSelect({ task, human = false, onChange }: { task: CardTask; human
           if (dismiss) recordDismiss(task);
         }}
       >
-        {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => (
-          <option key={s} value={s}>
-            {STATUS_LABEL[s]}
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
           </option>
         ))}
         <option disabled>──────</option>
-        <option value={DISMISS}>Dismiss</option>
+        <option value={DISMISS}>{watched ? "Unwatch" : "Dismiss"}</option>
       </select>
     </span>
   );
@@ -363,66 +386,8 @@ export function revealTask(id: string) {
 /** Whether the user asked for reduced motion; checked on each use, so a change in System Settings applies at once. */
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/**
- * A plan step's marker: dashed when not started, turning while in progress, amber and still while waiting on you,
- * checked when done, a red bar when blocked on someone else, struck through when skipped.
- */
-function StepCircle({ state, human = false }: { state?: StepState; human?: boolean }) {
-  return (
-    <svg className={`step-circle${state ? ` ${state}` : ""}${human ? " human" : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-      {state === "skipped" ? (
-        <>
-          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M3.2 8.8 8.8 3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        </>
-      ) : state === "blocked" ? (
-        <>
-          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
-          <path d="M3.5 6h5" stroke="var(--bg)" strokeWidth="1.5" strokeLinecap="round" />
-        </>
-      ) : state === "done" ? (
-        <>
-          <circle cx="6" cy="6" r="5.5" fill="currentColor" />
-          <path d="M3.4 6.2 5.2 8l3.4-3.6" fill="none" stroke="var(--bg)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      ) : (
-        <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.4 1.8" />
-      )}
-    </svg>
-  );
-}
-
-/**
- * Shows `text` in a small card under its child while it's hovered (the webview doesn't show native
- * title tooltips). With no text, renders the child alone.
- */
-function HoverTip({ text, whenClipped = false, children }: { text: string | null; whenClipped?: boolean; children: ReactNode }) {
-  const [anchor, setAnchor] = useState<DOMRect | null>(null);
-  if (!text) return <>{children}</>;
-  return (
-    <span
-      className="hover-tip-anchor"
-      onMouseEnter={(e) => {
-        // `whenClipped`: only when the text in it (.clip-text) is cut short, since otherwise it's all there.
-        const clip = e.currentTarget.querySelector<HTMLElement>(".clip-text");
-        if (whenClipped && (!clip || clip.scrollWidth <= clip.clientWidth)) return;
-        setAnchor(e.currentTarget.getBoundingClientRect());
-      }}
-      onMouseLeave={() => setAnchor(null)}
-    >
-      {children}
-      {anchor &&
-        createPortal(
-          <div className="card meeting-card hover-tip small" role="tooltip" style={{ left: anchor.left, top: anchor.bottom + 6 }}>
-            {text}
-          </div>,
-          document.body,
-        )}
-    </span>
-  );
-}
-
-interface OutlineStep {
+export interface OutlineStep {
+  /** The step as text: in prompts, matching and labels. */
   title: string;
   /** Who does it; null for older plans that didn't say. */
   by: "claude" | "you" | null;
@@ -430,6 +395,41 @@ interface OutlineStep {
   progress?: StepProgress;
   /** What finished it (a message sent, a doc or event created), as chips beside it. */
   links?: TaskLink[];
+  /** Drawn in place of the title when given (a watched topic's action, with its condition as badges). */
+  line?: ReactNode;
+  /** At the end of the line: a watched topic's action's state, or its Create and open task. */
+  trailing?: ReactNode;
+}
+
+/**
+ * Turns a task card into a card for something task-like that isn't a task: a watched topic. It keeps
+ * the card (header, priority, status, description, the step box, the chat in the dock) and replaces
+ * where the steps come from, the actions under them, and where edits go. Tasks don't pass it.
+ */
+export interface CardExtension {
+  /** The steps, with their state, in place of the plan's. */
+  steps: OutlineStep[];
+  /** The step box's heading ("Conditional actions"), and the note beside it. */
+  heading: string;
+  role: string;
+  /** Shown in the step box when there are no steps, in place of the plan's placeholder rows. */
+  empty?: ReactNode;
+  /** Below the card's boxes, always shown while it's open (Discuss); `discuss` opens the chat. */
+  actions: (open: { discuss: () => void }) => ReactNode;
+  /** In the meta row, in place of the project name (a project that can be changed). */
+  meta?: ReactNode;
+  /** More links for the Links toggle. */
+  links?: { url: string | null | undefined; title: string | null }[];
+  /** The chat, while it's open: drawn in the dock (or inline where there's none). */
+  chat: (close: () => void) => ReactNode;
+  /** The title isn't written yet: this shows, muted, in its place. */
+  titlePending?: string | null;
+  /** More of the card's boxes, after the steps' (a watched topic's Updates). */
+  after?: ReactNode;
+  /** A timestamp shown beside the title while the card is hovered, open or not ("Updated 2:30 PM"); the title gives way to it. */
+  stamp?: string | null;
+  /** Re-checks just this one: a ↻ that slides in between the status and the arrow while the card is hovered (a spinner while it runs). */
+  refresh?: { busy: boolean; onClick: () => void };
 }
 
 /** What Orb sent or created for a session, as chips: those for each step (1-based), and the rest. */
@@ -448,22 +448,26 @@ function PlanOutline({
   steps,
   action,
   planning = false,
+  empty,
   onMarkDone,
   onRemind,
 }: {
   steps: OutlineStep[];
   action?: ReactNode;
   planning?: boolean;
+  /** Shown when there are no steps, in place of the placeholder rows. */
+  empty?: ReactNode;
   /** Marks a step done by hand (once a session is under way): for work the session didn't see, like a message sent from Slack. */
   onMarkDone?: (index: number) => void;
   /** Has the session draft a reminder to whoever a blocked step is waiting on. */
   onRemind?: (index: number) => void;
 }) {
-  if (steps.length === 0 && !action) return null;
+  if (steps.length === 0 && !action && !empty) return null;
   return (
     <div className="plan-outline">
       {/* No steps yet: two placeholder rows where the plan will go; they pulse while it's being written. */}
-      {steps.length === 0 && (
+      {steps.length === 0 && empty}
+      {steps.length === 0 && !empty && (
         <ol className={`plan-outline-steps skeleton${planning ? " loading" : ""}`} aria-hidden>
           {[72, 54].map((width) => (
             <li key={width}>
@@ -492,9 +496,10 @@ function PlanOutline({
               })()}
               {/* Each step wraps to as many lines as it needs; a blocked one says why on hover. */}
               <HoverTip text={step.progress?.state === "blocked" ? `${step.title}${step.progress.note ? ` (blocked: ${step.progress.note})` : " (blocked)"}` : null}>
-                <span className="small step-line">{step.title}</span>
+                <span className="small step-line">{step.line ?? step.title}</span>
               </HoverTip>
               {step.links && step.links.length > 0 && <LinkChips links={step.links} />}
+              {step.trailing && <span className="step-trailing">{step.trailing}</span>}
               {onRemind && step.progress?.state === "blocked" && (
                 <button className="link-button small step-remind" onClick={() => onRemind(i)}>
                   Remind
@@ -518,7 +523,18 @@ function AssessmentView({
   onMarkDone,
   onRemind,
   planCreated,
+  heading = "Plan",
+  role,
+  openWhen = false,
+  empty,
 }: {
+  /** The box's heading, and the note beside it, when it holds something other than a plan. */
+  heading?: string;
+  role?: string;
+  /** The box opens by itself when this turns true (a watched topic's action is ready). */
+  openWhen?: boolean;
+  /** Shown when there are no steps, in place of the placeholder rows. */
+  empty?: ReactNode;
   /** When the plan was made (ISO), shown after the Plan heading's role as "Plan created …". */
   planCreated?: string | null;
   /** Claude's take on the task; until there is one (a task nobody has assessed), the plan box says so. */
@@ -533,7 +549,6 @@ function AssessmentView({
   onMarkDone?: (index: number) => void;
   onRemind?: (index: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const orbName = useOrbName();
   return (
     <>
@@ -547,10 +562,14 @@ function AssessmentView({
           )}
         </div>
       )}
-      <div className={`automation ${assessment?.automation ?? "unplanned"}`}>
-        <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-          <span className="automation-kind">Plan</span>
-          {assessment ? (
+      <CardBox
+        kind={assessment?.automation ?? "unplanned"}
+        heading={heading}
+        openWhen={openWhen}
+        note={
+          role !== undefined ? (
+            <span className="automation-role timestamp">{role}</span>
+          ) : assessment ? (
             orbRole(assessment.automation, orbName) && (
               <span className="automation-role timestamp">
                 {orbRole(assessment.automation, orbName)}
@@ -559,16 +578,51 @@ function AssessmentView({
             )
           ) : (
             <span className="automation-role timestamp">{planning ? "Planning…" : steps.length ? `${steps.length} steps` : "Plan not created"}</span>
-          )}
-          <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-            <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <Reveal open={open} className="automation-body">
-          <PlanOutline steps={steps} action={actions} planning={planning} onMarkDone={onMarkDone} onRemind={onRemind} />
-        </Reveal>
-      </div>
+          )
+        }
+      >
+        <PlanOutline steps={steps} action={actions} planning={planning} empty={empty} onMarkDone={onMarkDone} onRemind={onRemind} />
+      </CardBox>
     </>
+  );
+}
+
+/**
+ * A card's collapsible box: a heading and a note beside it, opening to what's inside. The Plan (or
+ * a watched topic's Conditional actions) is one; a watched topic's Updates is another.
+ */
+export function CardBox({
+  kind = "unplanned",
+  heading,
+  note,
+  openWhen = false,
+  children,
+}: {
+  /** Who does the work, for a plan (its color); "unplanned" otherwise. */
+  kind?: string;
+  heading: string;
+  note?: ReactNode;
+  /** The box opens by itself when this turns true. */
+  openWhen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(openWhen);
+  useEffect(() => {
+    if (openWhen) setOpen(true);
+  }, [openWhen]);
+  return (
+    <div className={`automation ${kind}`}>
+      <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="automation-kind">{heading}</span>
+        {note}
+        <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <Reveal open={open} className="automation-body">
+        {children}
+      </Reveal>
+    </div>
   );
 }
 
@@ -1373,11 +1427,15 @@ export function TaskCard({
   manualPriority,
   openTasks = [],
   duplicateOf,
+  mergedIn = [],
   compact = false,
   dateBadge,
   created,
+  watch,
   onChange,
 }: {
+  /** Makes this the card for a watched topic (see CardExtension); tasks don't pass it. */
+  watch?: CardExtension;
   /** When the task was created, if known: shown in the open card beside the due date. */
   created?: string | null;
   /**
@@ -1402,6 +1460,8 @@ export function TaskCard({
   openTasks?: { id: string; title: string }[];
   /** Another open task that looks like the same work, offered for a merge. */
   duplicateOf?: DuplicateCandidate;
+  /** Tasks merged into this one (by Demian or by you), each with Separate to undo it. */
+  mergedIn?: MergedTask[];
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
   compact?: boolean;
   onChange: () => void;
@@ -1498,18 +1558,21 @@ export function TaskCard({
   // They're numbered in this order in the session's prompt, so its "[orb] step N" reports line up.
   // Once the session revises the plan (a decision in the chat changed it), its version replaces them.
   const chips = artifactChips(sessionLink);
-  const outlineSteps: OutlineStep[] = (
-    progress?.plan
-      ? progress.plan
-      : plan
-        ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
-        : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
-  )
-    .map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title), links: chips.byStep.get(i + 1) }))
-    // A step after a blocked one can't be waiting on you yet; it starts once the block clears.
-    .map((st, i, all) =>
-      st.progress?.state === "waiting" && all.slice(0, i).some((earlier) => earlier.progress?.state === "blocked") ? { ...st, progress: undefined } : st,
-    );
+  // A watched topic brings its own steps, each with its state (see CardExtension).
+  const outlineSteps: OutlineStep[] = watch
+    ? watch.steps
+    : (
+        progress?.plan
+          ? progress.plan
+          : plan
+            ? plan.plan.steps.map((st) => ({ title: st.title, by: st.by ?? null }))
+            : (assessment?.claude_steps ?? []).map((title) => ({ title, by: "claude" as const }))
+      )
+        .map((st, i) => ({ ...st, progress: stepState(progress, sessionLink, i + 1, st.title), links: chips.byStep.get(i + 1) }))
+        // A step after a blocked one can't be waiting on you yet; it starts once the block clears.
+        .map((st, i, all) =>
+          st.progress?.state === "waiting" && all.slice(0, i).some((earlier) => earlier.progress?.state === "blocked") ? { ...st, progress: undefined } : st,
+        );
   // Once a session is under way, any step not yet done can be marked done by hand.
   const markDone = sessionLink
     ? async (i: number) => {
@@ -1559,16 +1622,18 @@ export function TaskCard({
     if (transcriptKey === sessionLink.recheckedKey) return;
     if (looksOutOfSync(outlineSteps.map((st) => st.progress))) recheckSteps();
   }, [transcriptKey, sessionWorking]);
-  // A step blocked on someone else blocks the task; once it moves, the task is back in progress.
+  // A step blocked on someone else blocks the task, during a plan discussion too; once no step is,
+  // the task moves on again (see statusForBlockedSteps). Checked whenever the plan's link or phase
+  // changes as well, so a block found before the card was shown still applies.
   const anyBlocked = outlineSteps.some((st) => st.progress?.state === "blocked");
   const wasBlocked = useRef(anyBlocked);
   useEffect(() => {
-    const changed = anyBlocked !== wasBlocked.current;
+    const was = wasBlocked.current;
     wasBlocked.current = anyBlocked;
-    if (!sessionLink || discussing) return;
-    if (anyBlocked && task.status !== "blocked" && task.status !== "done") setTaskState(task.id, { status: "blocked" }).then(onChange);
-    else if (!anyBlocked && changed && task.status === "blocked") setTaskState(task.id, { status: "in_progress" }).then(onChange);
-  }, [anyBlocked]);
+    if (!sessionLink) return;
+    const next = statusForBlockedSteps(anyBlocked, was, task.status, discussing);
+    if (next) setTaskState(task.id, { status: next }).then(onChange);
+  }, [anyBlocked, discussing, !!sessionLink]);
   // Every step finished (done, or skipped as no longer needed, with at least one done): the task is
   // done. Only as the last step finishes, so a task you reopen afterwards stays open.
   const allStepsDone =
@@ -1584,7 +1649,7 @@ export function TaskCard({
   const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
   const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
   const toSend = progress ? unsentMessages(progress.sends, sessionLink) : [];
-  const needsInput = !!sessionLink?.sessionId && !discussing && (!!waitingStep || toSend.length > 0);
+  const needsInput = watch ? !!waitingStep : !!sessionLink?.sessionId && !discussing && (!!waitingStep || toSend.length > 0);
   /**
    * What the chat was opened for: a step (its number), a message to send (0), talking the plan
    * through (DISCUSS), or null when it's closed.
@@ -1680,8 +1745,9 @@ export function TaskCard({
   };
   // The task's chat. In the Detail view it sits in the dock beside the list, drawn whatever state
   // the card is in (collapsed, or done and shrunk to a row), so it stays until you close it.
-  const chatView =
-    chatFor !== null && sessionLink ? (
+  const chatView = watch ? (
+    chatFor !== null ? watch.chat(() => setChatFor(null)) : null
+  ) : chatFor !== null && sessionLink ? (
       <SessionChat
         taskId={task.id}
         title={task.title}
@@ -1725,9 +1791,8 @@ export function TaskCard({
     ) : null;
   // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
   // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
-  const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
-  const planActions =
-    outlineSteps.length > 0 || planning || canPlan || sessionLink ? (
+  const canPlan = !watch && !plan && !planning && !linked && !!description && outlineSteps.length === 0;
+  const planActions = watch ? undefined : outlineSteps.length > 0 || planning || canPlan || sessionLink ? (
       <div className="plan-actions">
         {canPlan && (
           <button className="cta-primary" onClick={() => runPlan()} title="Have Claude research the task and plan every step, marking which it can do">
@@ -1858,11 +1923,12 @@ export function TaskCard({
       ...(plan?.plan.sources ?? []).map((src) => ({ url: src.link, title: src.title })),
       ...(plan?.plan.steps ?? []).map((st) => ({ url: st.link, title: null })),
       ...(check?.evidence ?? []).map((e) => ({ url: e.link, title: e.title })),
+      ...(watch?.links ?? []),
     ],
     [description],
   );
   // Double check follows More / Edit / Links, shown on hover (and while it runs). Last, so its hidden space sits at the end.
-  const checkAction = linked ? null : checkStatus ? (
+  const checkAction = linked || watch ? null : checkStatus ? (
     <span className="muted small checking" title={`${checkStatus}…`} aria-label={checkStatus}>
       <Spinner />
     </span>
@@ -1898,7 +1964,7 @@ export function TaskCard({
   const descriptionActions = (
     <>
       {linksToggle}
-      {claudeLink}
+      {!watch && claudeLink}
       {checkAction}
     </>
   );
@@ -1934,12 +2000,13 @@ export function TaskCard({
     <header className="task-card-header">
       <span className="task-title-wrap">
         <span className="task-title" title={task.title}>
-          {task.title}
+          {watch?.titlePending ? <span className="muted">{watch.titlePending}</span> : task.title}
         </span>
+        {watch?.stamp && <span className="timestamp card-stamp">{watch.stamp}</span>}
       </span>
       {/* Folded, the card shows only the badge its list is sorted by (the date when sorted by one,
           else the priority); the rest slide in beside it while it's hovered, and stay when it's open. */}
-      {dateBadge ? (
+      {watch ? null : dateBadge ? (
         <span className={`badge date-badge${dateBadge.date ? "" : " none"}`} title={dateBadge.date ? new Date(dateBadge.date.length === 10 ? `${dateBadge.date}T12:00:00` : dateBadge.date).toLocaleString() : undefined}>
           {dateBadge.date ? `${dateBadge.kind === "due" ? "Due " : ""}${formatWhen(dateBadge.date)}` : dateBadge.kind === "due" ? "No due date" : "No date"}
         </span>
@@ -1956,6 +2023,11 @@ export function TaskCard({
         {dateBadge && <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />}
         <StatusSelect task={task} human={needsInput && !task.done} onChange={onChange} />
       </span>
+      {watch?.refresh && (
+        <span className={`card-refresh${watch.refresh.busy ? " busy" : ""}`} onClick={(e) => e.stopPropagation()}>
+          <RefreshButton busy={watch.refresh.busy} title="Check now" status="Checking" onClick={watch.refresh.onClick} />
+        </span>
+      )}
       {toggle}
     </header>
   );
@@ -1964,7 +2036,7 @@ export function TaskCard({
     <>
     <article
       ref={cardRef}
-      className={`card task-card${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
+      className={`card task-card${watch ? " watched" : ""}${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
       {...drag.attrs}
       onClick={
         collapsed
@@ -1991,9 +2063,9 @@ export function TaskCard({
         <div className="task-body-inner">
           {bodyMounted && (
             <>
-              {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due || created) && (
+              {(watch?.meta || SOURCE_LABEL[task.source] || task.project || task.requester || task.due || created) && (
                 <div className="muted small task-meta">
-                  {task.project && <span className="task-project">{task.project.name}</span>}
+                  {watch?.meta ?? (task.project && <span className="task-project">{task.project.name}</span>)}
                   {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
                   {task.requester && <span>{task.requester}</span>}
                   {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
@@ -2010,7 +2082,7 @@ export function TaskCard({
                 <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
               )}
               {description ? (
-                <Description text={description} onEdit={() => setEditing(true)} actions={descriptionActions} />
+                <Description text={description} onEdit={watch ? undefined : () => setEditing(true)} actions={descriptionActions} />
               ) : (
                 manual && (
                   <button className="link-button small muted add-description" onClick={() => setEditing(true)}>
@@ -2031,7 +2103,7 @@ export function TaskCard({
                     <button
                       className="link-button small"
                       onClick={async () => {
-                        await mergeTasks(task.id, duplicateOf.id);
+                        await mergeTasks(task.id, duplicateOf.id, duplicateOf.title);
                         onChange();
                         recordCorrection(
                           { kind: "task_merge", subject: "task", subject_id: task.id, project_id: task.project?.id, before: { kept: taskSnapshot(task), folded: { title: duplicateOf.title } }, after: { into: task.id } },
@@ -2059,7 +2131,48 @@ export function TaskCard({
                 </div>
               )}
 
-              {assessment ? (
+              {mergedIn.map((m) => (
+                <div key={m.id} className="duplicate-note merged-note small">
+                  <span className="duplicate-text">
+                    Merged in <span className="duplicate-title">"{m.title}"</span>
+                  </span>
+                  <span className="duplicate-actions">
+                    <button
+                      className="link-button small"
+                      onClick={async () => {
+                        await separateTasks(task.id, m.id);
+                        onChange();
+                        recordCorrection(
+                          { kind: "not_duplicate", subject: "task", subject_id: task.id, project_id: task.project?.id, before: { task: taskSnapshot(task), looked_like: { id: m.id, title: m.title } } },
+                          label.notDuplicate(task.title),
+                        );
+                      }}
+                      title="Make it its own task again; Demian won't merge these two again"
+                    >
+                      Separate
+                    </button>
+                  </span>
+                </div>
+              ))}
+
+              {watch ? (
+                <>
+                  <AssessmentView
+                    assessment={null}
+                    steps={outlineSteps}
+                    planning={false}
+                    heading={watch.heading}
+                    role={watch.role}
+                    openWhen={needsInput}
+                    empty={watch.empty}
+                  />
+                  {watch.after}
+                  <div className="plan-actions">
+                    {watch.actions({ discuss: () => setChatFor(DISCUSS) })}
+                    {!chatDock && chatView}
+                  </div>
+                </>
+              ) : assessment ? (
                 <AssessmentView
                   planCreated={plan?.created_at}
                   assessment={assessment}
@@ -2089,7 +2202,7 @@ export function TaskCard({
                   onMerge={
                     duplicateTarget
                       ? async () => {
-                          await mergeTasks(duplicateTarget.id, task.id);
+                          await mergeTasks(duplicateTarget.id, task.id, task.title);
                           await clearTaskCheck(task.id);
                           onChange();
                           recordCorrection(

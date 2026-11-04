@@ -9,8 +9,10 @@ import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
 import { activeChannels, channelLabel, projectName } from "../projects";
 import { ago } from "../tasks";
+import { localDate } from "../scheduler";
+import { parseSelfDmState, SELF_DM_DEFAULT, selfDmEvery, type SelfDmEvery, type SelfDmState } from "../selfDm";
 import type { Theme } from "../theme";
-import { CloseIcon, Reveal, Spinner } from "./common";
+import { CloseIcon, InfoTip, Reveal, Spinner } from "./common";
 import type { OrbLook } from "./PressureBlob";
 
 const lines = (text: string) =>
@@ -18,6 +20,16 @@ const lines = (text: string) =>
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
+
+/** What the DM setting does, and today's checks and their cost once there are some. */
+function dmHint(every: SelfDmEvery, state: SelfDmState | null): string {
+  const what =
+    "Send yourself a Slack message with #demian in it and Demian does what it says: adds a task, watches a topic, creates or changes a project, adds context to a project or task, and anything else its chat can do. It replies in the message's thread with what it did. Nothing else in your DM is read.";
+  if (every === "off" || !state) return what;
+  if (state.lastError) return `${what} Last check failed: ${state.lastError}`;
+  const today = state.day === localDate(new Date());
+  return today && state.runs > 0 ? `${what} ${state.runs} checks today, $${state.usd.toFixed(2)}.` : what;
+}
 
 /** A small set of choices shown side by side, the picked one raised: for settings with two or three values. */
 function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
@@ -159,8 +171,10 @@ function SettingRow({ label, hint, children }: { label: string; hint?: ReactNode
   return (
     <div className="setting-row">
       <div className="setting-text">
-        <span className="setting-label">{label}</span>
-        {hint && <span className="setting-hint">{hint}</span>}
+        <span className="setting-label">
+          {label}
+          {hint && <InfoTip label={`About ${label}`}>{hint}</InfoTip>}
+        </span>
       </div>
       <div className="setting-control">{children}</div>
     </div>
@@ -302,6 +316,8 @@ export function Settings({
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
   const [model, setModel] = useState("opus");
+  const [dmEvery, setDmEvery] = useState<SelfDmEvery>(SELF_DM_DEFAULT);
+  const [dmState, setDmState] = useState<SelfDmState | null>(null);
   const [log, setLog] = useState<db.LogEntry[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -320,6 +336,8 @@ export function Settings({
       setTime((await db.getSetting("refresh_time")) ?? "07:30");
       setWeekdaysOnly(((await db.getSetting("weekdays_only")) ?? "1") === "1");
       setModel((await db.getSetting("model")) ?? "opus");
+      setDmEvery(selfDmEvery(await db.getSetting("self_dm_every")));
+      setDmState(parseSelfDmState(await db.getSetting("self_dm_state")));
       setNotes(await db.getNotes());
       reloadLessons();
       setLog(await db.recentLog(30));
@@ -418,6 +436,20 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
+              <SettingRow label="Tasks from your Slack DM" hint={dmHint(dmEvery, dmState)}>
+                <Segmented
+                  label="Tasks from your Slack DM"
+                  value={dmEvery}
+                  onChange={async (every) => {
+                    setDmEvery(every);
+                    await db.setSetting("self_dm_every", every);
+                  }}
+                  options={[
+                    { value: "300", label: "Every 5 minutes" },
+                    { value: "off", label: "Off" },
+                  ]}
+                />
+              </SettingRow>
               <SettingRow
                 label="Ask why after a change"
                 hint="After you change a task or project, Demian can ask why, so it learns the reason."
@@ -437,19 +469,23 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <div ref={learnings} />
               {/* Everything Demian has learned, in one list: what you told the chat, then the lessons from your corrections. */}
               {notes.length + lessons.length > 0 && (
-                <div className="setting-row stacked">
-                  <button className="setting-text setting-toggle" onClick={() => setLessonsOpen(!lessonsOpen)} aria-expanded={lessonsOpen}>
-                    <span className="setting-label">
+                <div className="setting-row stacked" ref={learnings}>
+                  {/* The (?) sits between the label and the arrow, outside the toggle: a button can't hold another control. */}
+                  <div className="setting-text setting-label learned-toggle">
+                    <button className="setting-toggle" onClick={() => setLessonsOpen(!lessonsOpen)} aria-expanded={lessonsOpen}>
                       What Demian has learned <span className="timestamp">{notes.length + lessons.length}</span>
+                    </button>
+                    <InfoTip label="About What Demian has learned">
+                      What you told the chat and lessons from your corrections, used in every refresh, plan and message. Click a lesson to reword it.
+                    </InfoTip>
+                    <button className="setting-toggle" tabIndex={-1} aria-hidden onClick={() => setLessonsOpen(!lessonsOpen)}>
                       <svg className={`disclosure${lessonsOpen ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                         <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
-                    </span>
-                    <span className="setting-hint">What you told the chat and lessons from your corrections, used in every refresh, plan and message. Click a lesson to reword it.</span>
-                  </button>
+                    </button>
+                  </div>
                   <Reveal open={lessonsOpen}>
                     <ul className="notes-list">
                       {notes.map((note, i) => (

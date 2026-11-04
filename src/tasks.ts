@@ -1,6 +1,25 @@
+import { TITLE_MAX } from "./baseLessons";
 import type { Automation, Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "blocked" | "done";
+
+/** Tasks whose titles are longer than a task title should be (see TITLE_RULE). */
+export function longTitled<T extends { title: string }>(tasks: T[]): T[] {
+  return tasks.filter((t) => t.title.trim().length > TITLE_MAX);
+}
+
+/**
+ * The status a task should move to as its plan's steps get blocked and unblocked, or null to leave
+ * it. A step blocked on someone else blocks the task, while the plan is still being discussed too
+ * (the discussion found the blocker). Once no step is blocked, a task that was blocked goes back to
+ * in progress, or to do if its plan hasn't been approved yet. A finished task is left alone.
+ */
+export function statusForBlockedSteps(anyBlocked: boolean, wasBlocked: boolean, status: TaskStatus, discussing: boolean): TaskStatus | null {
+  if (status === "done") return null;
+  if (anyBlocked) return status === "blocked" ? null : "blocked";
+  if (wasBlocked && status === "blocked") return discussing ? "todo" : "in_progress";
+  return null;
+}
 
 export interface TaskState {
   status: TaskStatus;
@@ -264,7 +283,8 @@ export function taskPriority(
 export type PriorityFilter = EffectivePriority | "unrated";
 
 /** Where a task came from: a project channel, a Slack or email request, or the user's own list. */
-export type TaskSource = "project" | "request" | "own";
+/** Where a task came from, for the source filter: a project, a Slack or email request, meeting prep, or the user's own list. */
+export type TaskSource = "project" | "request" | "meeting" | "own";
 
 /** When a task is due: overdue, within two days (as the orb counts it), later, or no date. */
 export type DueFilter = "overdue" | "soon" | "later" | "none";

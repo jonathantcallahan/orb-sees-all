@@ -75,6 +75,13 @@ export const TOOLS = {
     "search_describe_capabilities",
     "ask",
   ].map((t) => `${ZOOM}${t}`),
+  /** Reading the user's own DM, for #demian messages. */
+  selfDmRead: [`${SLACK}slack_read_channel`],
+  /**
+   * Answering the #demian messages once Demian has acted on them: a reaction, and a reply in the
+   * message's thread with what it did. Only ever in the user's DM with themselves.
+   */
+  selfDmReply: [`${SLACK}slack_add_reaction`, `${SLACK}slack_send_message`],
   /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
   slackSend: [`${SLACK}slack_send_message`],
   /** Creating a Google Doc, used only for a doc the user reviewed and clicked Create on. */

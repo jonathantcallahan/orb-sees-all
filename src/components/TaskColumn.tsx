@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TaskChatDockProvider, type TaskChatDock } from "./chatDock";
 import { isWindows, MOD } from "../platform";
-import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
+import { addManualTask, type AdhocStore, type ManualTask, type MergedTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
 import { applyOrder, applyTaskState, formatMinutes, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
@@ -30,6 +30,7 @@ function Group({
   priorityOverrides,
   openTasks,
   duplicates,
+  mergedFrom,
   running,
   filtered = false,
   controls,
@@ -61,6 +62,7 @@ function Group({
   priorityOverrides: Record<string, Priority>;
   openTasks: { id: string; title: string }[];
   duplicates: Map<string, DuplicateCandidate>;
+  mergedFrom: Record<string, MergedTask[]>;
   running: string[];
   onChange: () => void;
 }) {
@@ -89,6 +91,7 @@ function Group({
           manualPriority={priorityOverrides[t.id]}
           openTasks={openTasks}
           duplicateOf={duplicates.get(t.id)}
+          mergedIn={mergedFrom[t.id]}
           compact
           dateBadge={dateOf?.(t)}
           created={createdOf?.(t)}
@@ -144,6 +147,7 @@ export function TaskColumn({
   refinedDescriptions,
   taskBriefs = {},
   notDuplicates,
+  mergedFrom = {},
   running,
   sideBySide = false,
   headerExtra,
@@ -186,6 +190,8 @@ export function TaskColumn({
   taskBriefs?: Record<string, string>;
   /** Pairs you said aren't duplicates. */
   notDuplicates: Set<string>;
+  /** What was merged into each task, by the kept task's id. */
+  mergedFrom?: Record<string, MergedTask[]>;
   running: string[];
   onChange: () => void;
 }) {
@@ -217,7 +223,7 @@ export function TaskColumn({
   const filters = <TaskFilters filter={filter} onChange={setFilter} showSource={!filterProject} />;
   /** What Orb can do on the task, from its assessment (null until assessed). */
   const automationOf = (t: CardTask) => (t.source === "manual" ? assessments.get(t.id) : t.assessment)?.automation ?? null;
-  const sourceOf = (t: CardTask): TaskSource => (t.source === "manual" ? "own" : t.source === "project" ? "project" : "request");
+  const sourceOf = (t: CardTask): TaskSource => (t.source === "manual" ? "own" : t.source === "project" ? "project" : t.source === "meeting" ? "meeting" : "request");
   /** Applies the filters; in a single project's view, where everything comes from that project, the source filter doesn't apply. */
   const keep = <T extends CardTask>(list: T[], f: TaskFilter = filter) =>
     isFiltering(f)
@@ -331,7 +337,7 @@ export function TaskColumn({
   const [firstSeen, setFirstSeen] = useState<Record<string, string>>({});
   // When each task was created.
   const createdOf = (t: CardTask) => createdAt(t as CardTask & { created_at?: string | null }, firstSeen);
-  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, running, createdOf, onChange };
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, mergedFrom, running, createdOf, onChange };
 
   // Today's plan pulls from every group, in the order you arranged it, open tasks first (a task
   // just dropped among the finished ones waits there a moment before moving up).
@@ -365,6 +371,7 @@ export function TaskColumn({
             manualPriority={priorityOverrides[t.id]}
             openTasks={openTasks}
             duplicateOf={duplicates.get(t.id)}
+            mergedIn={mergedFrom[t.id]}
             // Finished tasks shrink to a one-line row (click to see the card again).
             compact={t.done}
             created={createdOf(t)}
