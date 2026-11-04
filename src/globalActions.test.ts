@@ -25,6 +25,13 @@ describe("action cards", () => {
   });
 });
 
+describe("context and watching", () => {
+  it("describes adding to a task and watching a topic", () => {
+    expect(describeAction({ type: "add_task_context", task_id: "m1", title: "Book venue", text: "Ana prefers Thursday" }, project, channel, items)).toBe('Add to "Book venue": Ana prefers Thursday');
+    expect(describeAction({ type: "watch_topic", text: "Legal sign-off by Friday, else chase them" }, project, channel, items)).toBe("Watch: Legal sign-off by Friday, else chase them");
+  });
+});
+
 describe("adding a task from the chat", () => {
   it("describes Today, status and priority on the card", () => {
     const a = { type: "add_task", title: "Get codes", today: true, status: "in_progress", priority: "high" } as const;

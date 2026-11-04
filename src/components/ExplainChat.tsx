@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { setTaskState } from "../db";
 import * as db from "../db";
 import { startChatSession } from "../jobs";
-import { explainPrompt, replyPrompt, type ExplainedUpdate, type ReplyTopic } from "../openInClaude";
+import { explainPrompt, replyPrompt, watchChatPrompt, type ExplainedUpdate, type ReplyTopic } from "../openInClaude";
+import { WATCH_CHAT, type WatchedTopic } from "../watched";
 import { unsentMessages, useSessionProgress, type SessionLink } from "../sessions";
 import { useJobStatus } from "../useAppData";
 import { SessionChat, type SessionAsk } from "./TaskCard";
@@ -18,6 +19,7 @@ function TopicChat({
   title,
   ask,
   onSent,
+  onPlan,
   onClose,
 }: {
   id: string;
@@ -26,6 +28,8 @@ function TopicChat({
   ask: SessionAsk;
   /** A handed-over message was sent. */
   onSent?: () => void;
+  /** The session wrote a new "[orb] plan" block: its lines. */
+  onPlan?: (lines: string[]) => void;
   onClose: () => void;
 }) {
   const [link, setLink] = useState<SessionLink | undefined>();
@@ -41,6 +45,10 @@ function TopicChat({
   const progress = useSessionProgress(id, link, reload);
   const working = useJobStatus(`session:${id}`);
   const sentCount = link?.sentKeys?.length ?? 0;
+  const planKey = progress?.plan ? JSON.stringify(progress.plan) : null;
+  useEffect(() => {
+    if (planKey && progress?.plan) onPlan?.(progress.plan.map((s) => s.title));
+  }, [planKey]);
   useEffect(() => {
     if (sentCount > 0) onSent?.();
   }, [sentCount]);
@@ -68,6 +76,31 @@ export function ExplainChat({ update, onClose }: { update: ExplainedUpdate; onCl
       prompt={() => explainPrompt(update)}
       title="Update detail chat"
       ask={{ step: null, title: `Explain the following update from ${update.label}`, note: update.text }}
+      onClose={onClose}
+    />
+  );
+}
+
+/** A watched topic's Discuss: a session reads the latest on it, says where it stands, then answers follow-ups. */
+export function WatchChat({
+  topic,
+  projectName,
+  onActions,
+  onClose,
+}: {
+  topic: WatchedTopic;
+  projectName: string | null;
+  /** The chat restated the conditional actions (an "[orb] plan" block): its lines. */
+  onActions: (lines: string[]) => void;
+  onClose: () => void;
+}) {
+  return (
+    <TopicChat
+      id={`${WATCH_CHAT}${topic.id}`}
+      prompt={() => watchChatPrompt({ ...topic, projectName })}
+      title="Watched topic chat"
+      ask={{ step: null, title: `About the watched topic "${topic.topic}"`, note: topic.status?.summary ?? "" }}
+      onPlan={onActions}
       onClose={onClose}
     />
   );

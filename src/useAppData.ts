@@ -1,3 +1,4 @@
+import type { WatchedTopic } from "./watched";
 import type { Priority } from "./schema";
 import type { SessionLink } from "./sessions";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -31,11 +32,14 @@ export interface AppData {
   taskBriefs: Record<string, string>;
   /** Pairs of tasks you said aren't duplicates. */
   notDuplicates: Set<string>;
+  /** What was merged into each task, by the kept task's id (see mergeTasks). */
+  mergedFrom: Record<string, db.MergedTask[]>;
   lastFullRefresh: string | null;
+  watched: WatchedTopic[];
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -55,8 +59,10 @@ async function loadAll(): Promise<AppData> {
     db.getNotDuplicates(),
     db.getSetting("last_full_refresh_date"),
     db.getTaskBriefs(),
+    db.listWatchedTopics(),
+    db.getMergedFrom(),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

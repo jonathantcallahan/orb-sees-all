@@ -1,3 +1,5 @@
+import { actionLine, WATCH_CHAT } from "./watched";
+import { SAME_WORK_RULE, TITLE_RULE } from "./baseLessons";
 import type { TaskPlan } from "./schema";
 
 /** Claude Desktop truncates prefilled prompts at about 14,000 characters. */
@@ -212,6 +214,60 @@ export function explainPrompt(u: ExplainedUpdate): string {
   ].join("\n");
 }
 
+/** A chat about a watched topic: where it stands, read from the sources, then the user's questions. */
+export function watchChatPrompt(t: {
+  id: string;
+  topic: string;
+  details: string | null;
+  status: { summary: string; links: { link: string }[] } | null;
+  projectName?: string | null;
+  outcomes: { when: "happens" | "not_by"; event: string; by: string | null; then: string }[];
+}): string {
+  return [
+    sessionMarker(`${WATCH_CHAT}${t.id}`),
+    "",
+    `I'm keeping an eye on this in my day planner, and want to talk about it: ${t.topic}`,
+    ...(t.projectName ? [`It's part of my project "${t.projectName}".`] : []),
+    ...(t.details?.trim() ? [`What I wrote about it: ${t.details.trim()}`] : []),
+    ...(t.status ? [`Where my planner last found it stands: ${t.status.summary}`, ...t.status.links.map((l) => `Source: ${l.link}`)] : []),
+    ...(t.outcomes.length
+      ? ["", "What my planner does about it, its conditional actions:", ...t.outcomes.map((o, i) => `${i + 1}. ${actionLine(o)}`)]
+      : ["", "It has no conditional actions yet: my planner just keeps track of where it stands."]),
+    "",
+    "Read the latest on it first (the Slack threads, emails or tickets about it), then tell me briefly where it stands now and whether anything needs me. If nothing does, say so.",
+    "If I ask to add, change or remove a conditional action, agree it with me, then write the whole new list on its own lines between `[orb] plan` and `[orb] end`, one action per numbered line in exactly the form above: `If <what happens> | hasn't happened by YYYY-MM-DD | then <what to do>`, or `If <what happens> | has happened | then <what to do>`. What to do becomes a task, so write it as a task title: ${TITLE_RULE} My planner takes that list as the topic's conditional actions and hides the block from our chat, so also tell me in a sentence what you changed. Leave out the block when nothing changes.",
+    "Don't send, post or change anything. I may have follow-up questions; answer them in the same plain way.",
+  ].join("\n");
+}
+
+/**
+ * The changes Demian can make to itself, as the JSON a chat (or a #demian message) proposes; one list,
+ * so the global chat and the DM can't drift apart. See GlobalAction and globalActions.ts.
+ */
+export const GLOBAL_ACTION_DOCS = [
+  '- {"type": "create_project", "name": "Store assets", "channels": [{"channel_id": "C123", "name": "store-assets"}], "reason": "why it\'s a project"}: a project the planner is missing. Find its channels in Slack first; the first is its main channel.',
+  '- {"type": "split_project", "project_id": "C111", "new_name": "Store assets", "channel_ids": ["C222"], "reason": "..."}: moves those channels out of a project into a new one. A project\'s own id (its main channel) can\'t move.',
+  '- {"type": "merge_projects", "from_id": "C111", "into_id": "C222"}',
+  '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
+  '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
+  '- {"type": "add_project_context", "project_id": "C111", "entries": ["one plain statement about it", "Not part of it: …"]}: adds to the project\'s context, which every refresh keeps to. Use it when I say what a project is or isn\'t about, or anything else that should shape how it\'s read.',
+  '- {"type": "add_project_repos", "project_id": "C111", "github": ["owner/name"], "local": ["/Users/me/code/repo"]}: where a project\'s code lives, so plans and chats can read it. Offer it when a question needs the code and the project has no repos listed.',
+  '- {"type": "remove_project_context", "project_id": "C111", "entries": ["the entry, as listed"]}: takes entries out of a project\'s context; refreshes leave them out.',
+  '- {"type": "set_project_status", "project_id": "C111", "status": "blocked" | "at_risk" | "on_track" | "idle" | "auto", "reason": "why, in my words"}: sets the status the board shows; refreshes keep to it unless something clearly changes. "auto" hands it back to refreshes.',
+  '- {"type": "resolve_project_item", "project_id": "C111", "item_id": "<id of an open blocker or active item>", "what": "<what it is>"}: marks it done, as its Mark done does.',
+  '- {"type": "check_project_item", "project_id": "C111", "item_id": "...", "what": "..."}: has Claude double-check whether a blocker or active item is still real, as its Double check does.',
+  '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s linked channels (not its main one).',
+  '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
+  '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
+  '- {"type": "add_task", "title": "...", "project_id": "C111" or null, "description": "<what you found, with links>" or null, "today": true or null, "status": "in_progress" or null, "priority": "high" or null}: a new task of my own. A new task has no id until it\'s applied, so set Today, status and priority here, in the same card, rather than in separate ones. Its title: ' + TITLE_RULE + ' Before adding one, look through my open tasks for the same piece of work. ' + SAME_WORK_RULE + ' If there is one, use add_task_context, plan_today or set_task_status on it instead of adding a second.',
+  '- {"type": "add_task_context", "task_id": "<id from my task list>", "title": "<its title>", "text": "..."}: adds what I said to the end of an existing task\'s description (details, links, who\'s involved), so its plan and chat take it into account.',
+  '- {"type": "watch_topic", "text": "<in my words: what to follow, and what to do if it happens or doesn\'t by a date>"}: something to keep an eye on rather than do now. My planner adds it to Watched topics, works out its title, project and conditional actions from the text, and checks it every refresh.',
+  '- {"type": "plan_today", "task_id": "<id from my task list>", "title": "<its title>", "today": true}: put one of my existing tasks in Today\'s tasks (today false takes it off). When I ask whether I have a task about something, find it in my task list (match on meaning, not just words), tell me which, and propose this if I want it today.',
+  '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "done"}',
+  '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',
+  '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',
+].join("\n");
+
 /**
  * The opening of a global chat: the user's first message, and how Claude helps them fix the planner
  * itself. Changes go to the planner as "[orb] action" blocks, which the user applies one by one.
@@ -228,25 +284,7 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '{"type": "...", ...}',
     "[orb] end",
     "The changes you can propose, as JSON:",
-    '- {"type": "create_project", "name": "Store assets", "channels": [{"channel_id": "C123", "name": "store-assets"}], "reason": "why it\'s a project"}: a project the planner is missing. Find its channels in Slack first; the first is its main channel.',
-    '- {"type": "split_project", "project_id": "C111", "new_name": "Store assets", "channel_ids": ["C222"], "reason": "..."}: moves those channels out of a project into a new one. A project\'s own id (its main channel) can\'t move.',
-    '- {"type": "merge_projects", "from_id": "C111", "into_id": "C222"}',
-    '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
-    '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
-    '- {"type": "add_project_context", "project_id": "C111", "entries": ["one plain statement about it", "Not part of it: …"]}: adds to the project\'s context, which every refresh keeps to. Use it when I say what a project is or isn\'t about, or anything else that should shape how it\'s read.',
-    '- {"type": "add_project_repos", "project_id": "C111", "github": ["owner/name"], "local": ["/Users/me/code/repo"]}: where a project\'s code lives, so plans and chats can read it. Offer it when a question needs the code and the project has no repos listed.',
-    '- {"type": "remove_project_context", "project_id": "C111", "entries": ["the entry, as listed"]}: takes entries out of a project\'s context; refreshes leave them out.',
-    '- {"type": "set_project_status", "project_id": "C111", "status": "blocked" | "at_risk" | "on_track" | "idle" | "auto", "reason": "why, in my words"}: sets the status the board shows; refreshes keep to it unless something clearly changes. "auto" hands it back to refreshes.',
-    '- {"type": "resolve_project_item", "project_id": "C111", "item_id": "<id of an open blocker or active item>", "what": "<what it is>"}: marks it done, as its Mark done does.',
-    '- {"type": "check_project_item", "project_id": "C111", "item_id": "...", "what": "..."}: has Claude double-check whether a blocker or active item is still real, as its Double check does.',
-    '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s linked channels (not its main one).',
-    '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
-    '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
-    '- {"type": "add_task", "title": "...", "project_id": "C111" or null, "description": "<what you found, with links>" or null, "today": true or null, "status": "in_progress" or null, "priority": "high" or null}: a new task of my own. A new task has no id until it\'s applied, so set Today, status and priority here, in the same card, rather than in separate ones.',
-    '- {"type": "plan_today", "task_id": "<id from my task list>", "title": "<its title>", "today": true}: put one of my existing tasks in Today\'s tasks (today false takes it off). When I ask whether I have a task about something, find it in my task list (match on meaning, not just words), tell me which, and propose this if I want it today.',
-    '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "done"}',
-    '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',
-    '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',
+    GLOBAL_ACTION_DOCS,
     "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
     `My message: ${firstMessage}`,
   ].join("\n");

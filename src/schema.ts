@@ -336,6 +336,10 @@ export const GlobalAction = z.discriminatedUnion("type", [
     status: z.enum(["todo", "in_progress", "waiting"]).nullish(),
     priority: z.enum(["critical", "high", "medium", "low"]).nullish(),
   }),
+  /** More about an existing task, in the user's words: added to the end of its description. */
+  z.object({ type: z.literal("add_task_context"), task_id: z.string(), title: z.string().nullish(), text: z.string().min(1) }),
+  /** A topic to watch, in the user's words: what to follow, and what to do if it happens or doesn't by a date. */
+  z.object({ type: z.literal("watch_topic"), text: z.string().min(1) }),
   /** Plans an existing task for today (Today's tasks), or takes it off. */
   z.object({ type: z.literal("plan_today"), task_id: z.string(), title: z.string().nullish(), today: z.boolean().default(true) }),
   z.object({ type: z.literal("set_task_status"), task_id: z.string(), title: z.string().nullish(), status: z.enum(["todo", "in_progress", "waiting", "done"]) }),
@@ -373,6 +377,67 @@ export const EpicChildren = z.object({
 export type EpicChildren = z.infer<typeof EpicChildren>;
 
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish(), moved: z.string().nullish() });
+
+/** New, short titles for long-titled tasks, by task id. */
+export const ShortTitles = z.object({ titles: z.array(z.object({ id: z.string(), title: z.string() })).default([]) });
+
+/** A watched topic as the user wrote it, read into its fields: a title, details and outcomes. */
+export const WatchedEntry = z.object({
+  topic: z.string(),
+  details: z.string().nullish(),
+  /** The id of the user's project it belongs to, from the list they were given, or null. */
+  project_id: z.string().nullish(),
+  outcomes: z
+    .array(
+      z.object({
+        when: z.enum(["happens", "not_by"]),
+        event: z.string(),
+        by: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+        then: z.string(),
+      }),
+    )
+    .default([]),
+});
+export type WatchedEntry = z.infer<typeof WatchedEntry>;
+
+/** One check of a watched topic: where it stands, and for each open outcome whether its event has happened. */
+export const WatchedCheck = z.object({
+  summary: z.string(),
+  links: z.array(z.object({ title: z.string(), link: z.string() })).default([]),
+  outcomes: z
+    .array(z.object({ id: z.string(), occurred: z.boolean(), evidence: z.string().nullish(), link: z.string().nullish() }))
+    .default([]),
+});
+export type WatchedCheck = z.infer<typeof WatchedCheck>;
+
+/** Sets of open tasks that are the same work (see SAME_WORK_RULE), each with the one to keep. */
+export const SameWork = z.object({
+  groups: z.array(z.object({ keep: z.string(), drop: z.array(z.string()).default([]), why: z.string().nullish() })).default([]),
+});
+export type SameWork = z.infer<typeof SameWork>;
+
+/** One check of the user's own Slack DM: the newest message seen, and the #demian messages among the new ones, as written. */
+export const SelfDmPoll = z.object({
+  latest_ts: z.string().nullish(),
+  /** Each message exactly as written, so the #demian tag can be checked. */
+  messages: z.array(z.object({ ts: z.string(), text: z.string() })).default([]),
+});
+export type SelfDmPoll = z.infer<typeof SelfDmPoll>;
+
+/**
+ * What each #demian message asks Demian to do: changes to the planner (GlobalActions, each checked
+ * on its own as it's applied, so one malformed change doesn't throw out the rest), or a question
+ * for the user when it can't tell.
+ */
+export const SelfDmActions = z.object({
+  results: z
+    .array(z.object({ ts: z.string(), actions: z.array(z.unknown()).default([]), question: z.string().nullish() }))
+    .default([]),
+});
+
+/** The #demian messages Demian reacted to and replied under. */
+export const SelfDmReplied = z.object({ done: z.array(z.string()).default([]) });
+export type SelfDmActions = z.infer<typeof SelfDmActions>;
 
 export const DailyReading = z.object({
   reading: z.string(),

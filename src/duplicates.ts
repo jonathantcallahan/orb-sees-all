@@ -55,12 +55,46 @@ export function similarity(a: Comparable, b: Comparable): number {
 /** Whether two tasks look like the same work, by the same test findDuplicates uses. */
 export const sameWork = (a: Comparable, b: Comparable) => similarity(a, b) >= TITLE_MATCH;
 
+/** The key for a pair of task ids, in either order (the same as notDuplicateKey in db.ts). */
+export const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+/**
+ * The merges to make from the merge pass's sets of same work (SameWork), as keep/drop pairs. Each
+ * id must be an open task, by canonical id; a pair the user said isn't a duplicate stays apart; the
+ * user's own task is the one kept when the set has one (their words, plan and session stay); two
+ * tasks that each have a Claude session stay apart, so neither session is lost; a task is merged at
+ * most once per pass; and with `focus` (tasks just added), only sets that include one of them count.
+ */
+export function acceptedMerges(
+  groups: { keep: string; drop: string[]; why?: string | null }[],
+  known: { open: Set<string>; mine: Set<string>; notDuplicates: Set<string>; sessions: Set<string>; aliases: Map<string, string>; focus?: Set<string> },
+): { keep: string; drop: string; why: string | null }[] {
+  const canon = (id: string) => known.aliases.get(id) ?? id;
+  const taken = new Set<string>();
+  const out: { keep: string; drop: string; why: string | null }[] = [];
+  for (const g of groups) {
+    const ids = [...new Set([g.keep, ...g.drop].map(canon))].filter((id) => known.open.has(id) && !taken.has(id));
+    if (ids.length < 2) continue;
+    if (known.focus && !ids.some((id) => known.focus!.has(id))) continue;
+    const wanted = canon(g.keep);
+    const keep = ids.some((id) => known.mine.has(id)) && !known.mine.has(wanted) ? ids.find((id) => known.mine.has(id))! : ids.includes(wanted) ? wanted : ids[0];
+    for (const drop of ids) {
+      if (drop === keep || known.notDuplicates.has(pairKey(keep, drop))) continue;
+      if (known.sessions.has(keep) && known.sessions.has(drop)) continue;
+      out.push({ keep, drop, why: g.why?.trim() || null });
+      taken.add(drop);
+    }
+    if (out.some((m) => m.keep === keep)) taken.add(keep);
+  }
+  return out;
+}
+
 /**
  * For each task, the most similar other open task, when they look like the same work. Pairs the
  * user marked "not a duplicate" are skipped (keys from notDuplicateKey in db.ts).
  */
 export function findDuplicates(tasks: Comparable[], notDuplicates: Set<string>): Map<string, DuplicateCandidate> {
-  const key = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const key = pairKey;
   const best = new Map<string, { score: number; other: Comparable }>();
   for (let i = 0; i < tasks.length; i++)
     for (let j = i + 1; j < tasks.length; j++) {

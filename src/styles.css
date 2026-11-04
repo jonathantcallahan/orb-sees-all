@@ -313,7 +313,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The status badge; an invisible native menu covers it, so clicking opens the usual list. */
 .status-badge, .menu-badge { position: relative; flex-shrink: 0; cursor: pointer; }
 .status-badge select, .menu-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
-.status-badge:focus-within, .menu-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A ring only when the menu was reached from the keyboard: picking with the mouse leaves it focused, and the ring would stay. */
+.status-badge:has(select:focus-visible), .menu-badge:has(select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 /* To do in the muted gray the other badges show (it would otherwise take the text color). */
 .status-badge.todo { color: var(--muted); }
@@ -412,20 +413,23 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   flex-direction: column;
   padding: 4px 6px;
   border-radius: 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --ev-tint: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--ev-tint) 45%, var(--border));
+  background: color-mix(in srgb, var(--ev-tint) 16%, var(--surface));
   font-size: 11px;
   line-height: 1.3;
   color: var(--text);
 }
 .event-block { cursor: pointer; }
 /* Meetings sit in gray until you point at the calendar, so it doesn't compete with the task lists;
-   pointing anywhere on it brings their colors back. */
-.event-block { transition: filter 0.25s ease; }
-.day-grid:not(:hover) .event-block { filter: grayscale(1); }
-.event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--accent) 26%, var(--surface)); }
+   pointing anywhere on it brings their colors back. Grayed by color, not a filter: WebKit crops a
+   filtered block's bottom border. */
+.event-block { transition: background-color 0.25s ease, border-color 0.25s ease; }
+.day-grid:not(:hover) .event-block { --ev-tint: var(--muted); }
+.event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--ev-tint) 26%, var(--surface)); }
 .event-block.past { opacity: 0.5; }
 .event-block.current { border-color: var(--red); }
+.day-grid:not(:hover) .event-block.current { border-color: color-mix(in srgb, var(--muted) 70%, var(--border)); }
 /* Lines never squeeze each other; what doesn't fit is left out (see DayGrid). */
 .event-block > span { flex-shrink: 0; }
 .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -802,6 +806,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Description: cut to two lines with "…" and a gray More at the end */
 .description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; min-width: 0; overflow: hidden; }
+/* With nothing to show (no More, Edit or links), the row takes no space, so it adds no gap. */
+.description-actions:empty { display: none; }
 /* The links never wrap; a long status (a double check under way) truncates instead. */
 .description-actions > * { white-space: nowrap; flex-shrink: 0; }
 .description-actions > .checking { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -983,6 +989,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .duplicate-actions { display: flex; gap: 10px; }
 .duplicate-note .link-button { color: inherit; }
 .duplicate-note .link-button.more-link { color: var(--muted); }
+/* What Demian (or you) merged into this task: just so, not a warning, so in grey; Separate undoes it. */
+.duplicate-note.merged-note { background: var(--grey-bg); color: var(--muted); }
+.duplicate-note.merged-note + .duplicate-note.merged-note { margin-top: 4px; }
 
 /* Your RSVP on calendar blocks: no response is grayed out, maybe is striped, yes is full color.
    Declined meetings aren't shown. */
@@ -1294,8 +1303,12 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; min-height: 44px; }
 .setting-row.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
 .setting-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.setting-label { font-size: 13px; }
-.setting-hint { font-size: 11px; color: var(--muted); }
+.setting-label { font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+/* A (?) beside a label; its explanation shows in a tooltip (see InfoTip). */
+.info-tip { display: inline-grid; place-items: center; color: color-mix(in srgb, var(--muted) 70%, var(--bg)); cursor: help; border-radius: 50%; line-height: 0; }
+.info-tip:hover, .info-tip:focus-visible { color: var(--muted); outline: none; }
+.info-tip:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.info-tip-body { position: fixed; z-index: 200; padding: 7px 10px; font-size: 12px; line-height: 1.45; color: var(--text); pointer-events: none; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); }
 .setting-control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
 .setting-row textarea { font-size: 12px; border-radius: 8px; resize: none; }
 .settings-modal textarea:focus, .settings-modal .time-input:focus {
@@ -1846,3 +1859,55 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
    two titles line up whatever controls sit on the right of each. */
 .detail-split > .detail-pane > .column-header,
 .detail-split > .detail-pane > .task-list > .group-header:first-child { height: 26px; margin-top: 0; }
+
+/* Watched topics, an area of its own laid out like Tasks: the add box and the topics (task cards, see
+   CardExtension) on the left, a topic's chat on the right. */
+.watched-add .watched-entry { display: block; width: 100%; min-height: 84px; padding: 10px 12px; resize: none; overflow: hidden; font-size: 13px; line-height: 1.45; }
+.watched-add .watched-entry:disabled { opacity: 0.6; }
+.watched-group-title { margin: 12px 0 6px; }
+.watched-none { margin: 0; }
+/* A conditional action is a plan step; its condition and date are small badges (they decide when
+   Demian acts), amber while it's ready, and its state or Create and open task sits at the end. */
+/* The same size as the step's text and on its baseline, so it reads as part of the sentence; the
+   vertical padding makes it taller without changing the line's height (inline padding doesn't). */
+.step-badge { padding: 1px 5px; border-radius: 3px; font-size: inherit; vertical-align: baseline; color: var(--text); }
+.plan-outline-steps li.step-waiting .step-badge { color: var(--amber); background: var(--amber-bg); }
+.step-trailing { flex-shrink: 0; margin-left: auto; padding-left: 8px; }
+.task-meta .badge-select { font-size: 11px; }
+/* A topic's Updates: newest first, each with when it was collected. */
+.watched-updates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.watched-updates li { display: flex; flex-direction: column; gap: 3px; }
+.watched-update-at { font-size: 11px; }
+.watched-update-text { line-height: 1.45; overflow-wrap: anywhere; }
+/* A card's timestamp beside its title, only while it's hovered (open or not); the title truncates to make room. */
+.card-stamp { display: none; flex-shrink: 0; white-space: nowrap; }
+.task-card:hover .card-stamp { display: inline; }
+/* A watched topic's status (Watching, Human, Done) is always shown: it's all its title row carries. */
+.task-card.watched.collapsed:not(:hover) .task-extras { max-width: 360px; opacity: 1; margin-left: 0; }
+/* A watched topic's own ↻: slides in between its status and the arrow while the card is hovered, and
+   stays while it checks. Closed it takes no room (the header's 8px gap is taken back), and the glyph's
+   line box is kept to the title row's so it doesn't make the header taller. */
+.task-card-header > .card-refresh {
+  display: inline-flex; align-self: center; flex-shrink: 0; width: 0; margin-left: -8px; opacity: 0; overflow: hidden; line-height: 18px;
+  transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
+}
+.task-card:hover .task-card-header > .card-refresh, .task-card-header > .card-refresh.busy { width: 24px; margin-left: 0; opacity: 1; }
+.card-refresh .icon-button { line-height: 18px; }
+/* An area's icon with something waiting on you: a small dot at its top right. */
+.detail-tab { position: relative; }
+.tab-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--bg); }
+
+/* A value you can change, as a badge (BadgeSelect): its text, a small arrow, and a menu under it. */
+.badge-select { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; border: none; font: inherit; font-size: 11px; line-height: inherit; color: var(--text); cursor: pointer; }
+.badge-select.none { color: var(--muted); }
+.badge-select:hover, .badge-select.open { background: color-mix(in srgb, var(--text) 10%, var(--surface)); }
+.badge-select:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.badge-select > svg { flex-shrink: 0; color: var(--muted); }
+.badge-menu { position: fixed; z-index: 200; display: flex; flex-direction: column; min-width: 140px; max-height: 280px; overflow-y: auto; padding: 4px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); }
+.badge-menu-item { padding: 5px 8px; border: none; border-radius: 5px; background: none; color: var(--text); font-size: 12px; text-align: left; white-space: nowrap; }
+.badge-menu-item:hover, .badge-menu-item:focus-visible { background: var(--grey-bg); outline: none; }
+.badge-menu-item.on { font-weight: 500; }
+
+/* Settings' What Demian has learned: the label and arrow toggle the list; the (?) sits between them. */
+.learned-toggle { display: flex; flex-direction: row; align-items: center; gap: 5px; }
+.learned-toggle > .setting-toggle { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import * as db from "../db";
-import { applyAction, describeAction } from "../globalActions";
+import { actionNames, applyAction, describeAction } from "../globalActions";
 import { globalChatKey, startGlobalChat } from "../jobs";
 import { projectName } from "../projects";
 import type { Project } from "../db";
@@ -141,16 +141,8 @@ export function GlobalChat({
   }, [link?.applied]);
 
   // Names for the cards: projects by id, channels by id.
-  const project = (id: string) => {
-    const p = projects.find((x) => x.channel_id === id);
-    return p ? projectName(p) : id;
-  };
-  const channel = (id: string) => projects.flatMap((p) => p.channels).find((c) => c.channel_id === id)?.name ?? id;
-  const projectItem = (projectId: string, itemId: string) => {
-    const s = projects.find((x) => x.channel_id === projectId)?.snapshot;
-    return [...(s?.blockers ?? []), ...(s?.active ?? [])].find((b) => b.id === itemId)?.what ?? null;
-  };
-  const describe = (item: PendingAction) => (item.action ? describeAction(item.action, project, channel, projectItem) : (item.error ?? "Couldn't read this change"));
+  const names = actionNames(projects);
+  const describe = (item: PendingAction) => (item.action ? describeAction(item.action, names.project, names.channel, names.item) : (item.error ?? "Couldn't read this change"));
 
   if (!key) return null;
   const hints = examplePrompts(projects);

@@ -25,6 +25,24 @@ export const WRITING_RULES = [
   "When a message includes AI-written background, say so and that it can be skimmed, and phrase suggestions tentatively (\"One option would be…\").",
 ];
 
+/**
+ * How long a task's title is. Titles are a label to recognize the task by in a list, not its
+ * explanation: the explanation goes in the description.
+ */
+export const TITLE_RULE =
+  'A task title is a few words, at most about 8 (roughly 50 characters): the action and what it\'s on, like "Draft reply to the pricing feedback thread". Who asked, why, the context, names and links go in the description, never the title. When a task carried over from before has a longer title, rewrite it to this length.';
+
+/** The longest a task title should be, in characters, matching TITLE_RULE. */
+export const TITLE_MAX = 55;
+
+/**
+ * When two tasks are the same work, so one should fold into the other instead of both staying on
+ * the list. One definition for every place that judges it: refreshes, the double check, the chat,
+ * #demian messages and the merge pass.
+ */
+export const SAME_WORK_RULE =
+  "Two tasks are the same work when doing one would finish, or mostly finish, the other: the same request, deliverable, decision or conversation, for the same people, however differently it's worded and wherever it came from (a note the user wrote, a Slack thread, an email, a project channel, meeting prep). A meeting topic and the to-do it's about are the same work (\"Discuss the export tool's scope with Sam\" and \"Broader support for the export tool\"), and so are a note and the request it records (\"Grow the beta group\" and \"Set criteria for adding people to #beta\"). Related work that would still be left to do once the other is done is separate.";
+
 /** What isn't a task. */
 export const TASK_RULES = [
   "A meeting already on the calendar isn't a task: not attending it, running it, or a follow-up that is just that meeting.",
