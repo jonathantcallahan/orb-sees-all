@@ -1,19 +1,20 @@
 import { useOrbName } from "../orbLook";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { approveDiscussedPlan, assessPendingTasks, checkTask, continueTaskSession, discussTaskPlan, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
-import { ago, formatMinutes, sinceWhen, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
+import { ago, formatMinutes, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { CloseIcon, ComposeModal, ExternalLink, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, useScrambled } from "./common";
 import { chatView, readableReply, sendDestination, GIVE_UP_MS, linkSession, looksOutOfSync, markStepDone, stepState, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress, type StepState } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
+import { InDock, useInDock, useTaskChatDock } from "./chatDock";
 import { label, recordCorrection, taskSnapshot } from "../feedback";
 import * as db from "../db";
 import { CLAUDE_ICON } from "../linkIcons";
@@ -24,6 +25,8 @@ export interface CardTask {
   id: string;
   title: string;
   description?: string | null;
+  /** The user's own note on a task they added, as typed, when its short title was written from it. */
+  brief?: string | null;
   link?: string | null;
   due?: string | null;
   requester?: string | null;
@@ -112,17 +115,17 @@ function Description({ text, onEdit, actions }: { text: string; onEdit?: () => v
       <div className="description-actions small">
         {truncated && (
           <button className="link-button small more-link" onClick={() => setExpanded(true)}>
-            Show more
+            More
           </button>
         )}
         {expanded && (
           <button className="link-button small more-link" onClick={() => setExpanded(false)}>
-            Show less
+            Hide
           </button>
         )}
         {onEdit && (
           <button className="link-button small more-link" onClick={onEdit}>
-            Edit description
+            Edit
           </button>
         )}
         {actions}
@@ -291,11 +294,15 @@ function recordDismiss(task: CardTask) {
   recordCorrection({ kind: "dismiss", subject: "task", subject_id: task.id, project_id: task.project?.id, before: taskSnapshot(task) }, label.dismiss(task.title));
 }
 
-function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void }) {
-  // A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
+/**
+ * A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
+ * While the task's Claude session is waiting on you, it reads "Human" instead (yellow); that isn't
+ * saved, and goes once you've answered.
+ */
+function StatusSelect({ task, human = false, onChange }: { task: CardTask; human?: boolean; onChange: () => void }) {
   return (
-    <span className={`badge status-badge ${task.status}`}>
-      {STATUS_LABEL[task.status]}
+    <span className={`badge status-badge ${human ? "human" : task.status}`} title={human ? "Claude needs your input: open the chat" : undefined}>
+      {human ? "Human" : STATUS_LABEL[task.status]}
       <select
         value={task.status}
         aria-label="Status"
@@ -319,11 +326,6 @@ function StatusSelect({ task, onChange }: { task: CardTask; onChange: () => void
   );
 }
 
-function carriedLabel(day: string): string {
-  const days = Math.round((Date.parse(localDate(new Date())) - Date.parse(day)) / 86_400_000);
-  return days === 1 ? "from yesterday" : `from ${days} days ago`;
-}
-
 /** What the orb can do for a task, beside the Plan heading, by its name; nothing for tasks that are all yours. */
 const orbRole = (automation: Automation, orb: string): string | null =>
   automation === "assisted" ? `${orb} can help` : automation === "claude" ? `${orb} can complete this task` : null;
@@ -337,8 +339,26 @@ const orbRole = (automation: Automation, orb: string): string | null =>
 /** Applying a double check's correction: still going (what it's doing), or done (when). */
 type CorrectionState = { working: string } | { appliedAt: string };
 
-/** Which task cards you've opened (true) or closed (false) this session, by task id. */
-const openCards = new Map<string, boolean>();
+/**
+ * The one task card that's open, by task id: opening a card closes whichever other was open (they're
+ * told by TASK_OPEN_EVENT). Kept here, not in the card, so a card dragged to another list (which
+ * renders it afresh) stays open.
+ */
+let openTask: string | null = null;
+const TASK_OPEN_EVENT = "taskcard:open";
+/** A task asked to be shown (View in tasks), until its card has scrolled it into view. */
+let pendingReveal: string | null = null;
+const TASK_REVEAL_EVENT = "taskcard:reveal";
+
+/**
+ * Opens a task's card and scrolls it into view: right away if it's on screen, or as soon as it is
+ * (View in tasks switches to the Tasks area first). Any id the task goes by works, merged ones too.
+ */
+export function revealTask(id: string) {
+  openTask = id;
+  pendingReveal = id;
+  window.dispatchEvent(new CustomEvent(TASK_REVEAL_EVENT, { detail: id }));
+}
 
 /** Whether the user asked for reduced motion; checked on each use, so a change in System Settings applies at once. */
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -376,11 +396,20 @@ function StepCircle({ state }: { state?: StepState }) {
  * Shows `text` in a small card under its child while it's hovered (the webview doesn't show native
  * title tooltips). With no text, renders the child alone.
  */
-function HoverTip({ text, children }: { text: string | null; children: ReactNode }) {
+function HoverTip({ text, whenClipped = false, children }: { text: string | null; whenClipped?: boolean; children: ReactNode }) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   if (!text) return <>{children}</>;
   return (
-    <span className="hover-tip-anchor" onMouseEnter={(e) => setAnchor(e.currentTarget.getBoundingClientRect())} onMouseLeave={() => setAnchor(null)}>
+    <span
+      className="hover-tip-anchor"
+      onMouseEnter={(e) => {
+        // `whenClipped`: only when the text in it (.clip-text) is cut short, since otherwise it's all there.
+        const clip = e.currentTarget.querySelector<HTMLElement>(".clip-text");
+        if (whenClipped && (!clip || clip.scrollWidth <= clip.clientWidth)) return;
+        setAnchor(e.currentTarget.getBoundingClientRect());
+      }}
+      onMouseLeave={() => setAnchor(null)}
+    >
       {children}
       {anchor &&
         createPortal(
@@ -455,11 +484,19 @@ function PlanOutline({
               ) : (
                 <StepCircle state={step.progress?.state} />
               )}
-              <HoverTip text={step.progress?.state === "blocked" ? (step.progress.note ? `Blocked: ${step.progress.note}` : "Blocked") : null}>
-                <span className="small">
-                  {step.title}
-                  {step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked" && (
-                    <span className="step-by you">Human</span>
+              {/* One line each, cut short with its Human tag kept after it; hovering shows the whole step
+                  (and why, for a blocked one). */}
+              <HoverTip
+                text={step.progress?.state === "blocked" ? `${step.title}${step.progress.note ? ` (blocked: ${step.progress.note})` : " (blocked)"}` : step.title}
+                whenClipped={step.progress?.state !== "blocked"}
+              >
+                <span className="small step-line">
+                  <span className="clip-text">{step.title}</span>
+                  {/* "Human" on the step waiting on you now (yellow on hover), whoever's step it is, and
+                      on your own steps still to come (gray). */}
+                  {(step.progress?.state === "waiting" ||
+                    (step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked")) && (
+                    <span className={`step-by you${step.progress?.state === "waiting" ? " now" : ""}`}>Human</span>
                   )}
                 </span>
               </HoverTip>
@@ -486,7 +523,10 @@ function AssessmentView({
   onAddDetails,
   onMarkDone,
   onRemind,
+  planCreated,
 }: {
+  /** When the plan was made (ISO), shown after the Plan heading's role as "Plan created …". */
+  planCreated?: string | null;
   /** Claude's take on the task; until there is one (a task nobody has assessed), the plan box says so. */
   assessment: Assessment | null;
   /** Plan steps tagged by who does them, shown inside the assessment. */
@@ -517,7 +557,12 @@ function AssessmentView({
         <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className="automation-kind">Plan</span>
           {assessment ? (
-            orbRole(assessment.automation, orbName) && <span className="automation-role timestamp">{orbRole(assessment.automation, orbName)}</span>
+            orbRole(assessment.automation, orbName) && (
+              <span className="automation-role timestamp">
+                {orbRole(assessment.automation, orbName)}
+                {planCreated && <span className="hover-stamp"> · Plan created {ago(planCreated)}</span>}
+              </span>
+            )
           ) : (
             <span className="automation-role timestamp">{planning ? "Planning…" : steps.length ? `${steps.length} steps` : "Plan not created"}</span>
           )}
@@ -689,7 +734,9 @@ function useThinCaret(ref: RefObject<HTMLTextAreaElement | null>, text: string, 
         const h = Math.max(8, box.height - 2);
         // Only when it lies wholly inside the visible text: a cursor scrolled out of view (or measured
         // against a box that has since shrunk) is not drawn, rather than drawn outside the box.
-        if (top >= -1 && top + h <= el.clientHeight + 1) next = { x: el.value ? box.left - origin.left : -2, y: top, h };
+        // In an empty box it sits just before where the placeholder starts (the text indent), a hair off it.
+        const empty = (parseFloat(cs.textIndent) || 0) - 3;
+        if (top >= -1 && top + h <= el.clientHeight + 1) next = { x: el.value ? box.left - origin.left : empty, y: top, h };
       }
     }
     // Only a real move re-renders; this keeps typing light.
@@ -935,6 +982,7 @@ export function SessionChat({
   canReply,
   askAction,
   plain = false,
+  hideSteps = false,
   headAction,
   subtitle,
   extra,
@@ -951,6 +999,8 @@ export function SessionChat({
    * no waiting marker, and the title is a quiet label.
    */
   plain?: boolean;
+  /** Leave the plan's steps out (the Detail view's Tasks area, where the task's card sits beside the chat). */
+  hideSteps?: boolean;
   ask: SessionAsk | null;
   /** A button in the ask box (Approve & start while discussing the plan). */
   askAction?: ReactNode;
@@ -1029,7 +1079,8 @@ export function SessionChat({
   const busy = !!working || (!!turn && turn.text !== null && !turnStarted);
 
   // With the plan's steps, the chat sits beside them: steps on the left, the conversation on the right.
-  const split = !!ask?.steps?.length;
+  const split = !hideSteps && !!ask?.steps?.length;
+  const docked = useInDock();
   const head = (
     <header className="chat-modal-head">
       <span className="chat-modal-title">
@@ -1047,7 +1098,8 @@ export function SessionChat({
   const askBox = ask && (
     <div className="chat-ask">
       <span className="chat-ask-step">
-        {!plain && <StepCircle state="waiting" />}
+        {/* The waiting marker only for a step that's waiting on you; talking the plan through isn't one. */}
+        {!plain && !!ask.step && <StepCircle state="waiting" />}
         {ask.step ? `Step ${ask.step} · ${ask.title}` : ask.title}
       </span>
       {ask.note && <p className="chat-ask-note">{ask.note}</p>}
@@ -1092,9 +1144,10 @@ export function SessionChat({
     </>
   );
 
-  return createPortal(
-    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
-      <div className={`modal chat-modal${plain ? " plain" : ""}${split ? " split" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
+  // In a chat dock (the Detail view's Updates area) it draws inline, filling the dock; elsewhere it's
+  // a window over everything.
+  const panel = (
+      <div className={`modal chat-modal${plain ? " plain" : ""}${split ? " split" : ""}${docked ? " docked" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
         {split ? (
           <>
             <div className="chat-modal-top">{head}</div>
@@ -1136,6 +1189,11 @@ export function SessionChat({
           </>
         )}
       </div>
+  );
+  if (docked) return panel;
+  return createPortal(
+    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
+      {panel}
     </div>,
     document.body,
   );
@@ -1182,31 +1240,22 @@ function SessionPanel({
           </button>
         </div>
       )}
-      {needsInput && !working && (
-        <div className="input-needed">
-          <span className="input-needed-label">Human input needed</span>
-          <button className="cta-primary" onClick={onOpenChat}>
-            Open chat
-          </button>
-        </div>
-      )}
+      {/* Open in chat is always here: to answer it, to review what it wrote, or to have it re-check its
+          steps against the conversation. The step it's waiting on says Human. */}
+      <button className={needsInput && !working ? "cta-primary" : "cta-ghost"} onClick={onOpenChat}>
+        Open in chat
+      </button>
     </>
   );
 }
 
-/** Where the linked Claude session is: still being looked for, or how far it has got. */
-function SessionStatus({ progress, steps }: { progress: SessionProgress | null; steps: OutlineStep[] }) {
-  if (!progress) return null;
-  if (!progress.found) return <span className="timestamp small session-status">Looking for the Claude session…</span>;
-  const claudeSteps = steps.filter((st) => st.by !== "you");
-  const done = claudeSteps.filter((st) => st.progress?.state === "done").length;
-  const waiting = steps.some((st) => st.progress?.state === "waiting");
-  return (
-    <span className="timestamp small session-status" title="Orb follows the session's progress reports">
-      {waiting ? "Session is waiting on you" : `Session: ${done} of ${claudeSteps.length} steps done`}
-      {progress.updatedAt && ` · ${ago(new Date(progress.updatedAt).toISOString())}`}
-    </span>
-  );
+/**
+ * While the linked Claude session is still being looked for, says so. Once it's found, the checklist
+ * above shows how far it's got, and the Plan heading when the plan was made, so this says nothing.
+ */
+function SessionStatus({ progress }: { progress: SessionProgress | null; steps: OutlineStep[] }) {
+  if (!progress || progress.found) return null;
+  return <span className="timestamp small session-status">Looking for the Claude session…</span>;
 }
 
 const CHECK_VERDICT: Record<StoredTaskCheck["verdict"], string> = {
@@ -1255,14 +1304,14 @@ function TaskCheckResult({
         <span className="check-title">Task investigation</span>
         {/* One status: a correction being applied (spinner, no time yet), or the outcome and when. */}
         {correction && "working" in correction ? (
-          <span className="timestamp check-status">
-            <Spinner /> {correction.working}…
+          <span className="timestamp check-status" title={`${correction.working}…`} aria-label={correction.working}>
+            <Spinner />
           </span>
         ) : correction ? (
-          <span className="timestamp check-status">Correction applied {sinceWhen(correction.appliedAt)}</span>
+          <span className="timestamp check-status hover-stamp">Correction applied {ago(correction.appliedAt)}</span>
         ) : (
           <span className="check-status">
-            <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span> <span className="timestamp">{sinceWhen(check.at)}</span>
+            <span className="check-verdict">{CHECK_VERDICT[check.verdict]}</span> <span className="timestamp hover-stamp">{ago(check.at)}</span>
           </span>
         )}
         <button
@@ -1331,8 +1380,17 @@ export function TaskCard({
   openTasks = [],
   duplicateOf,
   compact = false,
+  dateBadge,
+  created,
   onChange,
 }: {
+  /** When the task was created, if known: shown in the open card beside the due date. */
+  created?: string | null;
+  /**
+   * A date to show as a badge on the card's top line, collapsed or open: the due date or when it was
+   * created, when the list is sorted by one ("No due date" / "No date" when it has none).
+   */
+  dateBadge?: { kind: "due" | "created"; date: string | null };
   task: CardTask;
   plan: StoredPlan | undefined;
   planning: boolean;
@@ -1361,20 +1419,19 @@ export function TaskCard({
   const linked = !!sessionLink?.sessionId;
   /** Started, and Orb is still looking for the session (it gives up after a while, so the task can be started again). */
   const awaitingSession = !!sessionLink && !linked && Date.now() - sessionLink.startedAt < GIVE_UP_MS;
-  // Collapsed cards show one line; the arrow after the badges opens and closes them. Compact cards
-  // (finished tasks in Today, other groups' rows) start collapsed, and collapse again when they become compact.
-  // A card you opened or closed stays that way while the app runs, even when it's dragged to another
-  // list (which renders it afresh there); otherwise it starts as its list shows cards.
-  const [collapsed, setCollapsedState] = useState(() => openCards.get(task.id) === undefined ? compact : !openCards.get(task.id));
+  // Collapsed cards show one line; the arrow after the badges opens and closes them. At most one card
+  // is open at a time: every card starts collapsed except the one you last opened, and opening a card
+  // closes the other. A card that becomes compact (a task just marked done in Today) closes too.
+  // Every id this card's task goes by: its own, and those of tasks merged into it.
+  const ids = useMemo(() => new Set([task.id, ...(("aliasIds" in task ? (task as { aliasIds: string[] }).aliasIds : []) ?? [])]), [task]);
+  const [collapsed, setCollapsedState] = useState(() => !(openTask && ids.has(openTask)));
   const setCollapsed = (value: boolean) => {
-    openCards.set(task.id, !value);
+    if (!value) {
+      openTask = task.id;
+      window.dispatchEvent(new CustomEvent(TASK_OPEN_EVENT, { detail: task.id }));
+    } else if (openTask === task.id) openTask = null;
     setCollapsedState(value);
   };
-  // Remember how the card first showed, so it keeps that state when it's dragged into a list whose
-  // cards start the other way (each list renders the card afresh).
-  useEffect(() => {
-    if (!openCards.has(task.id)) openCards.set(task.id, !collapsed);
-  }, []);
   /** The body's content is only rendered once the card has been opened, then kept for the close animation. */
   const [bodyMounted, setBodyMounted] = useState(!collapsed);
   /** True while the height animates; the body clips its content only then (and while collapsed). */
@@ -1396,6 +1453,29 @@ export function TaskCard({
     if (compact && !wasCompact.current) setOpen(false);
     wasCompact.current = compact;
   }, [compact]);
+  // View in tasks: this card opens and scrolls into view, now or as soon as it's shown.
+  useEffect(() => {
+    const reveal = () => {
+      if (!pendingReveal || !ids.has(pendingReveal)) return;
+      pendingReveal = null;
+      closeForOther.current(true);
+      // After it has opened, so its full height is in view.
+      window.setTimeout(() => cardRef.current?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" }), 320);
+    };
+    reveal();
+    window.addEventListener(TASK_REVEAL_EVENT, reveal);
+    return () => window.removeEventListener(TASK_REVEAL_EVENT, reveal);
+  }, [ids]);
+  // Another card opened: this one closes.
+  const closeForOther = useRef(setOpen);
+  closeForOther.current = setOpen;
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== task.id) closeForOther.current(false);
+    };
+    window.addEventListener(TASK_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(TASK_OPEN_EVENT, onOpen);
+  }, [task.id]);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const manual = task.source === "manual";
@@ -1412,7 +1492,7 @@ export function TaskCard({
       return;
     }
     const prompt = sessionPrompt(
-      { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      { id: task.id, title: task.title, description, brief: task.brief, link: task.link, requester: task.requester, projectName: task.project?.name },
       plan?.plan ?? null,
       assessment ? { suggestion: assessment.suggestion, steps: assessment.claude_steps ?? [] } : undefined,
     );
@@ -1451,7 +1531,7 @@ export function TaskCard({
     if (!assessment) return;
     await setTaskState(task.id, { status: "in_progress" });
     const prompt = startPrompt(
-      { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+      { id: task.id, title: task.title, description, brief: task.brief, link: task.link, requester: task.requester, projectName: task.project?.name },
       assessment.suggestion,
       outlineSteps,
     );
@@ -1516,6 +1596,26 @@ export function TaskCard({
    * through (DISCUSS), or null when it's closed.
    */
   const [chatFor, setChatFor] = useState<number | null>(null);
+  // In the Detail view's Tasks area the chat opens in the dock beside the list (see TaskChatDock):
+  // opening it here claims the dock; another task's chat taking it closes this one; and a card that
+  // finds the dock already holding its task's chat (it just moved into Today) shows it.
+  const chatDock = useTaskChatDock();
+  const ownsDock = chatDock?.owner?.id === task.id;
+  const lastChatFor = useRef(chatFor);
+  useEffect(() => {
+    const was = lastChatFor.current;
+    lastChatFor.current = chatFor;
+    if (!chatDock) return;
+    // Opening, or switching what the chat is for, keeps the dock's record of it current.
+    if (chatFor !== null && (!ownsDock || chatDock.owner?.kind !== chatFor)) chatDock.open(task.id, chatFor);
+    else if (chatFor === null && was !== null && ownsDock) chatDock.close(task.id);
+  }, [chatFor]);
+  const owned = useRef(ownsDock);
+  useEffect(() => {
+    if (ownsDock && chatFor === null) setChatFor(chatDock!.owner!.kind);
+    else if (!ownsDock && owned.current && chatFor !== null) setChatFor(null);
+    owned.current = ownsDock;
+  }, [ownsDock]);
   const openChat = () => setChatFor(waitingIndex >= 0 ? waitingIndex + 1 : 0);
   // The chat stays open until you close it, whatever the session does meanwhile.
   const chatAsk: SessionAsk | null =
@@ -1551,7 +1651,7 @@ export function TaskCard({
     const unstarted = discussing && !sessionLink?.sessionId && !sessionWorking;
     if ((!discussing || unstarted) && assessment) {
       const prompt = discussPrompt(
-        { id: task.id, title: task.title, description, link: task.link, requester: task.requester, projectName: task.project?.name },
+        { id: task.id, title: task.title, description, brief: task.brief, link: task.link, requester: task.requester, projectName: task.project?.name },
         assessment.suggestion,
         outlineSteps,
       );
@@ -1584,6 +1684,41 @@ export function TaskCard({
     onChange();
     setChatFor(null);
   };
+  // The task's chat. In the Detail view it sits in the dock beside the list, drawn whatever state
+  // the card is in (collapsed, or done and shrunk to a row), so it stays until you close it.
+  const chatView =
+    chatFor !== null && sessionLink ? (
+      <SessionChat
+        taskId={task.id}
+        title={task.title}
+        hideSteps={!!chatDock}
+        ask={chatAsk}
+        messages={progress?.messages ?? []}
+        working={sessionWorking}
+        toSend={toSend}
+        canReply={!!sessionLink.sessionId}
+        // Beside the card (the Detail view's Tasks area), its own Approve & start is right there.
+        askAction={
+          chatFor === DISCUSS && discussing && !chatDock ? (
+            <button className="cta-primary" disabled={!!sessionWorking} onClick={approvePlan}>
+              Approve & start
+            </button>
+          ) : undefined
+        }
+        empty={
+          !sessionLink.sessionId && !sessionWorking ? (
+            <div className="chat-empty small muted">
+              {sessionLink.lastError ? `Claude couldn't start: ${sessionLink.lastError}` : "Claude hasn't started on this yet."}{" "}
+              <button className="link-button small" onClick={() => (chatFor === DISCUSS ? discussPlan() : approveAndStart())}>
+                Start it
+              </button>
+            </div>
+          ) : undefined
+        }
+        onClose={() => setChatFor(null)}
+        onChange={onChange}
+      />
+    ) : null;
   // Plan steps only for a card with no steps yet (the skeleton rows). Once steps show, from the
   // assessment or a plan, Approve & start is the one action: a second "plan" button reads as redundant.
   const canPlan = !plan && !planning && !linked && !!description && outlineSteps.length === 0;
@@ -1610,65 +1745,29 @@ export function TaskCard({
           </button>
         )}
         {planning && (
-          <span className="muted small">
-            <Spinner /> {planStatus ?? "Researching a plan"}…
+          <span className="muted small" title={`${planStatus ?? "Researching a plan"}…`} aria-label={planStatus ?? "Researching a plan"}>
+            <Spinner />
           </span>
         )}
         {sessionLink && !discussing && (
           <SessionPanel
             taskId={task.id}
             link={sessionLink}
-            working={sessionWorking}
+            // The open chat already shows what Claude is doing.
+            working={chatFor === null ? sessionWorking : undefined}
             needsInput={needsInput}
             onOpenChat={openChat}
             onChange={onChange}
           />
         )}
         {sessionLink && !discussing && !sessionWorking && !needsInput && !recheckStatus && <SessionStatus progress={progress} steps={outlineSteps} />}
-        {recheckStatus ? (
-          <span className="muted small session-working">
-            <Spinner /> Re-checking the steps against the conversation…
+        {recheckStatus && (
+          <span className="muted small session-working" title="Re-checking the steps against the conversation…" aria-label="Re-checking the steps">
+            <Spinner />
           </span>
-        ) : (
-          sessionLink?.sessionId &&
-          !discussing &&
-          progress?.found &&
-          !sessionWorking && (
-            <button className="link-button small more-link" onClick={recheckSteps} title="Have Orb check each step against the conversation">
-              Re-check steps
-            </button>
-          )
         )}
-        {chatFor !== null && sessionLink && (
-          <SessionChat
-            taskId={task.id}
-            title={task.title}
-            ask={chatAsk}
-            messages={progress?.messages ?? []}
-            working={sessionWorking}
-            toSend={toSend}
-            canReply={!!sessionLink.sessionId}
-            askAction={
-              chatFor === DISCUSS && discussing ? (
-                <button className="cta-primary" disabled={!!sessionWorking} onClick={approvePlan}>
-                  Approve & start
-                </button>
-              ) : undefined
-            }
-            empty={
-              !sessionLink.sessionId && !sessionWorking ? (
-                <div className="chat-empty small muted">
-                  {sessionLink.lastError ? `Claude couldn't start: ${sessionLink.lastError}` : "Claude hasn't started on this yet."}{" "}
-                  <button className="link-button small" onClick={() => (chatFor === DISCUSS ? discussPlan() : approveAndStart())}>
-                    Start it
-                  </button>
-                </div>
-              ) : undefined
-            }
-            onClose={() => setChatFor(null)}
-            onChange={onChange}
-          />
-        )}
+        {/* Inline where there's no dock; in the Detail view it's drawn into the dock (below), open or not. */}
+        {!chatDock && chatView}
       </div>
     ) : null;
   /** Saves an edited description, then has Claude plan again from it. */
@@ -1724,6 +1823,7 @@ export function TaskCard({
       id: task.id,
       title: task.title,
       description: descriptionText,
+      brief: task.brief ?? null,
       link: task.link ?? null,
       requester: task.requester ?? null,
       source,
@@ -1757,10 +1857,10 @@ export function TaskCard({
     ],
     [description],
   );
-  // Double check follows More / Edit / Show links, shown on hover (and while it runs). Last, so its hidden space sits at the end.
+  // Double check follows More / Edit / Links, shown on hover (and while it runs). Last, so its hidden space sits at the end.
   const checkAction = linked ? null : checkStatus ? (
-    <span className="muted small checking" title={checkStatus}>
-      <Spinner /> {checkStatus}…
+    <span className="muted small checking" title={`${checkStatus}…`} aria-label={checkStatus}>
+      <Spinner />
     </span>
   ) : (
     <button
@@ -1774,10 +1874,10 @@ export function TaskCard({
   const linksToggle =
     links.length > 0 ? (
       <button className="link-button small more-link" onClick={() => setLinksOpen(!linksOpen)} aria-expanded={linksOpen}>
-        {linksOpen ? "Hide links" : `Show links (${links.length})`}
+        {linksOpen ? "Hide links" : `Links (${links.length})`}
       </button>
     ) : null;
-  // Opens the task in Claude (its session, once it has one), beside Show links.
+  // Opens the task in Claude (its session, once it has one), beside Links.
   const claudeLink = (
     <button
       className="link-button small more-link claude-link"
@@ -1824,6 +1924,7 @@ export function TaskCard({
     </button>
   );
 
+  const estimateMinutes = taskEstimate(plan?.plan, assessment);
   // One header for both states, so the title row stays exactly where it is when the card opens or closes.
   const header = (
     <header className="task-card-header">
@@ -1832,19 +1933,31 @@ export function TaskCard({
           {task.title}
         </span>
       </span>
-      {assessment?.estimate_minutes != null && (
-        <span className="estimate" title="Estimated total time to finish: your time plus Claude's">
-          ~{formatMinutes(assessment.estimate_minutes)}
+      {/* Folded, the card shows only the badge its list is sorted by (the date when sorted by one,
+          else the priority); the rest slide in beside it while it's hovered, and stay when it's open. */}
+      {dateBadge ? (
+        <span className={`badge date-badge${dateBadge.date ? "" : " none"}`} title={dateBadge.date ? new Date(dateBadge.date.length === 10 ? `${dateBadge.date}T12:00:00` : dateBadge.date).toLocaleString() : undefined}>
+          {dateBadge.date ? `${dateBadge.kind === "due" ? "Due " : ""}${formatWhen(dateBadge.date)}` : dateBadge.kind === "due" ? "No due date" : "No date"}
         </span>
+      ) : (
+        <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
       )}
-      {task.recommended && <RecommendedBadge />}
-      <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
-      <StatusSelect task={task} onChange={onChange} />
+      <span className="task-extras">
+        {estimateMinutes != null && (
+          <span className="estimate" title="Your own hands-on time, estimated from the plan's steps (Claude's work isn't counted)">
+            {formatMinutes(estimateMinutes)}
+          </span>
+        )}
+        {task.recommended && <RecommendedBadge />}
+        {dateBadge && <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />}
+        <StatusSelect task={task} human={needsInput && !task.done} onChange={onChange} />
+      </span>
       {toggle}
     </header>
   );
 
   return (
+    <>
     <article
       ref={cardRef}
       className={`card task-card${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
@@ -1874,18 +1987,18 @@ export function TaskCard({
         <div className="task-body-inner">
           {bodyMounted && (
             <>
-              {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due) && (
+              {(SOURCE_LABEL[task.source] || task.project || task.requester || task.due || created) && (
                 <div className="muted small task-meta">
                   {task.project && <span className="task-project">{task.project.name}</span>}
                   {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
                   {task.requester && <span>{task.requester}</span>}
                   {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
-                </div>
-              )}
-
-              {task.carriedFrom && (
-                <div className="task-controls">
-                  <span className="carried">{carriedLabel(task.carriedFrom)}</span>
+                  {created && (
+                    // Just the day (in your time zone), not the time.
+                    <span className="timestamp" title={new Date(created).toLocaleString()}>
+                      created {formatWhen(localDate(new Date(created)))}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -1944,6 +2057,7 @@ export function TaskCard({
 
               {assessment ? (
                 <AssessmentView
+                  planCreated={plan?.created_at}
                   assessment={assessment}
                   steps={outlineSteps}
                   onAddDetails={!editing ? () => setEditing(true) : undefined}
@@ -1955,12 +2069,12 @@ export function TaskCard({
               ) : (
                 <>
                   {manual && assessing && (
-                    <div className="muted small">
-                      <Spinner /> Claude is reviewing this task…
+                    <div className="muted small" title="Claude is reviewing this task…" aria-label="Claude is reviewing this task">
+                      <Spinner />
                     </div>
                   )}
                   {/* No assessment yet: the same collapsed Plan box, saying there's no plan yet. */}
-                  <AssessmentView assessment={null} steps={outlineSteps} actions={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} />
+                  <AssessmentView assessment={null} steps={outlineSteps} actions={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} planCreated={plan?.created_at} />
                 </>
               )}
 
@@ -1993,5 +2107,8 @@ export function TaskCard({
       </div>
 
     </article>
+    {/* Beside the card, not in it, so clicks in the chat don't open a collapsed card. */}
+    {chatDock?.target && chatView && createPortal(<InDock>{chatView}</InDock>, chatDock.target)}
+    </>
   );
 }

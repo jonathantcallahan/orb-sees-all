@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { TaskChatDockProvider, type TaskChatDock } from "./chatDock";
 import { isWindows, MOD } from "../platform";
 import { addManualTask, type AdhocStore, type ManualTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks, refreshAdhoc } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
-import { applyOrder, applyTaskState, formatMinutes, isFiltering, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
+import { applyOrder, applyTaskState, formatMinutes, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
 import { CloseIcon, Kbd, RefreshButton, Updated } from "./common";
-import { setTaskState, type StoredTaskCheck } from "../db";
+import { getSetting, setSetting, setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
 import { findDuplicates, type DuplicateCandidate } from "../duplicates";
 import { Inbox } from "./Inbox";
-import { TaskFilters, useTaskFilter } from "./TaskFilters";
+import { SortSelect, TaskFilters, useTaskFilter } from "./TaskFilters";
+import { createdAt, sortTasks, type TaskSort } from "../taskDates";
 import { useJobStatus } from "../useAppData";
 import { TaskCard, type CardTask } from "./TaskCard";
 import { DropZone, TaskDragProvider, type DropZoneId, type Flip } from "./taskDrag";
@@ -31,11 +33,23 @@ function Group({
   running,
   filtered = false,
   controls,
+  titleControls,
+  keepOrder = false,
+  dateOf,
+  createdOf,
   onChange,
 }: {
+  /** When each task was created, shown in its open card beside the due date. */
+  createdOf?: (t: CardTask) => string | null;
+  /** Each task's date to show as a badge (the list is sorted by it). */
+  dateOf?: (t: CardTask) => { kind: "due" | "created"; date: string | null };
   title: string;
   /** Shown at the right of the heading, e.g. filters. */
   controls?: ReactNode;
+  /** Shown right after the title, e.g. how it's sorted. */
+  titleControls?: ReactNode;
+  /** Keep the tasks exactly in the order given (a sort other than priority), not recommended first. */
+  keepOrder?: boolean;
   tasks: CardTask[];
   empty: string;
   /** A filter is on, so say so when nothing is left. */
@@ -51,11 +65,14 @@ function Group({
   onChange: () => void;
 }) {
   // Recommended tasks first, keeping the group's order otherwise.
-  const tasks = [...unsorted].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
+  const tasks = keepOrder ? unsorted : [...unsorted].sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended));
   return (
     <>
       <div className="group-header">
-        <h4 className="section-title">{title}</h4>
+        <div className="group-title">
+          <h4 className="section-title">{title}</h4>
+          {titleControls}
+        </div>
         {controls}
       </div>
       {tasks.length === 0 && <p className="muted small">{filtered ? "Nothing matches the filters." : empty}</p>}
@@ -73,6 +90,8 @@ function Group({
           openTasks={openTasks}
           duplicateOf={duplicates.get(t.id)}
           compact
+          dateBadge={dateOf?.(t)}
+          created={createdOf?.(t)}
           onChange={onChange}
         />
       ))}
@@ -123,10 +142,20 @@ export function TaskColumn({
   priorityOverrides,
   taskAliases,
   refinedDescriptions,
+  taskBriefs = {},
   notDuplicates,
   running,
+  sideBySide = false,
+  headerExtra,
   onChange,
 }: {
+  /** Shown at the right of the Tasks header, e.g. the orb's stats in the Detail view. */
+  headerExtra?: ReactNode;
+  /**
+   * The Detail view's Tasks area: Today's tasks on the left and All tasks on the right, side by side
+   * (dragging between them still plans and unplans), with the inbox shown in Updates instead.
+   */
+  sideBySide?: boolean;
   adhoc: AdhocStore;
   manual: ManualTask[];
   /** Today's meetings; their prep items are tasks too. */
@@ -153,6 +182,8 @@ export function TaskColumn({
   taskAliases: Aliases;
   /** Descriptions refreshes brought up to date, by canonical id; the user's own edits win. */
   refinedDescriptions: Record<string, string>;
+  /** Your own notes on tasks you added, as typed, when a short title replaced them (see retitleManualTask). */
+  taskBriefs?: Record<string, string>;
   /** Pairs you said aren't duplicates. */
   notDuplicates: Set<string>;
   running: string[];
@@ -242,6 +273,7 @@ export function TaskColumn({
     .map((t) => ({
       ...t,
       description: t.description || refinedDescriptions[canonicalId(t.id, taskAliases)] || null,
+      brief: taskBriefs[t.id] ?? null,
       source: "manual" as const,
       recommended: isRecommended(t.id),
     }));
@@ -296,7 +328,10 @@ export function TaskColumn({
   const openTasks = openList.map((t) => ({ id: t.id, title: t.title }));
   // Likely duplicates among open tasks, for each card to offer a merge.
   const duplicates = findDuplicates(openList, notDuplicates);
-  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, running, onChange };
+  const [firstSeen, setFirstSeen] = useState<Record<string, string>>({});
+  // When each task was created.
+  const createdOf = (t: CardTask) => createdAt(t as CardTask & { created_at?: string | null }, firstSeen);
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, running, createdOf, onChange };
 
   // Today's plan pulls from every group, in the order you arranged it, open tasks first (a task
   // just dropped among the finished ones waits there a moment before moving up).
@@ -305,17 +340,14 @@ export function TaskColumn({
     (a, b) => Number(doneish(a)) - Number(doneish(b)),
   );
   const estimate = (t: (typeof planned)[number]) =>
-    (t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null)?.estimate_minutes ?? 0;
+    taskEstimate(plans.get(t.id)?.plan, t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null) ?? 0;
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
   const todayGroup = (
     <DropZone zone="today" className={`today-plan${planned.length ? "" : " empty"}`}>
       <h4 className="section-title today-heading">
         Today's tasks
-        {planned.length > 0 && (
-          <span className="today-total">
-            {planned.filter((t) => !t.done).length} open{remaining > 0 && ` · ~${formatMinutes(remaining)}`}
-          </span>
-        )}
+        {/* The time the open tasks still need. */}
+        {remaining > 0 && <span className="today-total">{formatMinutes(remaining)}</span>}
       </h4>
       {planned.length === 0 ? (
         <p className="muted small">Drag tasks here to plan your day.</p>
@@ -335,6 +367,7 @@ export function TaskColumn({
             duplicateOf={duplicates.get(t.id)}
             // Finished tasks shrink to a one-line row (click to see the card again).
             compact={t.done}
+            created={createdOf(t)}
             onChange={onChange}
           />
         ))
@@ -342,10 +375,48 @@ export function TaskColumn({
     </DropZone>
   );
 
+  // How All tasks is sorted (remembered), and when tasks without a date of their own were first seen.
+  const [sort, setSortState] = useState<TaskSort>(() => {
+    const v = localStorage.getItem("all-tasks-sort");
+    return v === "due" || v === "newest" || v === "oldest" ? v : "priority";
+  });
+  const setSort = (v: TaskSort) => {
+    localStorage.setItem("all-tasks-sort", v);
+    setSortState(v);
+  };
+  const sortControl = <SortSelect value={sort} onChange={setSort} />;
+  // Sorted by a date, each card shows it.
+  const dateOf =
+    sort === "due"
+      ? (t: CardTask) => ({ kind: "due" as const, date: t.due ?? null })
+      : sort === "newest" || sort === "oldest"
+        ? (t: CardTask) => ({ kind: "created" as const, date: createdAt(t as CardTask & { created_at?: string | null }, firstSeen) })
+        : undefined;
+  useEffect(() => {
+    getSetting("task_first_seen").then((v) => setFirstSeen(v ? JSON.parse(v) : {}), () => {});
+  }, []);
+  // A task with no date of its own (from a project or email) is dated from when it first turns up.
+  const undated = [...projectTasks.rest, ...projectTasks.planned, ...inbox.rest, ...inbox.planned]
+    .filter((t) => !createdAt(t, firstSeen))
+    .map((t) => t.id);
+  useEffect(() => {
+    if (!undated.length) return;
+    const now = new Date().toISOString();
+    getSetting("task_first_seen").then((v) => {
+      const seen: Record<string, string> = v ? JSON.parse(v) : {};
+      let added = false;
+      for (const id of undated) if (!seen[id]) (seen[id] = now), (added = true);
+      if (!added) return;
+      setSetting("task_first_seen", JSON.stringify(seen)).then(() => setFirstSeen(seen));
+    }, () => {});
+  }, [undated.join("|")]);
+
   // All tasks, by priority, most urgent first; within a priority, in the order you arranged them
   // (dragging moves a task among those of its own priority).
-  const allTasks = byPriority(
-    applyOrder(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest, ...prep.rest], order.all),
+  const allTasks = sortTasks(
+    byPriority(applyOrder(filterProject ? [...projectTasks.rest, ...mine.rest] : [...projectTasks.rest, ...mine.rest, ...inbox.rest, ...prep.rest], order.all)),
+    sort,
+    firstSeen,
   );
 
   // Dropping a task puts it where you let go: in Today or All tasks, before the card it landed above.
@@ -370,6 +441,31 @@ export function TaskColumn({
     await setTaskState(id, { todayOn: to === "today" ? today : null });
     onChange();
   };
+  // The Detail view's chat dock: one task's chat in place of All tasks. Opening it brings the task
+  // into Today, where you're working on it.
+  const [chatOwner, setChatOwner] = useState<TaskChatDock["owner"]>(null);
+  const [chatTarget, setChatTarget] = useState<HTMLElement | null>(null);
+  const chatDock = useMemo<TaskChatDock>(
+    () => ({
+      owner: chatOwner,
+      target: chatTarget,
+      open: (id, kind) => {
+        setChatOwner({ id, kind });
+        if (!planned.some((t) => t.id === id)) {
+          setPendingZone((cur) => ({ ...cur, [id]: "today" }));
+          setTaskState(id, { todayOn: today }).then(onChange, () => {});
+        }
+      },
+      close: (id) => setChatOwner((cur) => (cur?.id === id ? null : cur)),
+    }),
+    [chatOwner, chatTarget, planned],
+  );
+  // A chat whose task has left the board (dismissed, merged, done elsewhere) has no card to show it,
+  // so the dock gives All tasks back rather than staying blank.
+  const ownerShown = !chatOwner || planned.some((t) => t.id === chatOwner.id) || allTasks.some((t) => t.id === chatOwner.id);
+  useEffect(() => {
+    if (!ownerShown) setChatOwner(null);
+  }, [ownerShown]);
   // Drop the instant-move override once the saved state agrees.
   useEffect(() => {
     const settled = Object.keys(pendingZone).filter((id) => {
@@ -379,10 +475,7 @@ export function TaskColumn({
     if (settled.length) setPendingZone((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !settled.includes(id))));
   }, [taskStates]);
 
-  return (
-    <TaskDragProvider onDrop={moveTask}>
-    <DropZone zone="rest" className="column tasks-column">
-      <Inbox replies={adhoc.replies} states={taskStates} onChange={onChange} />
+  const header = (
       <header className="column-header">
         <div className="title-line">
           <h2>Tasks</h2>
@@ -392,8 +485,10 @@ export function TaskColumn({
             refreshAdhoc().catch(() => {});
             assessPendingTasks().catch(() => {});
           }} />
+        {headerExtra && <div className="header-extra">{headerExtra}</div>}
       </header>
-
+  );
+  const addBox = (
       <form
         className="add-task"
         onSubmit={async (e) => {
@@ -408,6 +503,49 @@ export function TaskColumn({
         <input ref={addTask} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a task…" aria-label={`Add a task (${MOD}N)`} />
         {!draft && <Kbd keys={`${MOD}N`} />}
       </form>
+  );
+
+  if (sideBySide)
+    return (
+      <TaskChatDockProvider value={chatDock}>
+      <TaskDragProvider onDrop={moveTask}>
+        <div className="detail-split">
+          <section className="column detail-pane">
+            {header}
+            {addBox}
+            <div className="task-list">{todayGroup}</div>
+          </section>
+          {/* A task's chat, when one is open, takes the place of All tasks (see TaskChatDock). */}
+          {chatOwner ? (
+            <section className="detail-pane chat-dock" ref={setChatTarget} />
+          ) : (
+          <DropZone zone="rest" className="column detail-pane">
+            <div className="task-list">
+              <Group
+                title="All tasks"
+                titleControls={sortControl}
+                keepOrder={sort !== "priority"}
+                dateOf={dateOf}
+                tasks={keep(allTasks)}
+                empty="No tasks yet. Add one, or refresh to find them in your projects, Slack and email."
+                filtered={filtering}
+                controls={filters}
+                {...shared}
+              />
+            </div>
+          </DropZone>
+          )}
+        </div>
+      </TaskDragProvider>
+      </TaskChatDockProvider>
+    );
+
+  return (
+    <TaskDragProvider onDrop={moveTask}>
+    <DropZone zone="rest" className="column tasks-column">
+      <Inbox replies={adhoc.replies} states={taskStates} taskIds={new Set(adhoc.tasks.map((t) => t.id))} onChange={onChange} />
+      {header}
+      {addBox}
 
       {/* The inbox, header and add box stay put; only the tasks below them scroll. */}
       <div className="task-list">
@@ -436,6 +574,9 @@ export function TaskColumn({
           {todayGroup}
           <Group
             title="All tasks"
+            titleControls={sortControl}
+            keepOrder={sort !== "priority"}
+            dateOf={dateOf}
             tasks={keep(allTasks)}
             empty="No tasks yet. Add one above, or refresh to find them in your projects, Slack and email."
             filtered={filtering}

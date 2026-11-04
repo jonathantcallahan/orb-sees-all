@@ -1,13 +1,13 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { setStandingNotes } from "../claude";
 import { RELEASE_NOTES } from "../releaseNotes";
-import { label, recordCorrection } from "../feedback";
-import { useEffect, useState, type ReactNode } from "react";
+import { label, loadWhyLevel, recordCorrection, saveWhyLevel, type WhyLevel } from "../feedback";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
-import { activeChannels, projectName } from "../projects";
+import { activeChannels, channelLabel, projectName } from "../projects";
 import { ago } from "../tasks";
 import type { Theme } from "../theme";
 import { CloseIcon, Reveal, Spinner } from "./common";
@@ -203,13 +203,13 @@ function ProjectRow({ project, others, onSaved }: { project: db.Project; others:
       <div className="settings-project-channels">
         {activeChannels(project).map((c) => (
           <span key={c.channel_id} className="chip">
-            #{c.name}
+            {channelLabel(c)}
             {c.role === "related" && (
               <button
                 className="chip-remove"
-                aria-label={`Unlink #${c.name} from this project`}
+                aria-label={`Unlink ${channelLabel(c)} from this project`}
                 onClick={async () => {
-                  await db.unlinkChannel(c.channel_id);
+                  await db.unlinkChannel(c.channel_id, project.channel_id);
                   onSaved();
                   recordCorrection(
                     { kind: "channel_unlink", subject: "project", subject_id: project.channel_id, project_id: project.channel_id, before: { channel: c.name, project: projectName(project) } },
@@ -273,7 +273,9 @@ function ProjectRow({ project, others, onSaved }: { project: db.Project; others:
 }
 
 export function Settings({
+  showLearnings = false,
   onOpenSetup,
+  onSimulateOnboarding,
   projects,
   theme,
   onThemeChange,
@@ -284,6 +286,8 @@ export function Settings({
 }: {
   /** Opens the setup checklist, to check Claude Code and the connectors again. */
   onOpenSetup: () => void;
+  /** Walks through onboarding's screens with made-up results, to see them; changes nothing. */
+  onSimulateOnboarding: () => void;
   projects: db.Project[];
   theme: Theme;
   onThemeChange: (t: Theme) => void;
@@ -291,16 +295,24 @@ export function Settings({
   onOrbLookChange: (look: OrbLook) => void;
   onClose: () => void;
   onSaved: () => void;
+  /** Opened from the Demian chat's View learnings: scrolled to what Demian knows and has learned, unfolded. */
+  showLearnings?: boolean;
 }) {
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
+  const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
   const [model, setModel] = useState("opus");
   const [log, setLog] = useState<db.LogEntry[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
   const [lessons, setLessons] = useState<db.Lesson[]>([]);
-  const [lessonsOpen, setLessonsOpen] = useState(false);
+  const [lessonsOpen, setLessonsOpen] = useState(showLearnings);
+  const learnings = useRef<HTMLDivElement>(null);
+  // Once what Demian knows has loaded, bring it into view.
+  useEffect(() => {
+    if (showLearnings && (notes.length || lessons.length)) learnings.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [showLearnings, notes.length > 0 || lessons.length > 0]);
   const reloadLessons = () => db.listLessons().then(setLessons, () => {});
 
   useEffect(() => {
@@ -406,6 +418,26 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
+              <SettingRow
+                label="Ask why after a change"
+                hint="After you change a task or project, Demian can ask why, so it learns the reason. Skipped ones it works out for itself."
+              >
+                <Segmented
+                  label="Ask why after a change"
+                  value={whyLevel}
+                  onChange={(level) => {
+                    setWhyLevel(level);
+                    saveWhyLevel(level);
+                  }}
+                  options={[
+                    { value: "always", label: "Always" },
+                    { value: "less", label: "Less often" },
+                    { value: "rarely", label: "Rarely" },
+                    { value: "never", label: "Never" },
+                  ]}
+                />
+              </SettingRow>
+              <div ref={learnings} />
               {notes.length > 0 && (
                 <div className="setting-row stacked">
                   <div className="setting-text">
@@ -478,9 +510,9 @@ export function Settings({
                 }}
               >
                 {discovering ? (
-                  <>
-                    <Spinner /> Finding channels…
-                  </>
+                  <span title="Finding channels…" aria-label="Finding channels">
+                    <Spinner />
+                  </span>
                 ) : (
                   "Find project channels"
                 )}
@@ -524,6 +556,16 @@ export function Settings({
                 ))}
               </div>
             </Reveal>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-group">
+              <SettingRow label="Simulate onboarding" hint="Walk through the first-run screens as a new user sees them: each step missing in turn, then passing. Nothing is installed or changed.">
+                <button className="cta-ghost" onClick={onSimulateOnboarding}>
+                  Simulate
+                </button>
+              </SettingRow>
+            </div>
           </section>
         </div>
       </div>

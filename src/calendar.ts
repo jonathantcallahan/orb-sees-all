@@ -1,7 +1,7 @@
 import type { CalendarEvent } from "./schema";
 
 export interface DayRange {
-  /** First and last hour shown, in local time (endHour is exclusive). */
+  /** First and last hour shown, in local time (endHour is exclusive). startHour can fall mid-hour. */
   startHour: number;
   endHour: number;
 }
@@ -12,16 +12,16 @@ const minutesOfDay = (iso: string) => {
 };
 
 /**
- * 8am to 6pm, stretched to fit any meeting that starts earlier or ends later.
- * With `now`, hours that are long past are dropped: the grid starts one hour
- * before the current hour.
+ * 8am to midnight, stretched to fit any meeting that starts earlier.
+ * With \`now\`, the past is cut to the last hour: the grid starts exactly one hour
+ * before now (mid-hour if need be), so earlier meetings are out of view.
  */
 export function dayRange(events: Pick<CalendarEvent, "start" | "end">[], now?: Date): DayRange {
   let startHour = 8;
   // The day always runs to midnight, so the rest of the evening is there to see.
   const endHour = 24;
   for (const e of events) startHour = Math.min(startHour, Math.floor(minutesOfDay(e.start) / 60));
-  if (now) startHour = Math.max(startHour, Math.min(now.getHours() - 1, endHour - 1));
+  if (now) startHour = Math.max(startHour, Math.min((now.getHours() * 60 + now.getMinutes() - 60) / 60, endHour - 1));
   return { startHour, endHour };
 }
 

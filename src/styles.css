@@ -100,7 +100,10 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
   flex: 1;
   display: grid;
   /* Minimums add up to fit the 1000px minimum window, so no column runs off the right edge. */
-  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.6fr) minmax(320px, 1.6fr);
+  /* Today (the orb and calendar) stops widening once the orb's box is square (as wide as its 285px
+     height, .pressure-blob): past that a wider calendar shows nothing more, and the extra room goes
+     to the task and project columns. */
+  grid-template-columns: minmax(220px, 285px) minmax(320px, 1.6fr) minmax(320px, 1.6fr);
   gap: 16px;
   padding: 16px 20px;
   overflow: hidden;
@@ -181,6 +184,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card.done .task-title { text-decoration: line-through; }
 .task-card-header { display: flex; gap: 8px; align-items: flex-start; }
 .task-card-header .badge, .task-card-header .estimate { flex-shrink: 0; margin-top: 2px; }
+/* The title row's other badges, beside the one the list is sorted by: folded away on a folded card
+   (giving back the row's gap too), sliding open while it's hovered. */
+.task-extras { display: flex; gap: 8px; align-items: flex-start; flex-shrink: 0; max-width: 360px; overflow: hidden; transition: max-width 0.25s ease, opacity 0.2s ease, margin-left 0.25s ease; }
+.task-card.collapsed:not(:hover) .task-extras { max-width: 0; opacity: 0; margin-left: -8px; }
 .task-card-header input { margin-top: 3px; }
 .task-card-header .task-title { flex: 1; }
 .task-card .dismiss { visibility: hidden; }
@@ -240,9 +247,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   );
 }
 
-.project-footer { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 10px; }
-.project .untrack { display: flex; gap: 8px; align-items: baseline; visibility: hidden; }
-.project:hover .untrack, .project .untrack.confirming { visibility: visible; }
 .link-button.danger { color: var(--red); }
 .project .p-badge + .badge.raci, .project .badge.raci { margin-right: 6px; vertical-align: 1px; }
 
@@ -260,7 +264,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .project:hover .project-header-right .refresh,
 .project-header-right .refresh.busy { width: 22px; padding: 0 4px; opacity: 1; }
-.project-header-right .refresh-status { margin-left: 6px; }
 
 /* Project cards: badges, description, blockers, selection */
 .project { cursor: pointer; }
@@ -275,10 +278,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .work-items .what { display: block; margin-top: 4px; font-weight: 400; color: var(--muted); }
 .owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .owners h4 { margin: 0 2px 0 0; }
-.owner { font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--grey-bg); }
-.owner.me { background: var(--grey-bg); color: var(--text); }
 .work-items .age { font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
-.project-meta { display: flex; gap: 4px; align-items: baseline; flex-wrap: wrap; }
 
 /* Tasks column: project badges and the project filter */
 .task-project { color: var(--muted); }
@@ -315,11 +315,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-badge select, .menu-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
 .status-badge:focus-within, .menu-badge:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
+/* To do in the muted gray the other badges show (it would otherwise take the text color). */
+.status-badge.todo { color: var(--muted); }
 .status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+.status-badge.human { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 .status-badge.blocked { color: var(--red); background: var(--red-bg); border-color: transparent; }
 .status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
-.carried { font-size: 11px; color: var(--muted); }
 
 /* Today's plan at the top of Tasks */
 .today-plan { display: flex; flex-direction: column; gap: 7px; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--text) 5%, transparent); }
@@ -387,11 +389,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Day grid: meetings at their real times, with a line at the current time */
 .day-grid { position: relative; margin: 6px 0 4px; flex-shrink: 0; }
-/* In the Today column the grid takes at least the rest of the height, so late in the day midnight sits at the bottom, just
-   above the fog. */
-.today-column .day-grid { flex-grow: 1; margin-bottom: 0; }
-.today-column .day-grid.late { overflow: hidden; }
-.today-column { padding-bottom: calc(var(--mist-height) + 4px); }
+/* The Today column itself stays put (orb, Today, updated); only the calendar beneath scrolls, in its
+   own box. Its bottom padding lets midnight come up to just above the fog. */
+.today-column { overflow: hidden; padding-bottom: 0; }
+.day-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(var(--mist-height) + 4px);
+  /* The top edge fades a little, so the hours slide in under the header instead of being cut off. */
+  -webkit-mask-image: linear-gradient(transparent, #000 28px);
+  mask-image: linear-gradient(transparent, #000 28px);
+}
+.today-column .day-grid { margin-bottom: 0; }
 /* Each hour: its time flush left (in line with Today above), its line starting after the times. */
 .day-grid .hour { position: absolute; left: 0; right: 0; }
 .day-grid .hour::after { content: ""; position: absolute; left: 44px; right: 0; top: 0; border-top: 1px solid var(--border); }
@@ -403,7 +410,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 2px 6px;
+  padding: 4px 6px;
   border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 16%, var(--surface));
@@ -412,6 +419,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   color: var(--text);
 }
 .event-block { cursor: pointer; }
+/* Meetings sit in gray until you point at the calendar, so it doesn't compete with the task lists;
+   pointing anywhere on it brings their colors back. */
+.event-block { transition: filter 0.25s ease; }
+.day-grid:not(:hover) .event-block { filter: grayscale(1); }
 .event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--accent) 26%, var(--surface)); }
 .event-block.past { opacity: 0.5; }
 .event-block.current { border-color: var(--red); }
@@ -424,6 +435,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-block .event-prep { color: inherit; transition: color 0.15s ease; }
 .event-block:hover .event-prep:not(.complete) { color: var(--amber); }
 .event-when .event-prep { margin-left: 6px; }
+/* Prep as dots: one per item, filled when done, the orb's stat-dot size; they take the prep's color. */
+.event-prep { display: inline-flex; gap: 3px; align-items: center; vertical-align: middle; }
+.prep-dot { width: 6px; height: 6px; border-radius: 50%; box-sizing: border-box; border: 1px solid currentColor; }
+.prep-dot.done { background: currentColor; }
 /* The current time: a 1px line, the same weight as the hour lines, in red. */
 .now-line { position: absolute; left: 44px; right: 0; height: 0; border-top: 1px solid var(--red); z-index: 2; pointer-events: none; }
 
@@ -462,7 +477,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The meeting's prep, ticked off in the card; each item's link as a chip under it. */
 .meeting-prep { margin: 2px 0 0; }
 .meeting-prep .task-title { color: var(--text); }
-.meeting-prep .link-chips { margin-top: 3px; }
 
 /* Daily reading */
 .reading { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; flex-shrink: 0; }
@@ -498,7 +512,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .column:hover > .column-header .refresh { visibility: visible; }
 
 /* Inbox: messages that only need a quick reply */
-.inbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; flex-shrink: 0; }
+/* The inbox takes the rest of its pane's height, its list scrolling inside it (above the fog, by the
+   pane's bottom padding). */
+.inbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; flex: 1 1 auto; min-height: 0; }
 .inbox h4 { margin: 0; }
 .inbox-item { padding: 7px 10px; }
 .inbox-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
@@ -512,24 +528,21 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   overflow: hidden;
   opacity: 0;
   white-space: nowrap;
-  transition: max-width 0.18s ease, opacity 0.18s ease;
+  transition: max-width 0.18s ease, opacity 0.18s ease, margin-left 0.18s ease;
 }
 .inbox-item:hover .inbox-action { max-width: 120px; opacity: 1; }
+/* Hidden actions take no width, and give back the row's gap too, so the time sits flush right. */
+.inbox-item:not(:hover) .inbox-action { margin-left: -8px; }
+/* While the actions show, the time folds away to make room for them. */
+.inbox-time { max-width: 120px; overflow: hidden; white-space: nowrap; transition: max-width 0.18s ease, opacity 0.18s ease; }
+.inbox-item:hover .inbox-time { max-width: 0; opacity: 0; }
 .reply-draft { margin-top: 6px; padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); }
 .reply-draft p { margin: 0 0 6px; white-space: pre-wrap; }
 .reply-draft-actions { display: flex; gap: 12px; }
 
 
-/* What a running refresh is doing, beside its spinner */
+/* A refresh button: its spinner while it runs, what it's doing in the tooltip. */
 .refresh-wrap { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
-.refresh-status {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--muted);
-}
 
 /* Updates as a deck: newest on top, the next two peeking out behind */
 .update-stack { position: relative; margin-top: 2px; }
@@ -575,15 +588,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 @keyframes update-fade { to { opacity: 0; } }
 .update-meta { display: flex; justify-content: space-between; gap: 8px; }
+/* The time a little smaller than the label beside it, like the inbox's. */
+.update-meta .timestamp { font-size: 11px; }
 .update-text { font-size: 13px; margin: 0; }
 .update-links { display: flex; gap: 12px; }
 .update-links .source-link { color: var(--muted); }
-/* Mark read stays gray until the pointer is over the update. */
-.update-card .mark-read { color: var(--muted); transition: color 0.15s ease; }
-.update-card:hover .mark-read { color: var(--accent); }
+/* Explain and Dismiss stay gray until the pointer is over the update. */
+.update-card :is(.mark-read, .explain-link) { color: var(--muted); transition: color 0.15s ease; }
+.update-card:hover :is(.mark-read, .explain-link) { color: var(--accent); }
 .update-actions { display: flex; justify-content: space-between; align-items: center; }
 
-.project .untrack .link-button.muted { color: var(--muted); }
 
 /* The RACI letter matches the P0-P4 badge beside it. */
 .project .badge.raci,
@@ -645,7 +659,27 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* All tasks filters: one control per category in the group heading */
 .group-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 10px 0 4px; }
 .group-header h4 { margin: 0; }
-.task-filters { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; }
+/* Task filters: one line, never wrapping; what doesn't fit goes into More filters (see OverflowBar). */
+.task-filters { position: relative; flex: 1; min-width: 0; display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; align-items: center; }
+.task-filters .filter-slot { flex-shrink: 0; }
+.task-filters .filter-select { white-space: nowrap; }
+/* The measuring copy: laid out like the row, but unseen and out of the way. */
+.task-filters-measure { position: absolute; top: 0; left: 0; display: flex; gap: 6px; visibility: hidden; pointer-events: none; white-space: nowrap; }
+/* More filters shows the hidden filters in a row just under it, right-aligned, with no panel behind
+   them: they read as the rest of the filter row. Each opens its own menu as usual. */
+.multi-filter-menu.more-filters-menu {
+  flex-direction: row; flex-wrap: nowrap; gap: 6px; padding: 0; min-width: 0;
+  background: none; border: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+/* The filters in it are solid, though, so tasks underneath don't show through them; a filter that's
+   on keeps its tint, laid over the same solid ground. */
+.more-filters-menu .filter-select { background: var(--bg); }
+.more-filters-menu .filter-select.on { background: linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 12%, transparent)), var(--bg); }
+/* The title and how the list is sorted, at the left of a group's heading. */
+.group-title { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sort-select .filter-select { gap: 5px; }
+.sort-menu { left: 0; right: auto; transform-origin: top left; }
+.multi-filter-check.round { border-radius: 50%; }
 /* Dropdowns and the Recommended button share one box, so their text lines up. */
 .filter-select {
   appearance: none;
@@ -677,7 +711,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .inbox-time { flex-shrink: 0; margin-left: auto; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 /* Three ~36px rows and their two 4px gaps, plus a few px so the third row's border isn't cut
    (rows can render a pixel taller); the fourth starts below that. The count says how many scroll. */
-.inbox-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; }
+.inbox-list { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .inbox-item { flex-shrink: 0; }
 
 /* A column title with its "updated" time on the same line */
@@ -707,10 +741,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .work-tab.about-tab:hover { color: var(--muted); }
 .work-tab.about-tab .muted { color: inherit; }
 .work-tab.open { border-color: var(--border); border-bottom-color: var(--surface); background: var(--surface); }
-.work-items.tab-panel { margin: 0 -14px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.work-items.tab-panel { margin: 0 -14px; padding: 10px 14px 0; }
 .profile-goal { margin: 0; }
 .profile-modal .column-header { display: flex; justify-content: space-between; align-items: center; }
-.profile-modal dl { font-size: 13px; }
+.profile-modal dl { font-size: 12px; }
 .person-chip { cursor: default; }
 /* Above the profile modal (z-index 30) */
 .person-card { z-index: 40; }
@@ -722,7 +756,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .profile-channels .chip:hover { background: color-mix(in srgb, var(--grey-bg) 70%, var(--text)); }
 .profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .milestone.done { color: var(--muted); }
-.milestone.at_risk, .milestone.missed { color: var(--amber); }
+/* The text reads like any milestone still to come; its badge says how it's doing. */
 
 /* Projects discovery found outside the #tmp- convention, waiting for the user to track or ignore */
 .suggested-projects { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
@@ -736,6 +770,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
+/* Each step on one line: its text cut short with "…", so a Human tag after it always fits. */
+.plan-outline-steps li > .hover-tip-anchor { flex: 1; min-width: 0; display: flex; }
+.plan-outline-steps .step-line { display: flex; align-items: baseline; min-width: 0; }
+.plan-outline-steps .step-line > .clip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-outline-steps .step-line > .step-by { flex-shrink: 0; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
 .step-circle.done { color: var(--green); }
 .step-circle.skipped { color: var(--muted); opacity: 0.7; }
@@ -745,13 +784,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .step-remind { margin-left: auto; padding-left: 8px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s ease; }
 .plan-outline-steps li:hover .step-remind, .step-remind:focus-visible { opacity: 1; }
 .hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
-.plan-outline-steps li.step-skipped > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.plan-outline-steps li.step-skipped > .hover-tip-anchor > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
 @keyframes step-turn { to { transform: rotate(360deg); } }
-.plan-outline-steps li.step-done > .small { color: var(--muted); }
+.plan-outline-steps li.step-done > .hover-tip-anchor > .small { color: var(--muted); }
 .step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
 .step-by.claude { color: var(--accent); }
+/* The step holding the task up right now (waiting on you) says Human in yellow while the card is
+   hovered, like the Human status badge; your steps still to come say it in gray. */
+.card:hover .plan-outline-steps .step-by.you.now { color: var(--amber); background: var(--amber-bg); }
 
 /* Plan panel actions: the Claude-style approve button, then text links */
 .plan-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
@@ -792,13 +834,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pressure-seg:hover::before { filter: brightness(1.15); }
 .pressure-bar-empty { width: 6px; height: 6px; margin: 5px 0; border-radius: 50%; background: color-mix(in srgb, var(--muted) 40%, var(--bg)); }
 /* Solid grays, darkest for the most urgent, stepping lighter toward low priority. */
-.pressure-seg.blocking { --seg: color-mix(in srgb, var(--text) 85%, var(--bg)); }
-.pressure-seg.critical { --seg: color-mix(in srgb, var(--text) 65%, var(--bg)); }
+.pressure-seg.blocking { --seg: color-mix(in srgb, var(--text) 62%, var(--bg)); }
+.pressure-seg.critical { --seg: color-mix(in srgb, var(--text) 46%, var(--bg)); }
 /* Overdue is the one that should catch the eye. */
 .pressure-seg.overdue { --seg: var(--red); }
-.pressure-seg.high, .pressure-seg.due-soon { --seg: color-mix(in srgb, var(--text) 45%, var(--bg)); }
-.pressure-seg.medium { --seg: color-mix(in srgb, var(--text) 28%, var(--bg)); }
-.pressure-seg.low { --seg: color-mix(in srgb, var(--text) 16%, var(--bg)); }
+.pressure-seg.high, .pressure-seg.due-soon { --seg: color-mix(in srgb, var(--text) 32%, var(--bg)); }
+.pressure-seg.medium { --seg: color-mix(in srgb, var(--text) 21%, var(--bg)); }
+.pressure-seg.low { --seg: color-mix(in srgb, var(--text) 12%, var(--bg)); }
 .pressure-tip { transform: translateX(-50%); padding: 4px 8px; white-space: nowrap; }
 
 /* Relevant links on a task, as Google Docs–style smart chips */
@@ -825,6 +867,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* A review window's editor: as tall as its text (set in ComposeModal), shrinking to fit the screen and
    scrolling only then. */
 .compose-editor { flex: 0 1 auto; resize: none; overflow-y: auto; }
+/* The draft box has its own border, so its footer needs no divider. */
+.compose-editor + .plan-modal-actions { border-top: 0; padding-top: 0; }
 .remind-status { margin-right: auto; }
 
 /* Multi-select filter: a pill that opens a checklist */
@@ -1008,14 +1052,24 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .setup-step > div { flex: 1; min-width: 0; }
 .setup-step-title { font-weight: 600; }
 .setup-step-body { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; color: var(--muted); }
-.setup-step-body code, .setup-command code { font-size: 12px; background: var(--grey-bg); padding: 1px 5px; border-radius: 4px; color: var(--text); }
+.setup-step-body code { font-size: 12px; background: var(--grey-bg); padding: 1px 5px; border-radius: 4px; color: var(--text); }
 .setup-mark { display: inline-flex; justify-content: center; width: 16px; flex-shrink: 0; font-weight: 700; }
 .setup-mark.ok { color: var(--green); }
 .setup-mark.bad { color: var(--red); }
 .setup-mark.warn { color: var(--amber); }
 .setup-mark.todo { color: var(--muted); font-weight: 400; }
 .setup-step .spinner { width: 16px; flex-shrink: 0; }
-.setup-command { display: flex; gap: 10px; align-items: baseline; }
+/* A command to paste: one line in a block, with the copy icon inside it at the right. */
+.setup-command {
+  display: flex; align-items: center; gap: 4px; max-width: 100%; box-sizing: border-box;
+  padding: 3px 3px 3px 8px; border-radius: 6px; background: var(--grey-bg); color: var(--text);
+}
+.setup-command code { flex: 1; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow-x: auto; scrollbar-width: none; background: none; padding: 0; color: inherit; }
+.setup-command-copy {
+  flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
+  border: none; border-radius: 4px; background: none; color: var(--muted); cursor: pointer;
+}
+.setup-command-copy:hover { color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent); }
 .setup-connectors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; align-self: stretch; }
 .setup-connector { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: baseline; color: var(--text); }
 .setup-status { flex: 1; }
@@ -1058,8 +1112,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
    WebKit's caret can't be made thinner; the native one is hidden. The mirror is a hidden copy of the
    textarea, laid out the same, for finding where the cursor falls. */
 .composer-field { flex: 1; min-width: 0; display: flex; position: relative; }
-/* Text starts a few pixels in, so the cursor (drawn at the very start of an empty box) sits clear of it. */
-.composer textarea { caret-color: transparent; text-indent: 5px; }
+/* Text starts just past the cursor (drawn at the very start of an empty box: 1px in, 1.25px wide), so
+   the two sit a hair apart rather than with a gap. */
+.composer textarea { caret-color: transparent; text-indent: 3px; }
 .composer-mirror {
   /* Its font, spacing, padding and width are copied from the textarea when measuring. */
   position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; overflow: hidden;
@@ -1081,7 +1136,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .composer-send:not(:disabled):active { transform: scale(0.92); }
 .composer-wrap.disabled .composer { background: color-mix(in srgb, var(--grey-bg) 60%, var(--surface)); }
 .composer-wrap.disabled textarea { cursor: default; }
-.plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .input-needed, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
+.plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
 
 /* The arrow at the end of a task's header row, after its badges, that opens and closes the card */
 .task-toggle { display: inline-flex; align-items: center; align-self: center; flex-shrink: 0; padding: 2px; margin-left: -2px; border: none; background: none; cursor: pointer; color: var(--muted); }
@@ -1149,14 +1204,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* In a task investigation the buttons sit on their own row, from the left. */
 .task-check .check-buttons { margin-left: 0; width: 100%; align-items: center; }
 
-/* Under a session's steps when it needs you: what's needed, and the way into the chat. */
-.input-needed {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 6px 6px 6px 10px; border-radius: 8px;
-  background: color-mix(in srgb, var(--amber) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
-}
-.input-needed-label { font-size: 12px; color: var(--text); }
+
 
 /* The session chat: laid out like a Claude conversation. Your messages sit in bubbles on the
    right, Claude's read as plain text, and the reply box stays pinned at the bottom. */
@@ -1179,23 +1227,25 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .chat-ask-step { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .chat-ask-step .step-circle { margin-top: 0; }
 .chat-ask-action { margin-top: 6px; }
-.chat-ask-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.chat-ask-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
-.chat-turn { font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+/* Chat text is the size of a task description, not larger. */
+.chat-turn { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-turn.you {
   align-self: flex-end; max-width: 80%; padding: 8px 14px; border-radius: 18px;
   background: var(--grey-bg); white-space: pre-wrap;
 }
 .chat-turn.claude { align-self: stretch; color: var(--text); display: flex; flex-direction: column; gap: 10px; }
-.chat-working { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.chat-working { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .claude-spark { display: inline-block; width: 1em; text-align: center; color: #d97757; font-size: 14px; line-height: 1; }
 .chat-modal-foot { padding: 10px 20px 16px; }
 /* A plain conversation (Explain this): a neutral top box and a quiet, light-gray title. */
 .chat-modal.plain .chat-modal-title { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .chat-modal.plain .chat-ask { background: var(--surface); border-color: var(--border); }
-.chat-modal-foot .composer { border-radius: 18px; padding: 8px 8px 8px 14px; }
-.chat-modal-foot .composer textarea { font-size: 13.5px; }
-.chat-modal-foot .composer-send { width: 28px; height: 28px; }
+/* The chat's reply bar, sized to its 12px text: field and send button centered on one line. */
+.chat-modal-foot .composer { border-radius: 16px; padding: 5px 5px 5px 12px; align-items: center; }
+.chat-modal-foot .composer textarea { font-size: 12px; }
+.chat-modal-foot .composer-send { width: 22px; height: 22px; }
 /* A task's chat, side by side: the plan's steps on the left (where each stands, and chips for what
    finished it), the conversation on the right. */
 .chat-modal.split { width: min(1140px, 100%); }
@@ -1434,7 +1484,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .action-card .handoff-head { align-items: flex-start; }
 .action-summary { color: var(--text); line-height: 1.45; }
 .action-buttons { display: flex; gap: 6px; flex-shrink: 0; }
-.action-card.applied { opacity: 0.85; }
 
 /* A project's focus, in the user's words, editable in its details. */
 .focus-field {
@@ -1458,6 +1507,9 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   color: var(--text); font: inherit; font-size: 12px;
 }
 .why-prompt input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.why-actions { display: flex; justify-content: flex-end; gap: 12px; }
+.why-actions .link-button { color: var(--muted); }
+.why-actions .link-button:hover { color: var(--text); }
 /* Settings: lessons learned from corrections, with where each applies. */
 .lesson { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1; }
 .lesson-scope { flex-shrink: 0; color: var(--muted); font-size: 11px; min-width: 64px; }
@@ -1470,7 +1522,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .today-column > .column-header { align-items: flex-start; }
 .today-column > .column-header > div:first-child { flex-shrink: 0; white-space: nowrap; }
 .today-column > .column-header > .refresh-wrap { flex: 1; justify-content: flex-end; line-height: 18px; }
-.today-column > .column-header .refresh-status { min-width: 0; max-width: none; }
 
 /* After the chat's title, what it's for, lighter. */
 .chat-modal-subtitle { margin-left: 8px; color: color-mix(in srgb, var(--muted) 38%, var(--bg)); }
@@ -1479,7 +1530,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
    the fiddly part, in the screen's small text. */
 .onboarding-guide { width: min(420px, calc(100% - 48px)); margin-top: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.55; color: var(--muted); animation: onboarding-start-in 400ms ease-out; }
 .onboarding-guide ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
-.onboarding-guide code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: rgb(255 255 255 / 0.08); color: var(--text); }
+.onboarding-guide :not(.setup-command) > code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: rgb(255 255 255 / 0.08); color: var(--text); }
 .onboarding-guide-actions { display: flex; justify-content: center; gap: 8px; margin: 2px 0; }
 .onboarding-guide-fallback { padding-top: 6px; border-top: 1px solid rgb(255 255 255 / 0.08); }
 .onboarding-guide-fallback p { margin: 0 0 6px; }
@@ -1489,10 +1540,50 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .onboarding-connector-mark { width: 10px; text-align: center; }
 .onboarding-connectors li.done .onboarding-connector-mark { color: var(--green); }
 .onboarding-connector-purpose { color: color-mix(in srgb, var(--muted) 60%, transparent); font-size: 11px; }
+.onboarding-guide-note { margin: 0; }
+/* The onboarding screen is always black, whatever the app's theme, so it brings the dark theme's
+   colors with it: in light mode the code blocks and buttons would be dark on black. */
+.onboarding {
+  color-scheme: dark;
+  --bg: #000; --surface: #1b1b1a; --border: #383836; --text: #ececea; --muted: #9b9b96;
+  --accent: #6b9cf0; --red: #f07b72; --green: #6fcf8a; --grey-bg: #262625;
+}
+/* The guide's buttons line up with its steps' text, on the left. */
+.onboarding-guide .onboarding-guide-actions { justify-content: flex-start; padding-left: 18px; }
+/* The full connector list makes the guide tall: the screen scrolls rather than clip it on a short window. */
+/* Always laid out from the top, with a top padding that centers the orb and its line on the first
+   screen (about 410px tall: the orb, the line and the space for Start). When a setup step shows, the
+   padding eases down to a small margin, so they slide up into place instead of jumping; they ease
+   back down for the closing greeting. */
+.onboarding {
+  overflow-y: auto; justify-content: flex-start; padding: max(24px, calc(50vh - 205px)) 0 24px;
+  transition: padding-top 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
 .onboarding-help { color: var(--muted); }
-.onboarding-progress { display: flex; justify-content: center; gap: 14px; margin-bottom: 4px; font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, transparent); }
-.onboarding-progress .done { color: var(--muted); }
-.onboarding-progress .current { color: var(--text); }
+/* Setup's steps beside the title, on a small drum: one line tall in the layout, with a taller window
+   hanging over it where the steps above and below turn away, foreshortened and fading. Moving on
+   turns the drum. */
+/* "Get started" stays centered under the orb; the wheel hangs off to its right. */
+.onboarding-line:has(.step-stack) { position: relative; margin: 22px 0 30px; }
+.step-stack { position: absolute; left: calc(100% + 18px); top: 0; width: 165px; height: 18px; text-align: left; }
+.step-stack-window {
+  position: absolute; left: 0; right: 0; top: -25px; height: 68px; perspective: 260px; perspective-origin: 50% 50%;
+  /* A long, eased fade: many stops so it has no visible band. */
+  -webkit-mask-image: linear-gradient(transparent 0%, rgb(0 0 0 / 0.04) 8%, rgb(0 0 0 / 0.16) 16%, rgb(0 0 0 / 0.36) 24%, rgb(0 0 0 / 0.62) 32%, rgb(0 0 0 / 0.86) 40%, #000 46%, #000 54%, rgb(0 0 0 / 0.86) 60%, rgb(0 0 0 / 0.62) 68%, rgb(0 0 0 / 0.36) 76%, rgb(0 0 0 / 0.16) 84%, rgb(0 0 0 / 0.04) 92%, transparent 100%);
+  mask-image: linear-gradient(transparent 0%, rgb(0 0 0 / 0.04) 8%, rgb(0 0 0 / 0.16) 16%, rgb(0 0 0 / 0.36) 24%, rgb(0 0 0 / 0.62) 32%, rgb(0 0 0 / 0.86) 40%, #000 46%, #000 54%, rgb(0 0 0 / 0.86) 60%, rgb(0 0 0 / 0.62) 68%, rgb(0 0 0 / 0.36) 76%, rgb(0 0 0 / 0.16) 84%, rgb(0 0 0 / 0.04) 92%, transparent 100%);
+}
+/* The drum's axis runs through the middle of the window; the current step faces you there. */
+.step-stack-drum { position: absolute; inset: 0; transform-style: preserve-3d; }
+.step-stack-item {
+  position: absolute; left: 0; right: 0; top: calc(50% - 9px); display: flex; gap: 6px; height: 18px; line-height: 18px;
+  font-size: 12px; white-space: nowrap; color: var(--muted); backface-visibility: hidden; transform-origin: 50% 50% 0;
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.6s ease, filter 0.6s ease, color 0.3s;
+}
+/* Pulled back by the radius, so the face of the drum sits where the line would be. */
+.step-stack-drum { transform: translateZ(calc(-1 * var(--wheel-radius, 31px))); }
+.step-stack-item.current { color: color-mix(in srgb, var(--text) 72%, #000); }
+.step-stack-mark { width: 10px; text-align: center; }
+.step-stack-item.done .step-stack-mark { color: var(--green); }
 
 /* The setup checklist opened from onboarding ("More help") sits above onboarding's black screen. */
 body:has(.onboarding) .modal-backdrop:has(.setup-modal) { z-index: 110; }
@@ -1547,3 +1638,213 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 .epic-issue-assignee { flex-shrink: 0; color: var(--muted); }
 .epic-issue-assignee.unassigned { font-style: italic; opacity: 0.7; }
 .epic-issues-foot { display: flex; gap: 8px; align-items: baseline; }
+
+/* Detail: the orb and calendar column, a rule, a rail of area icons, then the open area in a panel
+   set in from the top and right, rounded at the top, flush with the bottom of the window. */
+.detail-layout {
+  flex: 1; min-height: 0; position: relative; display: grid;
+  /* The orb and calendar column is exactly as wide as in the Dashboard (285px at most), so nothing
+     moves when you switch: its track adds the 16px of padding before the rule and the rule's 1px. */
+  grid-template-columns: minmax(237px, 302px) 52px minmax(0, 1fr);
+  /* No top padding here, so the rule beside the calendar runs to the top of the window; the column,
+     rail and panel each keep their 16px instead. */
+  padding: 0 16px 0 20px;
+}
+.detail-layout > :not(.orb-glow) { position: relative; z-index: 1; min-width: 0; }
+/* The calendar column reaches across the rail, so the calendar's hour labels and lines can sit
+   there and scroll with it. The rule beside the calendar stays where it was: drawn as a fixed
+   1px background line at the rail's left edge (a scroll box's background doesn't scroll). */
+.detail-layout > .today-column {
+  grid-column: 1 / 3; grid-row: 1; padding-top: 16px; padding-right: calc(16px + 1px + 52px);
+  background: linear-gradient(var(--border), var(--border)) calc(100% - 52px) 0 / 1px 100% no-repeat;
+}
+.detail-layout > .detail-rail { grid-column: 2; grid-row: 1; z-index: 2; align-self: start; }
+/* The calendar's scroll box reaches across the rail too, so its labels there aren't clipped. */
+.detail-layout .day-scroll { margin-right: calc(-1 * (16px + 1px + 52px)); padding-right: calc(16px + 1px + 52px); }
+.detail-layout > .detail-panel { grid-column: 3; grid-row: 1; }
+/* In the rail: each hour's label, and its line running from the calendar's left edge a few px past
+   the rule; the now line the same, with the time beside it. An hour label the time would cover
+   steps aside. */
+.detail-layout .day-grid .events { left: 0; }
+.detail-layout .day-grid .hour::after { left: 0; right: -23px; }
+.detail-layout .day-grid .hour-label { left: calc(100% + 28px); white-space: nowrap; }
+/* The rail is narrow: its times show just the number. */
+.detail-layout .day-grid .time-period { display: none; }
+.detail-layout .day-grid .hour.near-now .hour-label { visibility: hidden; }
+.detail-layout .now-line { left: 0; right: -23px; }
+.detail-layout .now-label { display: block; }
+.detail-rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 24px; }
+.detail-tab {
+  display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: none; border-radius: 9px;
+  background: none; color: var(--muted); cursor: pointer; transition: color 0.15s, background 0.15s;
+}
+/* Like the layout toggle: the open area dark gray and filled, the others a lighter gray, outlined. */
+.detail-tab { color: color-mix(in srgb, var(--muted) 65%, var(--bg)); }
+.detail-tab:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.detail-tab.on { color: color-mix(in srgb, var(--text) 62%, var(--bg)); background: color-mix(in srgb, var(--text) 11%, transparent); }
+.detail-panel {
+  display: flex; min-height: 0; overflow: hidden; margin-top: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-bottom: none; border-radius: 14px 14px 0 0;
+}
+.detail-split { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.detail-pane { min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 18px; }
+.detail-pane + .detail-pane { border-left: 1px solid var(--border); }
+/* The Updates area's chat dock: the chat fills it, inline rather than as a window. */
+.chat-dock { padding: 0; display: flex; overflow: hidden; }
+.chat-dock-empty { margin: auto; padding: 24px; text-align: center; }
+.chat-modal.docked { width: 100%; height: 100%; max-height: none; border: none; border-radius: 0; box-shadow: none; background: transparent; }
+
+/* A project's details in the Detail view: each heading (Channels, People, …) sits above its content,
+   left-aligned, rather than beside it as in the window. */
+.project-detail-pane dl { margin: 0; font-size: 12px; display: flex; flex-direction: column; }
+.project-detail-pane dt { color: var(--muted); margin-top: 16px; }
+.project-detail-pane dt:first-child { margin-top: 4px; }
+.project-detail-pane dd { margin: 6px 0 0; min-width: 0; }
+
+/* A milestone on one line: its date, its text cut short, then its health badge, which always fits. */
+.profile-list .milestone { display: flex; align-items: baseline; gap: 0; min-width: 0; white-space: nowrap; }
+.profile-list .milestone-date { flex-shrink: 0; margin-right: 8px; }
+.profile-list .milestone-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.milestone-health { flex-shrink: 0; margin-left: 8px; }
+.milestone-health.done { color: var(--green); background: var(--green-bg); }
+.milestone-health.at_risk { color: var(--amber); background: var(--amber-bg); }
+.milestone-health.missed { color: var(--red); background: var(--red-bg); }
+
+/* View in tasks under a prep item, on its own line, small. */
+/* A prep item's lines stack: its title, its links, then View in tasks, all flush left. */
+.meeting-prep .task-body { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.meeting-prep .prep-view-task { margin: 2px 0 0; padding-left: 0; padding-right: 0; text-align: left; }
+
+/* The date a list is sorted by, on each card: quiet, like the estimate; "No date" quieter still. */
+.badge.date-badge { color: var(--muted); background: var(--grey-bg); white-space: nowrap; }
+.badge.date-badge.none { opacity: 0.7; }
+/* The docked chat's reply box sits just above the fog along the bottom, clear of its blur too, which
+   rises higher than the fog itself (--mist-fade-height), fading out toward its top. */
+.chat-modal.docked .chat-modal-foot { padding-bottom: calc(var(--mist-fade-height) - 30px); }
+/* A simulated onboarding (Settings > Simulate onboarding): toggles along the top for what's
+   pretended to be in place, and a way out. */
+.onboarding-sim-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 10px 16px; font-size: 11px; color: var(--muted); background: rgb(255 255 255 / 0.04); border-bottom: 1px solid rgb(255 255 255 / 0.08);
+}
+.onboarding-sim-title { margin-right: 4px; color: var(--text); font-weight: 600; }
+.onboarding-sim-sep { width: 1px; height: 14px; margin: 0 4px; background: rgb(255 255 255 / 0.12); }
+.onboarding-sim-toggle {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.onboarding-sim-toggle input { margin: 0; accent-color: var(--accent); }
+.onboarding-sim-toggle.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.onboarding-sim-toggle.disabled { opacity: 0.4; cursor: default; }
+.onboarding-sim-end { margin-left: auto; color: var(--muted); }
+.onboarding:has(.onboarding-sim-bar) { padding-top: max(64px, calc(50vh - 205px)); }
+/* Once a step's guide shows, the orb and title stay put at the top and the guide grows downward, so
+   steps of different heights don't move them (centering would lift them for a taller step). A
+   window too short for the tallest step scrolls. */
+.onboarding:has(.onboarding-guide) { padding-top: max(16px, 3vh); }
+.onboarding:has(.onboarding-guide):has(.onboarding-sim-bar) { padding-top: max(56px, 3vh); }
+/* The orb steps back while a guide shows, so the tallest step (connectors) fits on a ~700px window. */
+
+/* Install and sign-in, two ways side by side: the button that does it, or the command to paste. */
+.onboarding-guide:has(.onboarding-two-ways) { width: min(560px, calc(100% - 48px)); }
+.onboarding-two-ways { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 4px 0; }
+.onboarding-two-ways > div { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; min-width: 0; }
+.onboarding-two-ways > div + div { padding-left: 20px; border-left: 1px solid rgb(255 255 255 / 0.08); }
+.onboarding-two-ways p { margin: 0; }
+.onboarding-two-ways .setup-command { width: 100%; }
+.onboarding-way-label { font-size: 11px; color: color-mix(in srgb, var(--muted) 70%, transparent); }
+.onboarding-way-badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 10px; vertical-align: 1px;
+  color: var(--muted); background: rgb(255 255 255 / 0.08);
+}
+/* The connectors step, split: what to do and a preview of the page on the left, the list on the right. */
+.onboarding-guide.onboarding-guide-wide { width: min(620px, calc(100% - 48px)); }
+.onboarding-connectors-split .onboarding-guide-actions { justify-content: flex-start; padding-left: 0; flex-wrap: wrap; }
+.onboarding-connectors-split .onboarding-connectors { margin-left: 0; }
+.onboarding-connectors-split .onboarding-way-label + .onboarding-connectors { margin-bottom: 8px; }
+
+/* What about Jira?: a dotted hint that explains on hover or focus. */
+.onboarding-tip { position: relative; align-self: flex-start; margin-top: 4px; font-size: 11px; color: var(--muted); border-bottom: 1px dotted currentColor; cursor: help; outline: none; }
+.onboarding-tip-bubble {
+  position: absolute; left: 0; bottom: calc(100% + 8px); width: 260px; padding: 8px 10px; border-radius: 8px;
+  background: #1f1f1e; border: 1px solid var(--border); color: var(--text); font-size: 11px; line-height: 1.5;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5); opacity: 0; visibility: hidden; transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s, visibility 0.15s; z-index: 2;
+}
+.onboarding-tip:hover .onboarding-tip-bubble, .onboarding-tip:focus .onboarding-tip-bubble { opacity: 1; visibility: visible; transform: none; }
+
+/* A sketch of claude.ai's Connectors page: a browser frame, a row per connector, the cursor on Connect. */
+.connectors-preview { width: 100%; margin-top: 6px; border-radius: 8px; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.1); background: #262624; font-size: 10px; color: #c9c7c0; }
+.connectors-preview-bar { display: flex; align-items: center; gap: 4px; padding: 5px 7px; background: #1c1c1b; border-bottom: 1px solid rgb(255 255 255 / 0.06); }
+.connectors-preview-bar > span { width: 6px; height: 6px; border-radius: 50%; background: rgb(255 255 255 / 0.15); }
+.connectors-preview-url { flex: 1; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: rgb(255 255 255 / 0.06); color: #8d8b85; font-size: 9px; }
+.connectors-preview-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 5px; }
+.connectors-preview-title { margin-bottom: 2px; font-size: 11px; font-weight: 600; color: #ece9e1; }
+.connectors-preview-row { display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 6px; border: 1px solid rgb(255 255 255 / 0.06); }
+.connectors-preview-row.hover { background: rgb(255 255 255 / 0.04); }
+.connectors-preview-icon { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: rgb(255 255 255 / 0.1); font-size: 9px; font-weight: 600; color: #ece9e1; }
+.connectors-preview-name { flex: 1; min-width: 0; }
+.connectors-preview-connect { position: relative; padding: 2px 8px; border-radius: 5px; border: 1px solid rgb(255 255 255 / 0.14); color: #ece9e1; }
+.connectors-preview-row.hover .connectors-preview-connect { background: rgb(255 255 255 / 0.12); }
+.connectors-preview-cursor { position: absolute; left: 60%; top: 55%; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.5)); animation: connectors-preview-tap 2.6s ease-in-out infinite; }
+@keyframes connectors-preview-tap { 0%, 60%, 100% { transform: none; } 70% { transform: scale(0.88); } }
+/* In the split connectors step the list is narrow: each connector's purpose goes under its name. */
+.onboarding-connectors-split .onboarding-connectors li { display: grid; grid-template-columns: 10px 1fr; column-gap: 8px; row-gap: 0; }
+.onboarding-connectors-split .onboarding-connectors li { white-space: nowrap; }
+.onboarding-connectors-split .onboarding-connector-purpose { grid-column: 2; line-height: 1.4; white-space: normal; }
+
+/* The step's sections sit in a panel like the Detail view's: rounded at the top, open and flush at
+   the bottom of the window, with the dividing line running its full height. */
+.onboarding:has(.onboarding-guide) { padding-bottom: 0; }
+.onboarding-guide:has(.onboarding-two-ways) { flex: 1 0 auto; margin-top: 0; }
+.onboarding-guide .onboarding-two-ways {
+  flex: 1 0 auto; gap: 0; margin: 0; border: 1px solid rgb(255 255 255 / 0.1); border-bottom: none; border-radius: 14px 14px 0 0;
+  background: rgb(255 255 255 / 0.02);
+}
+.onboarding-guide .onboarding-two-ways > div { padding: 20px 22px 28px; }
+.onboarding-guide .onboarding-two-ways > div + div { padding-left: 22px; border-left: 1px solid rgb(255 255 255 / 0.1); }
+/* More help stays reachable in the corner while the panel runs to the bottom. */
+.onboarding:has(.onboarding-guide) .onboarding-actions { position: fixed; right: 18px; bottom: 12px; min-height: 0; margin: 0; }
+
+/* The now line's time: shown only where there's room beside the calendar (the Detail view's rail). */
+.now-label { display: none; position: absolute; top: -7px; left: calc(100% + 5px); font-size: 10px; line-height: 13px; color: var(--red); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Detail view: the orb's stats leave the orb for the Tasks header, at its right, centered on the row. */
+.detail-layout .today-column .pressure-bars { display: none; }
+.column-header:has(> .header-extra) { align-items: center; justify-content: flex-start; gap: 0; }
+/* Title on the left; the stats at the right, with the refresh button after them. The button shows
+   only while the pointer is over the tasks (or while it's refreshing), and the stats slide left to
+   make room for it. */
+.header-extra { order: 1; margin-left: auto; display: flex; align-items: center; }
+/* It opens to the icon's own width (24px: the 16px glyph and its padding), so the slide runs the same
+   distance both ways; animating to a looser cap made the close sit still and then snap. A refresh
+   in progress keeps it open. */
+.column-header:has(> .header-extra) > .refresh-wrap {
+  order: 2; flex: 0 0 auto; width: 0; margin-left: 0; opacity: 0; overflow: hidden; justify-content: flex-end;
+  transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
+}
+.detail-pane:hover .column-header:has(> .header-extra) > .refresh-wrap { width: 24px; margin-left: 10px; opacity: 1; }
+.column-header:has(> .header-extra) > .refresh-wrap:has(.busy) { width: 24px; margin-left: 10px; opacity: 1; }
+/* "Tasks" and when it was updated stay on one line beside the stats. */
+.column-header:has(> .header-extra) .title-line { white-space: nowrap; }
+.header-extra .pressure-bars { padding: 0; }
+/* The bottom bar's line on what's loading, beside Refresh everything: one line, cut short if long. */
+.bottom-status { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+/* A section being refreshed: a spinner after its title. */
+.section-spinner { margin-left: 6px; display: inline-flex; vertical-align: -1px; }
+
+/* "updated …" shows only while the pointer is over its section (a column, pane or card). */
+.updated-stamp { transition: opacity 0.15s ease; }
+:is(.column, .detail-pane, .card):not(:hover) .updated-stamp { opacity: 0; }
+/* Each section's first item sits the same 6px under its heading (the section's 4px gap plus 2px), as in the Inbox. */
+.reading > .column-header + * { margin-top: 2px; }
+.project .card-header h3 .updated-stamp { margin-left: 8px; font-weight: 400; }
+/* When a task's plan was made, or its investigation corrected: shown while that box is hovered. */
+.hover-stamp { transition: opacity 0.15s ease; }
+:is(.automation, .check-result):not(:hover) .hover-stamp { opacity: 0; }
+/* The Demian chat's View learnings, the size of the chat's title beside it. */
+.learnings-link { font-size: 13px; }
+/* Tasks beside All tasks: both heading rows are one fixed height from the panes' top edge, so the
+   two titles line up whatever controls sit on the right of each. */
+.detail-split > .detail-pane > .column-header,
+.detail-split > .detail-pane > .task-list > .group-header:first-child { height: 26px; margin-top: 0; }

@@ -12,14 +12,73 @@ export const WHY_EVENT = "feedback:why";
 
 export interface WhyRequest {
   id: number;
-  /** What was just changed, in a few words ("Dismissed "Review the SIT plan""), shown in the prompt. */
+  /** What kind of change it was, so Ask less often applies to changes like it. */
+  kind: db.FeedbackKind;
+  /** What was just changed, in a few words ("Dismissed "Review the launch checklist""), shown in the prompt. */
   label: string;
 }
 
-/** Logs a correction and, unless it came with a reason, offers the optional "Why?". */
+/**
+ * How often "Why?" is asked, per kind of change: every `every`th time, `seen` since it last was.
+ * Ask less often doubles `every`, up to WHY_EVERY_MAX; kinds never adjusted are asked every time.
+ */
+export type WhyRates = Partial<Record<db.FeedbackKind, { every: number; seen: number }>>;
+export const WHY_EVERY_MAX = 16;
+const WHY_RATES_KEY = "why-ask-rates";
+
+/** How often to ask about every kind of change, from Settings: every Nth time, or never (0). */
+export const WHY_LEVELS = { always: 1, less: 4, rarely: WHY_EVERY_MAX, never: 0 } as const;
+export type WhyLevel = keyof typeof WHY_LEVELS;
+const WHY_LEVEL_KEY = "why-ask-level";
+
+export function loadWhyLevel(): WhyLevel {
+  const v = localStorage.getItem(WHY_LEVEL_KEY);
+  return v && v in WHY_LEVELS ? (v as WhyLevel) : "always";
+}
+
+/** Sets how often to ask from Settings; it starts every kind of change over at that rate. */
+export function saveWhyLevel(level: WhyLevel) {
+  localStorage.setItem(WHY_LEVEL_KEY, level);
+  saveWhyRates({});
+}
+
+/**
+ * Counts a change of this kind and says whether to ask why this time: at the Settings rate
+ * (`base`), or less often for a kind you've asked to be asked about less.
+ */
+export function countWhy(rates: WhyRates, kind: db.FeedbackKind, base: number = WHY_LEVELS.always): { ask: boolean; rates: WhyRates } {
+  if (base === WHY_LEVELS.never) return { ask: false, rates };
+  const r = rates[kind] ?? { every: 1, seen: 0 };
+  const seen = r.seen + 1;
+  const ask = seen >= Math.max(r.every, base);
+  return { ask, rates: { ...rates, [kind]: { every: r.every, seen: ask ? 0 : seen } } };
+}
+
+/** Asks about this kind of change half as often as now (from at least the Settings rate, `base`). */
+export function askLessOften(rates: WhyRates, kind: db.FeedbackKind, base: number = WHY_LEVELS.always): WhyRates {
+  const every = Math.min(Math.max(rates[kind]?.every ?? 1, base) * 2, WHY_EVERY_MAX);
+  return { ...rates, [kind]: { every, seen: 0 } };
+}
+
+export function loadWhyRates(): WhyRates {
+  try {
+    return JSON.parse(localStorage.getItem(WHY_RATES_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function saveWhyRates(rates: WhyRates) {
+  localStorage.setItem(WHY_RATES_KEY, JSON.stringify(rates));
+}
+
+/** Logs a correction and, unless it came with a reason, offers the optional "Why?" (as often as you've asked to be asked). */
 export async function recordCorrection(f: db.NewFeedback, label: string): Promise<number> {
   const id = await db.logFeedback(f);
-  if (!f.reason && id) window.dispatchEvent(new CustomEvent<WhyRequest>(WHY_EVENT, { detail: { id, label } }));
+  if (f.reason || !id) return id;
+  const { ask, rates } = countWhy(loadWhyRates(), f.kind, WHY_LEVELS[loadWhyLevel()]);
+  saveWhyRates(rates);
+  if (ask) window.dispatchEvent(new CustomEvent<WhyRequest>(WHY_EVENT, { detail: { id, kind: f.kind, label } }));
   return id;
 }
 

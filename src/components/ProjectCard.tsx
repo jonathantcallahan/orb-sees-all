@@ -1,6 +1,7 @@
+import { formatWhen } from "../scheduler";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { logFeedback, saveFocus, setTaskState, updateProjectConfig, type Project, type Reminder, type StoredBlockerCheck } from "../db";
+import { logFeedback, saveFocus, setTaskState, type Project, type Reminder, type StoredBlockerCheck } from "../db";
 import { checkBlocker, refreshProject, sendReminder } from "../jobs";
 import { reminderText, toSlackMentions, updateRequestText } from "../prompts";
 import type { Blocker, BlockerCheck, ProjectStatus, PullRequest, Raci } from "../schema";
@@ -8,7 +9,7 @@ import { age, ago, blockerKey, stateOf, type TaskState } from "../tasks";
 import { linkKind } from "../links";
 import { LinkChips } from "./LinkChips";
 import { TrackingFeed } from "./TrackingFeed";
-import { activeChannels, projectContext, projectName, slackChannelUrl } from "../projects";
+import { activeChannels, channelLabel, dedupeStatements, projectContext, projectName, projectStatus, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
 import { useOrbName } from "../orbLook";
 import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated, updatedText } from "./common";
@@ -20,6 +21,14 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   idle: "Idle",
 };
 
+
+/** A milestone's health, as its badge says it; planned ones have none. */
+const MILESTONE_LABEL: Record<"done" | "planned" | "at_risk" | "missed", string> = {
+  done: "Done",
+  planned: "Planned",
+  at_risk: "At risk",
+  missed: "Missed",
+};
 
 const RACI_LABEL: Record<Raci, string> = {
   responsible: "Responsible",
@@ -60,6 +69,16 @@ function PersonChip({ person }: { person: ProfilePerson }) {
         )}
     </>
   );
+}
+
+/**
+ * An owner of a blocker or active item, named as in Project details: a chip, with their role on this
+ * project on hover when the project knows them (matched by Slack id, else name). You're "You".
+ */
+function OwnerChip({ owner, people }: { owner: { name: string; slack_user_id?: string | null; is_me?: boolean }; people: ProfilePerson[] }) {
+  const person = people.find((p) => (owner.slack_user_id && p.slack_user_id === owner.slack_user_id) || p.name.toLowerCase() === owner.name.toLowerCase());
+  if (person && !owner.is_me) return <PersonChip person={person} />;
+  return <span className={`chip person-chip${owner.is_me ? " me" : ""}`}>{owner.is_me ? "You" : owner.name}</span>;
 }
 
 /**
@@ -192,7 +211,21 @@ function UnderstandingModal({ project, onClose, onChange }: { project: Project; 
   );
 }
 
-function ProfileModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
+/** Milestones, latest date first; ones without a date (or one that isn't a real date, like "Q4") last. */
+function byDateNewestFirst<T extends { date?: string | null }>(items: T[]): T[] {
+  const time = (d?: string | null) => {
+    const t = d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d).getTime() : NaN;
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  return [...items].sort((a, b) => time(b.date) - time(a.date));
+}
+
+/**
+ * A project's details: what it's for, its context, channels, people, milestones, links, decisions and
+ * what's being tracked. Shown in a window from the project card, or inline in the Detail view's
+ * Projects area.
+ */
+export function ProjectDetail({ project, onChange }: { project: Project; onChange: () => void }) {
   const p = project.profile;
   const [contextOpen, setContextOpen] = useState(false);
   const orbName = useOrbName();
@@ -200,28 +233,8 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
   const contextAt = [project.last_refreshed_at, project.focus?.updated_at].filter((t): t is string => !!t).sort().at(-1);
   const channels = activeChannels(project);
   const permalinks = channelPermalinks(project);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  // Clicks still bubble through React from the portal, so stop them before they select the project.
-  return createPortal(
-    <div
-      className="modal-backdrop plan-modal-backdrop"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
-    >
-      <div className="modal plan-modal profile-modal" role="dialog" aria-label={`Project details for ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
-        <header className="column-header">
-          <h2>{projectName(project)}</h2>
-          <button className="icon-button" title="Close" onClick={onClose}>
-            <CloseIcon />
-          </button>
-        </header>
+  return (
+    <>
         {(p?.goal || project.snapshot?.description) && <p className="profile-goal">{p?.goal || project.snapshot?.description}</p>}
         <div className="understanding-row">
           <button className="link-button small more-link understanding-link" onClick={() => setContextOpen(true)}>
@@ -235,7 +248,7 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
       <dl>
         <dt>Channels</dt>
         <dd>
-          <LinkChips links={channels.map((c) => ({ url: slackChannelUrl(c.channel_id, permalinks), title: `#${c.name}`, kind: "slack" as const }))} />
+          <LinkChips links={channels.map((c) => ({ url: slackChannelUrl(c.channel_id, permalinks), title: channelLabel(c), kind: "slack" as const }))} />
         </dd>
         {!!p?.aliases.length && (
           <>
@@ -258,11 +271,13 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
             <dt>Milestones</dt>
             <dd>
               <ul className="profile-list">
-                {p.milestones.map((m) => (
-                  <li key={m.what} className={`milestone ${m.status}`}>
-                    {m.date && <span className="muted">{m.date} · </span>}
-                    {m.what}
-                    {m.status !== "planned" && <span className="muted"> · {m.status.replace("_", " ")}</span>}
+                {byDateNewestFirst(dedupeStatements(p.milestones)).map((m) => (
+                  // One line each: the date, then the milestone cut short with an ellipsis so its health
+                  // badge always fits after it; the whole milestone shows on hover.
+                  <li key={m.what} className={`milestone ${m.status}`} title={`${m.date ? formatWhen(m.date) : "No date"} · ${m.what}${m.status !== "planned" ? ` · ${MILESTONE_LABEL[m.status]}` : ""}`}>
+                    <span className="muted milestone-date">{m.date ? formatWhen(m.date) : "No date"}</span>
+                    <span className="milestone-what">{m.what}</span>
+                    {m.status !== "planned" && <span className={`badge milestone-health ${m.status}`}>{MILESTONE_LABEL[m.status]}</span>}
                   </li>
                 ))}
               </ul>
@@ -282,10 +297,17 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
             <dt>Decisions</dt>
             <dd>
               <ul className="profile-list">
-                {p.decisions.slice(0, 4).map((d) => (
-                  <li key={d.what}>
-                    {d.link ? <ExternalLink href={d.link}>{d.what}</ExternalLink> : d.what}
-                    {d.date && <span className="muted"> · {d.date}</span>}
+                {byDateNewestFirst(dedupeStatements(p.decisions)).slice(0, 4).map((d) => (
+                  // Like the milestones: the date, then the decision on one line, whole on hover.
+                  <li key={d.what} className="milestone" title={`${d.date ? formatWhen(d.date) : "No date"} · ${d.what}`}>
+                    <span className="muted milestone-date">{d.date ? formatWhen(d.date) : "No date"}</span>
+                    {d.link ? (
+                      <ExternalLink href={d.link} className="milestone-what">
+                        {d.what}
+                      </ExternalLink>
+                    ) : (
+                      <span className="milestone-what">{d.what}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -295,37 +317,37 @@ function ProfileModal({ project, onClose, onChange }: { project: Project; onClos
         </dl>
         {!p && <p className="muted small">The next refresh builds the project's profile.</p>}
         <TrackingFeed projectId={project.channel_id} />
-      </div>
-    </div>,
-    document.body,
+    </>
   );
 }
 
-/** Hides a project from the dashboard after an inline confirmation. */
-function Untrack({ name, onConfirm }: { name: string; onConfirm: () => Promise<void> }) {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <div className={`untrack small${confirming ? " confirming" : ""}`}>
-      {confirming ? (
-        <>
-          <span className="muted">Untrack {name}?</span>
-          <button className="link-button small danger" onClick={onConfirm}>
-            Yes
+function ProfileModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Clicks still bubble through React from the portal, so stop them before they select the project.
+  return createPortal(
+    <div
+      className="modal-backdrop plan-modal-backdrop"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="modal plan-modal profile-modal" role="dialog" aria-label={`Project details for ${projectName(project)}`} onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>{projectName(project)}</h2>
+          <button className="icon-button" title="Close" onClick={onClose}>
+            <CloseIcon />
           </button>
-          <button className="link-button small muted" onClick={() => setConfirming(false)}>
-            Cancel
-          </button>
-        </>
-      ) : (
-        <button
-          className="link-button small muted"
-          title="Stop tracking this project. You can track it again in Settings."
-          onClick={() => setConfirming(true)}
-        >
-          Untrack
-        </button>
-      )}
-    </div>
+        </header>
+        <ProjectDetail project={project} onChange={onChange} />
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -351,8 +373,8 @@ const VERDICT_LABEL: Record<"blocker" | "active", Record<BlockerCheck["verdict"]
 function CheckAction({ checking, onCheck, label = "Double check" }: { checking: string | undefined; onCheck: () => void; label?: string }) {
   if (checking) {
     return (
-      <span className="muted small checking" title={checking}>
-        <Spinner /> {checking}…
+      <span className="muted small checking" title={`${checking}…`} aria-label={checking}>
+        <Spinner />
       </span>
     );
   }
@@ -481,7 +503,13 @@ function WorkItem({
   kind,
   remind,
   check,
+  onViewTask,
+  people = [],
 }: {
+  /** Opens your task for this item in the Tasks area (the Detail view); only on items that are yours. */
+  onViewTask?: () => void;
+  /** The project's people, so owners show as in Project details. */
+  people?: ProfilePerson[];
   item: Blocker;
   kind: "blocker" | "active";
   /** The channel to post a reminder (blockers) or update request (active work) in, and any already sent. */
@@ -499,9 +527,7 @@ function WorkItem({
     <li className={`work-item ${kind}`}>
       <div className="owners">
         {item.owners.map((o) => (
-          <span key={o.slack_user_id ?? o.name} className={`owner${o.is_me ? " me" : ""}`}>
-            {o.is_me ? "You" : o.name}
-          </span>
+          <OwnerChip key={o.slack_user_id ?? o.name} owner={o} people={people} />
         ))}
         {item.since && <span className="age">{age(item.since)}</span>}
         {remind?.reminder && (
@@ -542,6 +568,11 @@ function WorkItem({
                 Mark done
               </button>
             )}
+            {onViewTask && item.owners.some((o) => o.is_me) && (
+              <button className="link-button small more-link" onClick={onViewTask} title="Open your task for this in Tasks">
+                View in tasks
+              </button>
+            )}
           </span>
         )}
       </div>
@@ -567,8 +598,14 @@ export function ProjectCard({
   reminders,
   blockerChecks,
   onSelect,
+  inlineDetails = false,
+  onViewTask,
   onChange,
 }: {
+  /** Opens a task in the Tasks area, by id (the Detail view); items that are yours offer it. */
+  onViewTask?: (taskId: string) => void;
+  /** Its details are shown beside the list (the Detail view), so the card doesn't offer its own. */
+  inlineDetails?: boolean;
   project: Project;
   busy: boolean;
   taskStates: Map<string, TaskState>;
@@ -582,7 +619,7 @@ export function ProjectCard({
   onChange: () => void;
 }) {
   const s = project.snapshot;
-  const status = s?.status;
+  const status = projectStatus(project);
   const repo = project.repo_state;
   const refreshStatus = useJobStatus(`project:${project.channel_id}`);
   // Blocking and Active are tabs: none open at first, clicking the open tab closes it,
@@ -609,7 +646,6 @@ export function ProjectCard({
         // Links, buttons and inputs keep their own behavior.
         if (!(e.target as HTMLElement).closest("a, button, input, textarea, select")) onSelect();
       }}
-      title={selected ? "Showing only this project's tasks. Click to show all." : "Click to show only this project's tasks"}
     >
       <header className="card-header">
         <div>
@@ -625,6 +661,8 @@ export function ProjectCard({
               </span>
             )}
             {projectName(project)}
+            {/* When it was last refreshed, right after its name; shown while the card is hovered. */}
+            <Updated at={project.last_refreshed_at} />
           </h3>
         </div>
         <div className="row project-header-right">
@@ -640,8 +678,7 @@ export function ProjectCard({
         <>
           {s.status_reason && <p className="reason small">{s.status_reason}</p>}
 
-          {/* title="" keeps the card's "Click to show…" tooltip off the tabs and their lists. */}
-          <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist" title="">
+          <div className={`work-tabs${tab ? " has-open" : ""}`} role="tablist">
               {blockers.length > 0 && (
                 <button role="tab" aria-selected={tab === "blockers"} className={`work-tab${tab === "blockers" ? " open" : ""}`} onClick={() => toggle("blockers")}>
                   Blocking {blockers.length}
@@ -656,19 +693,23 @@ export function ProjectCard({
                   {tab === "active" && <TabClose />}
                 </button>
               )}
-              <button className="work-tab about-tab" onClick={() => setAboutOpen(true)}>
-                Project details
-                {channelCount > 1 && <span className="muted"> · {channelCount} channels</span>}
-              </button>
+              {!inlineDetails && (
+                <button className="work-tab about-tab" onClick={() => setAboutOpen(true)}>
+                  Project details
+                  {channelCount > 1 && <span className="muted"> · {channelCount} channels</span>}
+                </button>
+              )}
             </div>
 
           {tab === "blockers" && blockers.length > 0 && (
-            <ul className="work-items tab-panel" role="tabpanel" title="">
+            <ul className="work-items tab-panel" role="tabpanel">
               {blockers.map((b) => (
                 <WorkItem
+                  people={project.profile?.people ?? []}
                   key={b.id}
                   item={b}
                   kind="blocker"
+                  onViewTask={onViewTask && (() => onViewTask(b.id))}
                   remind={{ channelId: project.channel_id, reminder: reminders[b.id], onSent: onChange }}
                   check={{
                     result: blockerChecks[b.id],
@@ -683,12 +724,14 @@ export function ProjectCard({
           {aboutOpen && <ProfileModal project={project} onClose={() => setAboutOpen(false)} onChange={onChange} />}
 
           {tab === "active" && active.length > 0 && (
-            <ul className="work-items tab-panel" role="tabpanel" title="">
+            <ul className="work-items tab-panel" role="tabpanel">
               {active.map((a) => (
                 <WorkItem
+                  people={project.profile?.people ?? []}
                   key={a.id}
                   item={a}
                   kind="active"
+                  onViewTask={onViewTask && (() => onViewTask(a.id))}
                   remind={{ channelId: project.channel_id, reminder: reminders[a.id], onSent: onChange }}
                   check={{
                     result: blockerChecks[a.id],
@@ -726,18 +769,6 @@ export function ProjectCard({
           ))}
         </footer>
       )}
-      <div className="project-footer">
-        <div className="project-meta">
-          <Updated at={project.last_refreshed_at} />
-        </div>
-        <Untrack
-          name={projectName(project)}
-          onConfirm={async () => {
-            await updateProjectConfig(project.channel_id, { hidden: true, local_repos: project.local_repos, gh_repos: project.gh_repos });
-            onChange();
-          }}
-        />
-      </div>
     </article>
   );
 }

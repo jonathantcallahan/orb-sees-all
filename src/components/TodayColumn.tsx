@@ -1,20 +1,23 @@
+import { revealTask } from "./TaskCard";
+import { showDetailTab } from "../viewMode";
 import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { setTaskState } from "../db";
-import { collectLinks } from "../links";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import { refreshCalendar } from "../jobs";
 import type { CalendarDay, CalendarEvent } from "../schema";
 import { stateOf, type Pressure, type TaskState } from "../tasks";
 import { RefreshButton, Updated } from "./common";
-import { LinkChips } from "./LinkChips";
 import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
 
 /** Pixels per minute on the day grid (72px an hour). */
-/** Pixels per minute on the day grid (72px an hour). */
-const PX_PER_MIN = 1.2;
+/**
+ * Pixels per minute on the day grid (174px an hour): tall enough that even a 15-minute meeting
+ * shows both its lines, the title and then its time with the prep count, with room around them.
+ */
+const PX_PER_MIN = 2.9;
 /** Space kept clear above and below each event, so blocks don't touch hour lines or each other. */
 const EVENT_INSET_BOTTOM = 2;
 /** The hour line is a 1px rule drawn below its mark, so the top gap counts it to match the bottom. */
@@ -29,7 +32,24 @@ const hostOf = (url: string) => {
     return url;
   }
 };
-const hourLabel = (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: "numeric" });
+/** How close (px) an hour label can sit to the now line before the line's time would overlap it. */
+const NOW_LABEL_CLEARANCE = 13;
+/**
+ * A time split into its number and its AM/PM, so the Detail view's rail can drop the AM/PM (see
+ * .time-period); 24-hour locales have none to drop.
+ */
+function TimeParts({ date, minutes }: { date: Date; minutes: boolean }) {
+  const parts = new Intl.DateTimeFormat([], { hour: "numeric", ...(minutes ? { minute: "2-digit" } : {}) }).formatToParts(date);
+  const period = parts.filter((p) => p.type === "dayPeriod").map((p) => p.value).join("");
+  const number = parts.filter((p) => p.type !== "dayPeriod").map((p) => p.value).join("").trim();
+  return (
+    <>
+      {number}
+      {period && <span className="time-period"> {period}</span>}
+    </>
+  );
+}
+const hourLabel = (h: number) => <TimeParts date={new Date(2000, 0, 1, h)} minutes={false} />;
 
 /** The current time, refreshed every minute so the now line moves. */
 function useNow(): Date {
@@ -115,7 +135,16 @@ function MeetingCard({
                   />
                   <div className="task-body">
                     <span className="task-title">{p.title}</span>
-                    {p.link && <LinkChips links={collectLinks([{ url: p.link }])} />}
+                    {/* Each prep item is a task too: open its card in Tasks. */}
+                    <button
+                      className="link-button small more-link prep-view-task"
+                      onClick={() => {
+                        revealTask(p.id);
+                        showDetailTab("tasks");
+                      }}
+                    >
+                      View in tasks
+                    </button>
                   </div>
                 </li>
               );
@@ -141,23 +170,14 @@ function DayGrid({
 }) {
   // Meetings you declined don't take up space on your day.
   const events = all.filter((ev) => ev.my_response !== "declined");
-  // The grid keeps one scale and the column scrolls. Late in the day, when the hours left don't
-  // fill the column, earlier hours fill in above so midnight stays at the bottom instead of rising.
-  const box = useRef<HTMLDivElement>(null);
-  const [room, setRoom] = useState(0);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setRoom(entry.contentRect.height));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  const base = dayRange(events, now);
-  // Late: what's left of the day, plus room for the midnight label, is shorter than the column.
-  const late = room > 0 && (base.endHour - base.startHour) * 60 * PX_PER_MIN + 8 < room;
-  const range = late ? { ...base, startHour: Math.max(0, base.endHour - Math.ceil((room - 8) / (60 * PX_PER_MIN))) } : base;
-  // Every hour line, midnight at the bottom included.
-  const hours = Array.from({ length: range.endHour - range.startHour + 1 }, (_, i) => range.startHour + i);
+  // The grid is the whole day, midnight to midnight, in its own scroll box under the header. It rests
+  // an hour before now (see dayRange), so only the last hour of the past shows, and can be scrolled
+  // up to earlier in the day or down to midnight; see useRestingScroll.
+  const range = { startHour: 0, endHour: 24 };
+  const restPx = dayRange(events, now).startHour * 60 * PX_PER_MIN;
+  // Every whole hour from the start on, midnight at the bottom included.
+  const firstHour = Math.ceil(range.startHour);
+  const hours = Array.from({ length: range.endHour - firstHour + 1 }, (_, i) => firstHour + i);
   const placed = layoutDay(events, range);
   const nowTop = nowOffset(now, range);
   const [hover, setHover] = useState<{ ev: CalendarEvent; anchor: DOMRect } | null>(null);
@@ -170,13 +190,18 @@ function DayGrid({
   };
   useEffect(() => keep, []);
   const minutes = (range.endHour - range.startHour) * 60;
-  // Late, everything shifts so midnight lands on the bottom line; the earliest hour is cut off at the top.
-  const shift = late ? room - 8 - minutes * PX_PER_MIN : 0;
+  // Where the now line sits, in px, and which hour labels its time would sit on top of: those step
+  // aside (the Detail view shows the time beside the line; see .now-label).
+  const nowPx = nowTop != null ? nowTop * PX_PER_MIN : null;
+  const nearNow = (h: number) => nowPx != null && Math.abs((h - range.startHour) * 60 * PX_PER_MIN - nowPx) < NOW_LABEL_CLEARANCE;
+
+  const scroll = useRestingScroll(restPx, () => setHover(null));
 
   return (
-    <div ref={box} className={`day-grid${late ? " late" : ""}`} style={{ height: late ? undefined : minutes * PX_PER_MIN + 8 }}>
-      {hours.map((h, i) => (
-        <div key={h} className="hour" style={{ top: shift + i * 60 * PX_PER_MIN }}>
+    <div className="day-scroll" {...scroll}>
+    <div className="day-grid" style={{ height: minutes * PX_PER_MIN + 8 }}>
+      {hours.map((h) => (
+        <div key={h} className={`hour${nearNow(h) ? " near-now" : ""}`} style={{ top: (h - range.startHour) * 60 * PX_PER_MIN }}>
           <span className="hour-label">{hourLabel(h)}</span>
         </div>
       ))}
@@ -197,7 +222,7 @@ function DayGrid({
               className={`event-block rsvp-${ev.my_response ?? "accepted"}${past ? " past" : ""}${current ? " current" : ""}`}
               title={ev.my_response === "tentative" ? "You said maybe" : ev.my_response === "needs_action" ? "You haven't responded" : undefined}
               style={{
-                top: shift + top * PX_PER_MIN + EVENT_INSET_TOP,
+                top: top * PX_PER_MIN + EVENT_INSET_TOP,
                 height: px,
                 left: `${(column / columns) * 100}%`,
                 width: `calc(${100 / columns}% - 2px)`,
@@ -211,12 +236,15 @@ function DayGrid({
               onMouseLeave={release}
             >
               <span className="event-name">{ev.title}</span>
-              {px >= 32 && (
+              {px >= 34 && (
                 <span className="event-when">
                   {time(ev.start)}
                   {prep.items.length > 0 && (
-                    <span className={`event-prep${prep.done === prep.items.length ? " complete" : ""}`}>
-                      {prep.done}/{prep.items.length} prep
+                    // One small circle per prep item, filled once it's done, the size of the orb's stat dots.
+                    <span className={`event-prep${prep.done === prep.items.length ? " complete" : ""}`} aria-label={`${prep.done} of ${prep.items.length} prep done`}>
+                      {prep.items.map((item, i) => (
+                        <span key={item.id ?? i} className={`prep-dot${stateOf(states, item.id).done ? " done" : ""}`} />
+                      ))}
                     </span>
                   )}
                 </span>
@@ -238,10 +266,72 @@ function DayGrid({
           );
         })}
       </div>
-      {nowTop != null && <div className="now-line" style={{ top: shift + nowTop * PX_PER_MIN }} />}
+      {nowPx != null && (
+        <div className="now-line" style={{ top: nowPx }}>
+          <span className="now-label">
+            <TimeParts date={now} minutes />
+          </span>
+        </div>
+      )}
       {hover && <MeetingCard ev={hover.ev} anchor={hover.anchor} states={states} onChange={onChange} onEnter={keep} onLeave={release} />}
     </div>
+    </div>
   );
+}
+
+/** How long the calendar takes to ease back to where it rests, after you've scrolled it and left. */
+const RETURN_MS = 1500;
+const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+
+/**
+ * The calendar's scroll box: it sits at `restPx` (an hour before now), following it as the day goes
+ * on. Scroll it yourself and it stays where you put it while the pointer is over it; leave, and it
+ * eases back over a second and a half. Only your own scrolling (wheel, touch, keys) moves it off.
+ */
+function useRestingScroll(restPx: number, onUserScroll: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const restPxRef = useRef(restPx);
+  restPxRef.current = restPx;
+  /** Scrolled away by the user, and not yet sent back. */
+  const away = useRef(false);
+  const frame = useRef(0);
+  const stopReturn = () => cancelAnimationFrame(frame.current);
+  // At rest it follows the resting point, minute by minute.
+  useLayoutEffect(() => {
+    if (!away.current && !frame.current && ref.current) ref.current.scrollTop = restPx;
+  }, [restPx]);
+  useEffect(() => stopReturn, []);
+  const leftAlone = () => {
+    stopReturn();
+    frame.current = 0;
+    away.current = true;
+    onUserScroll();
+  };
+  return {
+    ref,
+    onWheel: leftAlone,
+    onTouchMove: leftAlone,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) leftAlone();
+    },
+    onMouseLeave: () => {
+      const el = ref.current;
+      if (!away.current || !el) return;
+      const from = el.scrollTop;
+      const begin = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - begin) / RETURN_MS);
+        el.scrollTop = from + (restPxRef.current - from) * easeInOut(t);
+        if (t < 1) frame.current = requestAnimationFrame(step);
+        else {
+          frame.current = 0;
+          away.current = false;
+        }
+      };
+      stopReturn();
+      frame.current = requestAnimationFrame(step);
+    },
+  };
 }
 
 export function TodayColumn({

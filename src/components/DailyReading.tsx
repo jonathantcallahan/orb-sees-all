@@ -7,8 +7,9 @@ import { refreshReading } from "../jobs";
 import { projectName } from "../projects";
 import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
-import { ExternalLink, RefreshButton, Reveal } from "./common";
+import { ExternalLink, RefreshButton, Reveal, Spinner } from "./common";
 import { ExplainChat } from "./ExplainChat";
+import { DockedChat, useChatDock } from "./chatDock";
 
 interface Update {
   key: string;
@@ -56,6 +57,11 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
   const [leaving, setLeaving] = useState(false);
   /** The update whose Explain this chat is open. */
   const [explaining, setExplaining] = useState<Update | null>(null);
+  // In the Detail view the chat opens in the dock beside the updates, not as a window.
+  const dock = useChatDock();
+  const explain = (u: Update) => (dock ? dock.open(`explain:${u.key}`) : setExplaining(u));
+  // The update the docked chat explains, as it is now; gone once it's read, which closes the chat.
+  const docked = dock?.owner?.startsWith("explain:") ? updates.find((u) => `explain:${u.key}` === dock.owner) : undefined;
   /** The top card arrived by the stack moving up, so it doesn't also slide in. */
   const [advanced, setAdvanced] = useState(false);
   const top = updates[0];
@@ -128,7 +134,7 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
                 {sourceLabel(top.link)}
               </ExternalLink>
             )}
-            <button className="link-button small source-link" onClick={() => setExplaining(top)}>
+            <button className="link-button small source-link explain-link" onClick={() => explain(top)}>
               Explain
             </button>
             <button
@@ -148,12 +154,17 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
                 );
               }}
             >
-              {leaving ? <span className="read-tick">✓ Read</span> : "Mark read"}
+              {leaving ? <span className="read-tick">✓ Dismissed</span> : "Dismiss"}
             </button>
           </span>
         </div>
       </div>
       {explaining && <ExplainChat update={explaining} onClose={() => setExplaining(null)} />}
+      {dock && docked && (
+        <DockedChat dock={dock} owner={`explain:${docked.key}`}>
+          <ExplainChat key={docked.key} update={docked} onClose={() => dock.close(`explain:${docked.key}`)} />
+        </DockedChat>
+      )}
     </div>
   );
 }
@@ -165,8 +176,14 @@ export function DailyReading({
   news,
   states,
   busy,
+  updatesBusy = false,
+  alwaysOpen = false,
   onChange,
 }: {
+  /** A refresh that brings updates (a project's, or the task refresh's news) is running. */
+  updatesBusy?: boolean;
+  /** Both sections always shown, with no way to fold them away (the Detail view's Updates area). */
+  alwaysOpen?: boolean;
   reading: StoredReading | null;
   projects: Project[];
   news: NewsItem[];
@@ -190,10 +207,10 @@ export function DailyReading({
           <h4 className="section-title">Daily briefing</h4>
           <div className="row reading-header-actions">
             <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
-            <Disclosure open={open} what="the briefing" onToggle={() => setOpen(!open)} />
+            {!alwaysOpen && <Disclosure open={open} what="the briefing" onToggle={() => setOpen(!open)} />}
           </div>
         </header>
-        <Reveal open={open} className="reading-body">
+        <Reveal open={alwaysOpen || open} className="reading-body">
           {current ? (
             <p className="reading-text">{current.text}</p>
           ) : (
@@ -206,12 +223,19 @@ export function DailyReading({
       {updates.length > 0 && (
         <section className="reading">
           <header className="column-header">
-            <h4 className="section-title">Updates</h4>
+            <h4 className="section-title">
+              Updates
+              {updatesBusy && (
+                <span className="section-spinner" title="Reading what's new…" aria-label="Reading what's new">
+                  <Spinner />
+                </span>
+              )}
+            </h4>
             <div className="row reading-header-actions">
-              <Disclosure open={updatesOpen} what="updates" onToggle={() => setUpdatesOpen(!updatesOpen)} />
+              {!alwaysOpen && <Disclosure open={updatesOpen} what="updates" onToggle={() => setUpdatesOpen(!updatesOpen)} />}
             </div>
           </header>
-          <Reveal open={updatesOpen} className="reading-body">
+          <Reveal open={alwaysOpen || updatesOpen} className="reading-body">
             <UpdateStack
               updates={updates}
               onRead={async (u) => {

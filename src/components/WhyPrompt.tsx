@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
-import { WHY_EVENT, type WhyRequest } from "../feedback";
+import { askLessOften, loadWhyLevel, loadWhyRates, saveWhyRates, WHY_EVENT, WHY_EVERY_MAX, WHY_LEVELS, type WhyRequest } from "../feedback";
 
 /** How long the prompt waits for a reason before fading, unless you start typing. */
 const LINGER_MS = 8000;
@@ -9,8 +9,9 @@ const WIDTH = 280;
 
 /**
  * The optional "Why?" after a correction (recordCorrection): a one-line field by where you just
- * clicked. Enter saves the reason with the correction; Esc, clicking away or waiting leaves it,
- * and the reason is inferred later instead. Mounted once, in App.
+ * clicked. Enter saves the reason with the correction; Dismiss, Esc, clicking away or waiting
+ * leaves it, and the reason is inferred later instead. Ask less often halves how often it asks
+ * about this kind of change. Mounted once, in App.
  */
 export function WhyPrompt() {
   const [ask, setAsk] = useState<(WhyRequest & { x: number; y: number }) | null>(null);
@@ -54,6 +55,16 @@ export function WhyPrompt() {
     if (reason) await db.setFeedbackReason(ask.id, reason, "user").catch(() => {});
     close();
   };
+  const lessOften = () => {
+    saveWhyRates(askLessOften(loadWhyRates(), ask.kind, WHY_LEVELS[loadWhyLevel()]));
+    close();
+  };
+  const atLeast = Math.max(loadWhyRates()[ask.kind]?.every ?? 1, WHY_LEVELS[loadWhyLevel()]) >= WHY_EVERY_MAX;
+  // Buttons act on mouse down so the field's blur (which closes the prompt) doesn't beat them.
+  const press = (fn: () => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    fn();
+  };
   return createPortal(
     <form
       className={`why-prompt${leaving ? " leaving" : ""}`}
@@ -72,6 +83,16 @@ export function WhyPrompt() {
         onKeyDown={(e) => e.key === "Escape" && close()}
         onBlur={() => (text.trim() ? save() : close())}
       />
+      <div className="why-actions">
+        {!atLeast && (
+          <button type="button" className="link-button small" onMouseDown={press(lessOften)}>
+            Ask less often
+          </button>
+        )}
+        <button type="button" className="link-button small" onMouseDown={press(close)}>
+          Dismiss
+        </button>
+      </div>
     </form>,
     document.body,
   );

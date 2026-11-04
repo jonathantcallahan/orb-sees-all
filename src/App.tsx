@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
-import { Kbd, RefreshButton } from "./components/common";
+import { useEffect, useMemo, useState } from "react";
+import { Kbd, RefreshButton, ScrambleText } from "./components/common";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
@@ -12,7 +12,11 @@ import { Onboarding } from "./components/Onboarding";
 import { GlobalChat } from "./components/GlobalChat";
 import { WhyPrompt } from "./components/WhyPrompt";
 import { isWindows, MOD } from "./platform";
-import { ProjectCard } from "./components/ProjectCard";
+import { ProjectCard, ProjectDetail } from "./components/ProjectCard";
+import { revealTask } from "./components/TaskCard";
+import { Inbox } from "./components/Inbox";
+import { ChatDockProvider } from "./components/chatDock";
+import { useDetailTab, type DetailTab } from "./viewMode";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
@@ -22,11 +26,14 @@ import { maybeDistill, maybeRunMorning, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
+import { projectStatus, projectName } from "./projects";
 import { useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
 import { setUserProfile } from "./prompts";
 import { OrbGlow } from "./components/PressureBlob";
-import { useAppData, useJobStatus, useRunningJobs } from "./useAppData";
+import { PressureBars } from "./components/PressureBars";
+import { useAppData, useJobStatus, useRunningJobs, useStatusFeed } from "./useAppData";
+import { isChatJob } from "./statusFeed";
 
 const refreshAllSafely = () => refreshAll().catch(() => {});
 
@@ -95,8 +102,12 @@ export default function App() {
   const { data, reload } = useAppData();
   const running = useRunningJobs();
   const [showSettings, setShowSettings] = useState(false);
+  /** Settings opened from the chat's View learnings, scrolled to them. */
+  const [settingsLearnings, setSettingsLearnings] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  /** Settings' Simulate onboarding: the same screens, with made-up results, changing nothing. */
+  const [simulateOnboarding, setSimulateOnboarding] = useState(false);
   const [showChat, setShowChat] = useState(false);
   // ⌘D (Ctrl+D on Windows) opens the Demian chat, or closes it if it's open.
   useEffect(() => {
@@ -124,7 +135,15 @@ export default function App() {
       else setShowOnboarding(true);
     }, () => {});
   }, []);
-  const [filterProject, setFilterProject] = useState<string | null>(null);
+  // The open area, the project the Projects area shows, and the chat open in the Updates area.
+  const [tab, setTab] = useDetailTab();
+  const [shownProject, setShownProject] = useState<string | null>(null);
+  const [dockOwner, setDockOwner] = useState<string | null>(null);
+  const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
+  const dock = useMemo(
+    () => ({ owner: dockOwner, target: dockTarget, open: setDockOwner, close: (owner: string) => setDockOwner((cur) => (cur === owner ? null : cur)) }),
+    [dockOwner, dockTarget],
+  );
   const [theme, setTheme] = useTheme();
   const [orbLook, setOrbLook] = useOrbLook();
   // Who you are, for the prompts (learned in the background; see learnRole).
@@ -132,7 +151,6 @@ export default function App() {
     getSetting("user_profile").then(setUserProfile, () => {});
     getNotes().then(setStandingNotes, () => {});
   }, []);
-  const allStatus = useJobStatus("all");
   const [projectFilter, setProjectFilter] = useProjectFilter();
   useScheduler();
 
@@ -148,19 +166,18 @@ export default function App() {
     .filter((p) => !p.hidden)
     .sort((a, b) =>
       compareProjects(
-        { name: a.name, status: a.snapshot?.status ?? null, priority: a.snapshot?.priority?.level },
-        { name: b.name, status: b.snapshot?.status ?? null, priority: b.snapshot?.priority?.level },
+        { name: a.name, status: projectStatus(a) ?? null, priority: a.snapshot?.priority?.level },
+        { name: b.name, status: projectStatus(b) ?? null, priority: b.snapshot?.priority?.level },
       ),
     );
   const counts = {
-    blocked: projects.filter((p) => p.snapshot?.status === "blocked").length,
-    at_risk: projects.filter((p) => p.snapshot?.status === "at_risk").length,
+    blocked: projects.filter((p) => projectStatus(p) === "blocked").length,
+    at_risk: projects.filter((p) => projectStatus(p) === "at_risk").length,
   };
-  const refreshingAll = running.includes("all");
   const recommended = new Set(data.reading?.date === localDate(new Date()) ? (data.reading.recommended ?? []) : []);
   const shownProjects = projects.filter((p) =>
     matchesProjectFilter(
-      { status: p.snapshot?.status ?? null, priority: p.snapshot?.priority?.level, role: p.snapshot?.raci?.role },
+      { status: projectStatus(p) ?? null, priority: p.snapshot?.priority?.level, role: p.snapshot?.raci?.role },
       projectFilter,
     ),
   );
@@ -205,24 +222,74 @@ export default function App() {
           Chat
           <Kbd keys={`${MOD}D`} />
         </button>
-        <RefreshButton busy={refreshingAll} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
-        {!allStatus && running.length > 0 && <span className="timestamp small">{running.filter((k) => k !== "all").length} refreshing…</span>}
+        <BottomStatus running={running} />
         <UpdateButton />
       </nav>
 
-      <main className="columns">
+      {/* The orb and calendar, a rule, a rail of icons for the three areas, then the open area in a
+          panel with rounded top corners, flush with the bottom of the window. */}
+      <main className="detail-layout">
         <OrbGlow look={orbLook} level={load.level} />
         <TodayColumn pressure={load} orbLook={orbLook} working={running.length > 0} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
-
-        <section className="column projects-column">
-          <DailyReading
-            reading={data.reading}
-            projects={data.projects}
-            news={data.adhoc.news}
-            states={data.taskStates}
-            busy={running.includes("reading")}
-            onChange={reload}
-          />
+        <nav className="detail-rail" aria-label="Areas">
+          {DETAIL_TABS.map(({ id, label, rects }) => (
+            <button key={id} className={`detail-tab${tab === id ? " on" : ""}`} onClick={() => setTab(id)} title={label} aria-label={label} aria-current={tab === id ? "page" : undefined}>
+              {viewIcon(rects, tab !== id, 18)}
+            </button>
+          ))}
+        </nav>
+        <div className="detail-panel">
+          {tab === "updates" && (
+            <ChatDockProvider value={dock}>
+              <div className="detail-split">
+                <section className="column detail-pane">
+                  <DailyReading
+                    alwaysOpen
+                    reading={data.reading}
+                    projects={data.projects}
+                    news={data.adhoc.news}
+                    states={data.taskStates}
+                    busy={running.includes("reading")}
+                    updatesBusy={running.some((k) => k.startsWith("project:") || k === "adhoc")}
+                    onChange={reload}
+                  />
+                  <Inbox replies={data.adhoc.replies} states={data.taskStates} taskIds={new Set(data.adhoc.tasks.map((t) => t.id))} busy={running.includes("adhoc")} onChange={reload} />
+                </section>
+                <section className="detail-pane chat-dock" ref={setDockTarget}>
+                  {!dockOwner && <p className="muted small chat-dock-empty">Click Explain on an Update or Draft on an Inbox item to open a chat here</p>}
+                </section>
+              </div>
+            </ChatDockProvider>
+          )}
+          {tab === "tasks" && (
+            <TaskColumn
+          adhoc={data.adhoc}
+          manual={data.manual}
+          calendar={data.calendar?.day ?? null}
+          projects={projects}
+          filterProject={null}
+          onClearFilter={() => {}}
+          taskStates={data.taskStates}
+          plans={data.plans}
+          assessments={data.assessments}
+          recommended={recommended}
+          descriptionOverrides={data.descriptionOverrides}
+          taskChecks={data.taskChecks}
+          sessionLinks={data.sessionLinks}
+          priorityOverrides={data.priorityOverrides}
+          taskAliases={data.taskAliases}
+          refinedDescriptions={data.refinedDescriptions}
+          taskBriefs={data.taskBriefs}
+          notDuplicates={data.notDuplicates}
+          running={running}
+          sideBySide
+          headerExtra={<PressureBars pressure={load} />}
+          onChange={reload}
+        />
+          )}
+          {tab === "projects" && (
+            <div className="detail-split">
+              <section className="column detail-pane">
           <header className="column-header">
             <div className="row">
               <h2>Projects</h2>
@@ -243,44 +310,57 @@ export default function App() {
               project={p}
               busy={running.includes(`project:${p.channel_id}`)}
               taskStates={data.taskStates}
-              selected={filterProject === p.channel_id}
+              selected={(shownProject ?? shownProjects[0]?.channel_id) === p.channel_id}
               reminders={data.reminders}
               blockerChecks={data.blockerChecks}
-              onSelect={() => setFilterProject((cur) => (cur === p.channel_id ? null : p.channel_id))}
+              onSelect={() => setShownProject(p.channel_id)}
+              inlineDetails
+              onViewTask={(id) => {
+                revealTask(id);
+                setTab("tasks");
+              }}
               onChange={reload}
             />
           ))}
           <SuggestedProjects projects={data.projects.filter((p) => p.state === "suggested")} onChange={reload} />
           </div>
-        </section>
-
-        <TaskColumn
-          adhoc={data.adhoc}
-          manual={data.manual}
-          calendar={data.calendar?.day ?? null}
-          projects={projects}
-          filterProject={projects.find((p) => p.channel_id === filterProject) ?? null}
-          onClearFilter={() => setFilterProject(null)}
-          taskStates={data.taskStates}
-          plans={data.plans}
-          assessments={data.assessments}
-          recommended={recommended}
-          descriptionOverrides={data.descriptionOverrides}
-          taskChecks={data.taskChecks}
-          sessionLinks={data.sessionLinks}
-          priorityOverrides={data.priorityOverrides}
-          taskAliases={data.taskAliases}
-          refinedDescriptions={data.refinedDescriptions}
-          notDuplicates={data.notDuplicates}
-          running={running}
-          onChange={reload}
-        />
+              </section>
+              <section className="column detail-pane project-detail-pane">
+                {(() => {
+                  const project = shownProjects.find((p) => p.channel_id === shownProject) ?? shownProjects[0];
+                  return project ? (
+                    <>
+                      <header className="column-header">
+                        <h2>{projectName(project)}</h2>
+                      </header>
+                      <ProjectDetail project={project} onChange={reload} />
+                    </>
+                  ) : (
+                    <p className="muted small">Pick a project to see its details.</p>
+                  );
+                })()}
+              </section>
+            </div>
+          )}
+        </div>
       </main>
 
       <Mist level={load.level} look={orbLook} />
 
       <WhyPrompt />
-      {showChat && <GlobalChat projects={data.projects} onClose={() => setShowChat(false)} onApplied={reload} />}
+      {showChat && (
+        <GlobalChat
+          projects={data.projects}
+          onClose={() => setShowChat(false)}
+          onApplied={reload}
+          onViewLearnings={() => {
+            setShowChat(false);
+            setSettingsLearnings(true);
+            setShowSettings(true);
+          }}
+        />
+      )}
+      {simulateOnboarding && <Onboarding simulate onDone={() => setSimulateOnboarding(false)} />}
       {showOnboarding && (
         <Onboarding
           onDone={() => {
@@ -300,7 +380,82 @@ export default function App() {
           }}
         />
       )}
-      {showSettings && <Settings onOpenSetup={() => { setShowSettings(false); setShowSetup(true); }} projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => setShowSettings(false)} onSaved={reload} />}
+      {showSettings && <Settings showLearnings={settingsLearnings} onOpenSetup={() => { setShowSettings(false); setShowSetup(true); }} onSimulateOnboarding={() => { setShowSettings(false); setSimulateOnboarding(true); }} projects={data.projects} theme={theme} onThemeChange={setTheme} orbLook={orbLook} onOrbLookChange={setOrbLook} onClose={() => { setShowSettings(false); setSettingsLearnings(false); }} onSaved={reload} />}
     </div>
+  );
+}
+
+/**
+ * The Detail view's areas, in the rail's order, each drawn like the layout icons (filled for the area
+ * you're in, outlined for the others): Updates, one square split into three bands; Tasks, four small
+ * squares making a larger one; Projects, a single square.
+ */
+const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[] }[] = [
+  {
+    id: "updates",
+    label: "Updates",
+    rects: [
+      [1, 1, 12, 3.6, 0.9],
+      [1, 5.2, 12, 3.6, 0.9],
+      [1, 9.4, 12, 3.6, 0.9],
+    ],
+  },
+  {
+    id: "tasks",
+    label: "Tasks",
+    rects: [
+      [1, 1, 5.4, 5.4, 1],
+      [7.6, 1, 5.4, 5.4, 1],
+      [1, 7.6, 5.4, 5.4, 1],
+      [7.6, 7.6, 5.4, 5.4, 1],
+    ],
+  },
+  { id: "projects", label: "Projects", rects: [[1, 1, 12, 12, 1.6]] },
+];
+
+type Rect = [x: number, y: number, w: number, h: number, r: number];
+
+/**
+ * A rail icon: filled for the area you're in; for the others, outlines drawn inside each block's
+ * edge (inset by half the stroke), so neighboring blocks keep their gaps.
+ */
+function viewIcon(rects: Rect[], outlined: boolean, size = 14) {
+  // The outline is 1 screen pixel whatever size the icon is drawn at.
+  const stroke = 14 / size;
+  const inset = outlined ? stroke / 2 : 0;
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" aria-hidden>
+      {rects.map(([x, y, w, h, r], i) => (
+        <rect
+          key={i}
+          x={x + inset}
+          y={y + inset}
+          width={w - inset * 2}
+          height={h - inset * 2}
+          rx={r}
+          fill={outlined ? "none" : "currentColor"}
+          stroke={outlined ? "currentColor" : "none"}
+          strokeWidth={stroke}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * The bottom bar's Refresh everything, or while anything loads, its line of text in its place. Its
+ * own component, so the status streaming in re-renders this line alone, not the whole app.
+ */
+function BottomStatus({ running }: { running: string[] }) {
+  const allStatus = useJobStatus("all");
+  /** What's loading: the running jobs' steps, taking turns. */
+  const loadingStatus = useStatusFeed();
+  // What's running in the background: chats show their own progress.
+  const loading = running.filter((k) => !isChatJob(k));
+  if (loading.length === 0) return <RefreshButton busy={running.includes("all")} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />;
+  return (
+    <span className="bottom-status small" title={loadingStatus}>
+      <ScrambleText text={loadingStatus ? `${loadingStatus}…` : `${loading.filter((k) => k !== "all").length || 1} refreshing…`} />
+    </span>
   );
 }

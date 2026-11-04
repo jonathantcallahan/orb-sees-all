@@ -307,13 +307,14 @@ describe("calendar layout", () => {
     expect(byId.c).toMatchObject({ top: 180, height: 30, column: 0, columns: 1 });
   });
 
-  it("drops hours that are long past", () => {
+  it("shows only the last hour of the past", () => {
     const events = [ev("a", [9, 0], [10, 0]), ev("b", [12, 30], [14, 0])];
     const range = dayRange(events, new Date(2026, 9, 29, 13, 15));
-    expect(range).toEqual({ startHour: 12, endHour: 24 });
+    // Exactly an hour before 1:15pm.
+    expect(range).toEqual({ startHour: 12.25, endHour: 24 });
     const placed = layoutDay(events, range);
-    // The 9am meeting is gone; the 12:30 one starts 30 minutes down.
-    expect(placed.map((p) => [p.event.id, p.top, p.height])).toEqual([["b", 30, 90]]);
+    // The 9am meeting is gone; the 12:30 one starts 15 minutes down.
+    expect(placed.map((p) => [p.event.id, p.top, p.height])).toEqual([["b", 15, 90]]);
   });
 
   it("clips a meeting that started before the grid", () => {
@@ -343,7 +344,7 @@ describe("readingContext", () => {
       summary: "",
     };
     const ctx = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null }],
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null, status_override: null }],
       adhoc: { tasks: [], replies: [{ id: "r1", source: "slack", from: "Kim", summary: "OK to ship?" }], news: [{ id: "n1", headline: "Reorg announced" }], refreshed_at: null },
       manual: [{ id: "m1", title: "Done thing", description: null, project_id: null, created_at: "" }],
       assessments: new Map(),
@@ -362,7 +363,7 @@ describe("readingContext", () => {
 
     // A blocker marked resolved after a double check drops out.
     const after = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null }],
+      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null, status_override: null }],
       adhoc: { tasks: [], replies: [], news: [], refreshed_at: null },
       manual: [],
       assessments: new Map(),
@@ -641,5 +642,64 @@ describe("sinceWhen", () => {
     expect(sinceWhen(new Date(2026, 9, 30, 9, 0).toISOString(), now)).toBe("3h ago");
     expect(sinceWhen(new Date(2026, 9, 28, 9, 0).toISOString(), now)).toBe(new Date(2026, 9, 28).toLocaleDateString([], { month: "short", day: "numeric" }));
     expect(sinceWhen(null, now)).toBe("");
+  });
+});
+
+import { channelLabel } from "./projects";
+describe("channel labels", () => {
+  it("names channels with a pound sign, and group DMs and DMs by their people", () => {
+    expect(channelLabel({ name: "tmp-launch", channel_id: "C1" })).toBe("#tmp-launch");
+    expect(channelLabel({ name: "mpdm-ana--ben--cara-1", channel_id: "G1" })).toBe("ana, ben, cara");
+    expect(channelLabel({ name: "ana", channel_id: "D1" })).toBe("ana");
+    expect(channelLabel({ name: "Group DM (Aivaras, Aidas, Dima)", channel_id: "C9" })).toBe("Group DM (Aivaras, Aidas, Dima)");
+    expect(channelLabel({ name: "#Group DM with Nicole, Jonas" })).toBe("Group DM with Nicole, Jonas");
+  });
+});
+
+describe("task briefs", () => {
+  it("gives sessions the user's own note when a short title was written from it", () => {
+    const prompt = sessionPrompt({ title: "Review the launch checklist", brief: "Sam shared the launch sheet on Oct 19; check rows 12 and 40 against the item limit" }, null);
+    expect(prompt).toContain("Task: Review the launch checklist");
+    expect(prompt).toContain("My own note on it, as I wrote it: Sam shared the launch sheet");
+  });
+});
+
+import { taskEstimate } from "./tasks";
+describe("task estimates", () => {
+  it("adds up the plan's per-step minutes once every step has one", () => {
+    expect(taskEstimate({ steps: [{ minutes: 0 }, { minutes: 15 }, { minutes: 5 }] }, { estimate_minutes: 120 })).toBe(20);
+  });
+  it("falls back to the assessment's estimate for older plans and tasks with none", () => {
+    expect(taskEstimate({ steps: [{ minutes: 10 }, {}] }, { estimate_minutes: 30 })).toBe(30);
+    expect(taskEstimate(null, { estimate_minutes: null })).toBeNull();
+    expect(taskEstimate(undefined, undefined)).toBeNull();
+  });
+});
+
+import { dedupeStatements } from "./projects";
+describe("decision and milestone duplicates", () => {
+  it("collapses rewordings of the same decision, keeping the linked one", () => {
+    const out = dedupeStatements([
+      { what: "Results are split into 'Matches' and 'Related', with Related expanded when there are none", date: "2026-11-03", link: null },
+      { what: "Results split into 'Matches' and 'Related', with Related expanded when there are no matches", date: "2026-11-03", link: "https://slack/x" },
+      { what: "Rename the package to com.example.library", date: "2026-11-03", link: null },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0].link).toBe("https://slack/x");
+  });
+  it("keeps different decisions, and the same words on different dates", () => {
+    expect(dedupeStatements([{ what: "Ship on Nov 9", date: "2026-11-01" }, { what: "Ship on Nov 9", date: "2026-11-04" }])).toHaveLength(2);
+    expect(dedupeStatements([{ what: "Use DocFX for package docs" }, { what: "Rename the package" }])).toHaveLength(2);
+  });
+});
+
+import { projectStatus } from "./projects";
+describe("project status", () => {
+  const snapshot = { status: "on_track" } as never;
+  it("shows the status the user set until a refresh after it", () => {
+    const o = { status: "blocked" as const, reason: null, at: "2026-11-03T10:00:00Z" };
+    expect(projectStatus({ snapshot, last_refreshed_at: "2026-11-03T09:00:00Z", status_override: o })).toBe("blocked");
+    expect(projectStatus({ snapshot, last_refreshed_at: "2026-11-03T11:00:00Z", status_override: o })).toBe("on_track");
+    expect(projectStatus({ snapshot, last_refreshed_at: null, status_override: null })).toBe("on_track");
   });
 });

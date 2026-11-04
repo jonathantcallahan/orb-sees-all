@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Feedback } from "./db";
-import { asUserHasIt, describeFeedback } from "./feedback";
+import { askLessOften, asUserHasIt, countWhy, describeFeedback, WHY_EVERY_MAX, WHY_LEVELS, type WhyRates } from "./feedback";
 import { foldProfile, mergeProfile, projectContext, projectName } from "./projects";
 import { distillPrompt, learningSection, planPrompt, projectPrompt } from "./prompts";
 import type { ProjectProfile } from "./schema";
@@ -145,5 +145,41 @@ describe("built-in lessons", () => {
     expect(project).toContain("A meeting already on the calendar isn't a task");
     const distill = distillPrompt({ feedback: [], lessons: [], projects: [] });
     expect(distill).toContain("Already built into the assistant");
+  });
+});
+
+describe("how often Why? is asked", () => {
+  it("asks every time until told to ask less often, then every 2nd, 4th… time, per kind", () => {
+    let rates: WhyRates = {};
+    const ask = (kind: Parameters<typeof countWhy>[1]) => {
+      const r = countWhy(rates, kind);
+      rates = r.rates;
+      return r.ask;
+    };
+    expect([ask("dismiss"), ask("dismiss")]).toEqual([true, true]);
+    rates = askLessOften(rates, "dismiss");
+    expect([ask("dismiss"), ask("dismiss"), ask("dismiss"), ask("dismiss")]).toEqual([false, true, false, true]);
+    // Other kinds of change are still asked about every time.
+    expect(ask("priority_change")).toBe(true);
+  });
+
+  it("stops halving at the most it waits", () => {
+    let rates: WhyRates = {};
+    for (let i = 0; i < 10; i++) rates = askLessOften(rates, "dismiss");
+    expect(rates.dismiss?.every).toBe(WHY_EVERY_MAX);
+  });
+});
+
+describe("the Settings rate for Why?", () => {
+  it("never asks at Never, and asks at least as seldom as the Settings rate", () => {
+    expect(countWhy({}, "dismiss", WHY_LEVELS.never).ask).toBe(false);
+    let rates: WhyRates = {};
+    const asks = [1, 2, 3, 4, 5, 6, 7, 8].map(() => {
+      const r = countWhy(rates, "dismiss", WHY_LEVELS.less);
+      rates = r.rates;
+      return r.ask;
+    });
+    expect(asks).toEqual([false, false, false, true, false, false, false, true]);
+    expect(askLessOften({}, "dismiss", WHY_LEVELS.less).dismiss?.every).toBe(8);
   });
 });

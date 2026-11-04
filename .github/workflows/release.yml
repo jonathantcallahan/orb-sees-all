@@ -50,6 +50,15 @@ jobs:
         with:
           tagName: ${{ github.event_name == 'push' && github.ref_name || format('windows-test-{0}', github.run_number) }}
           releaseName: ${{ github.event_name == 'push' && format('Demian {0}', github.ref_name) || format('Windows test build {0}', github.run_number) }}
-          releaseBody: "See the README for setup. First launch on a new Mac: right-click the app and choose Open. On Windows: if SmartScreen warns you, choose More info, then Run anyway."
+          releaseBody: |
+            **macOS:** open the `.dmg` and drag Demian into Applications. The app isn't signed by Apple yet, so before opening it the first time, open Terminal, paste this and press Return:
+
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/Demian.app"
+            ```
+
+            **Windows:** run the `-setup.exe`. If SmartScreen warns you, choose **More info**, then **Run anyway**.
+
+            On first launch, Demian walks you through installing Claude Code, signing it in and connecting your accounts. See the [README](https://github.com/jonathantcallahan/orb-sees-all#readme) for the details.
           releaseDraft: ${{ github.event_name != 'push' }}
           args: ${{ matrix.args }}

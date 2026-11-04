@@ -1,5 +1,5 @@
 import type { Project } from "./db";
-import type { Discovery, ProjectProfile, RelatedChannel } from "./schema";
+import type { Discovery, ProjectProfile, ProjectSnapshot, RelatedChannel } from "./schema";
 
 /** A Slack channel's link to a project. */
 export interface ProjectChannel {
@@ -97,6 +97,35 @@ export function projectName(p: Pick<Project, "name" | "snapshot"> & { focus?: { 
 
 const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 
+/** Little words that don't tell two statements apart. */
+const FILLER = new Set(["a", "an", "the", "is", "are", "was", "were", "be", "to", "of", "and", "or", "in", "on", "for", "with", "when", "there", "that", "this", "it", "its", "by", "as", "at", "from"]);
+const words = (s: string) => new Set(norm(s).replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w && !FILLER.has(w)));
+
+/** Whether two statements say the same thing: nearly all of the shorter one's words are in the other. */
+function sameStatement(a: string, b: string): boolean {
+  const [x, y] = [words(a), words(b)];
+  const [small, big] = x.size <= y.size ? [x, y] : [y, x];
+  if (!small.size) return false;
+  let shared = 0;
+  for (const w of small) if (big.has(w)) shared++;
+  return shared / small.size >= 0.8;
+}
+
+/**
+ * Drops near-duplicates (the same decision or milestone reworded by another refresh, or once with a
+ * link and once without): entries on the same date (or with none) saying the same thing. The one
+ * with a link is kept, else the first.
+ */
+export function dedupeStatements<T extends { what: string; date?: string | null; link?: string | null }>(items: T[]): T[] {
+  const out: T[] = [];
+  for (const item of items) {
+    const i = out.findIndex((o) => (!o.date || !item.date || o.date === item.date) && sameStatement(o.what, item.what));
+    if (i === -1) out.push(item);
+    else if (!out[i].link && item.link) out[i] = item;
+  }
+  return out;
+}
+
 /** Items from `next` first, then the ones from `prev` it no longer lists, by key, up to `max`. */
 function union<T>(next: T[], prev: T[], key: (t: T) => string, max: number): T[] {
   const seen = new Set<string>();
@@ -138,8 +167,8 @@ export function mergeProfile(prev: ProjectProfile | null, next: ProjectProfile, 
     aliases: union([...pinnedAliases, ...next.aliases], prev.aliases, norm, 10),
     people: union(next.people, prev.people, (p) => norm(p.name), 16),
     resources: union(next.resources, prev.resources, (r) => norm(r.link), 16),
-    milestones: union(next.milestones, prev.milestones, (m) => `${norm(m.what)}|${m.date ?? ""}`, 12).sort(byDate),
-    decisions: union(next.decisions, prev.decisions, (d) => norm(d.link) || norm(d.what), 15).sort((a, b) => byDate(b, a)),
+    milestones: dedupeStatements(union(next.milestones, prev.milestones, (m) => `${norm(m.what)}|${m.date ?? ""}`, 24)).slice(0, 12).sort(byDate),
+    decisions: dedupeStatements(union(next.decisions, prev.decisions, (d) => norm(d.link) || norm(d.what), 30)).slice(0, 15).sort((a, b) => byDate(b, a)),
   };
 }
 
@@ -167,4 +196,30 @@ export function slackThread(link: string | null | undefined): { channelId: strin
   if (!m) return null;
   const parent = link!.match(/[?&]thread_ts=(\d+\.\d+)/)?.[1];
   return { channelId: m[1], threadTs: parent ?? `${m[2]}.${m[3]}` };
+}
+
+/**
+ * How a Slack conversation is named in the app: a channel as "#name"; a group DM (Slack names those
+ * "mpdm-ana--ben--cara-1") as its people, "ana, ben, cara"; a DM (its ID starts with D), or any name
+ * that isn't a channel's ("Group DM with Ana, Ben"), as it is, without a pound sign.
+ */
+export function channelLabel(c: { name: string; channel_id?: string }): string {
+  const name = c.name.replace(/^#/, "");
+  const group = /^mpdm-(.+?)(?:-\d+)?$/.exec(name);
+  if (group) return group[1].split("--").join(", ");
+  if (c.channel_id?.startsWith("D")) return name;
+  // Only a real channel name gets the pound sign: Slack's are lowercase with no spaces. Anything
+  // else ("Group DM (Ana, Ben)", a person's name) names a conversation already.
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) return name;
+  return `#${name}`;
+}
+
+/**
+ * The project's status as shown: one the user set, until a refresh after it has looked again (told to
+ * keep it unless something has clearly changed since); otherwise the latest refresh's.
+ */
+export function projectStatus(p: Pick<Project, "snapshot" | "last_refreshed_at" | "status_override">): ProjectSnapshot["status"] | undefined {
+  const o = p.status_override;
+  if (o && (!p.last_refreshed_at || o.at > p.last_refreshed_at)) return o.status;
+  return p.snapshot?.status;
 }

@@ -1,4 +1,4 @@
-import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, slackThread } from "../projects";
+import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, projectStatus, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
@@ -8,6 +8,7 @@ import { linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, SentMessage, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { blockerKey } from "../tasks";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { codeFor, codeNote, githubReposOf, projectOfTask } from "../code";
@@ -221,6 +222,8 @@ export async function refreshProject(channelId: string): Promise<void> {
             lastRefreshedAt: project.last_refreshed_at,
             repoState,
             now: startedAt,
+            statusSetByUser:
+              project.status_override && (!project.last_refreshed_at || project.status_override.at > project.last_refreshed_at) ? project.status_override : null,
           }),
           schema: ProjectRefresh,
           // Jira too, to find the project's epics.
@@ -350,6 +353,12 @@ export function assessPendingTasks(): Promise<void> {
         const results = data.assessments.filter((a) => ids.has(a.id));
         if (results.length === 0) throw new Error("Claude returned no assessments for this batch");
         await db.saveAssessments(results);
+        // A task added as a detailed note gets the short title written for it; the note becomes its brief.
+        for (const r of results) {
+          const t = batch.find((b) => b.id === r.id);
+          const title = r.title?.trim();
+          if (t && title && title !== t.title.trim()) await db.retitleManualTask(t.id, title, t.title);
+        }
         return { value: undefined, costUsd };
       });
     }
@@ -441,7 +450,7 @@ const EVENT_REMINDER =
 const DOC_REMINDER =
   ORB_NOTE + " you can make Google Docs here, through me. Write the doc as a block, a line `[orb] doc: <title>` (or `[orb] doc step N: <title>` for a plan step), then its content in Markdown, then `[orb] end`. I show it to the user to review and create it in their Drive, then send you its link. Don't call any Drive or Docs tool, and don't say you can't make docs or that it needs a permission; if you said so earlier, that was wrong.)";
 
-const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead];
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead];
 
 /**
  * Runs the next turn of a task's working session in the background: the first turn from the start
@@ -522,6 +531,11 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
   );
 }
 
+/** How many of a project's open blockers and active items the global chat's context lists. */
+const CONTEXT_ITEMS = 3;
+/** The same for a blocked or at-risk project. */
+const CONTEXT_ITEMS_URGENT = 8;
+
 /** What the planner shows right now, for the global chat's next turn, so it works from current ids. */
 async function globalContext(link: SessionLink | undefined): Promise<string> {
   const [projects, reading, adhoc, manual, states, profile, notes] = await Promise.all([
@@ -538,12 +552,24 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     .filter((p) => p.state !== "merged")
     .map((p) => {
       const channels = p.channels.filter((c) => c.role !== "excluded").map((c) => `#${c.name} (${c.channel_id})`).join(", ");
-      const status = p.snapshot ? ` — ${p.snapshot.status}: ${p.snapshot.status_reason}` : "";
+      const shown = projectStatus(p);
+      const setByMe = p.status_override && shown === p.status_override.status && p.status_override.at > (p.last_refreshed_at ?? "");
+      const status = shown ? ` — ${shown}${setByMe ? " (set by me)" : p.snapshot ? `: ${p.snapshot.status_reason}` : ""}` : "";
+      // Open blockers and active work, with ids, so the chat can mark them done or check them.
+      const items = p.state === "tracked" && p.snapshot
+        ? [...p.snapshot.blockers.map((b) => ({ ...b, kind: "blocker" })), ...(p.snapshot.active ?? []).map((a) => ({ ...a, kind: "active" }))]
+            .filter((it) => !states.get(blockerKey(it.id))?.dismissed)
+            .map((it) => `${it.kind} [id ${it.id}] ${it.what} (${it.owners.map((o) => (o.is_me ? "me" : o.name)).join(", ") || "no owner"})`)
+        : [];
+      // A few per project, blockers first, so the context stays short however big the board gets;
+      // a project that's blocked or at risk shows more, since it's the likeliest to come up.
+      const cap = shown === "blocked" || shown === "at_risk" ? CONTEXT_ITEMS_URGENT : CONTEXT_ITEMS;
+      if (items.length > cap) items.splice(cap, items.length, `${items.length - cap} more not listed`);
       const context = projectContext(p)
         .map((c) => `${c.text}${c.by === "you" ? " (mine)" : ""}`)
         .join("; ");
       const repos = [...p.local_repos, ...githubReposOf(p)];
-      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}. Code: ${repos.length ? repos.join(", ") : "none mapped"}`;
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}. Code: ${repos.length ? repos.join(", ") : "none mapped"}${items.length ? `\n  Open: ${items.join("; ")}` : ""}`;
     });
   const calendar = await db.getCalendarDay(localDate(new Date()));
   const tasks = [
@@ -795,7 +821,7 @@ export function refreshReading(): Promise<void> {
   return track("reading", (status) =>
     logged("reading", null, async () => {
       const today = localDate(new Date());
-      const [projects, adhoc, manual, assessments, states, calendar, priorityOverrides] = await Promise.all([
+      const [projects, adhoc, manual, assessments, states, calendar, priorityOverrides, plans] = await Promise.all([
         db.listProjects(),
         db.getAdhoc(),
         db.listManualTasks(),
@@ -803,8 +829,9 @@ export function refreshReading(): Promise<void> {
         db.getTaskStates(),
         db.getCalendarDay(today),
         db.getPriorityOverrides(),
+        db.getTaskPlans(),
       ]);
-      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today, priorityOverrides });
+      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today, priorityOverrides, plans });
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: readingPrompt(context),
@@ -842,7 +869,7 @@ export function planTask(task: PlanTask): Promise<void> {
         dirs: code.map((c) => c.dir),
         prompt: `${planPrompt({ ...task, userId: await db.getSetting("slack_user_id"), learning: await planLearning() })}${note ? `\n\n${note}` : ""}`,
         schema: TaskPlan,
-        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead],
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead],
         model: await model(),
       });
       await db.saveTaskPlan(task.id, data, costUsd);

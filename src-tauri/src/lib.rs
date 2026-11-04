@@ -63,7 +63,18 @@ fn search_path() -> std::ffi::OsString {
         );
     }
     #[cfg(not(windows))]
-    parts.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].map(PathBuf::from));
+    {
+        // Where npm-installed tools land under the common Node version managers and npm setups, so
+        // a claude installed that way is found too (and setup doesn't offer to install a second).
+        parts.extend([".npm-global/bin", ".volta/bin", ".bun/bin", ".asdf/shims"].map(|d| home.join(d)));
+        if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+            let mut bins: Vec<PathBuf> = versions.flatten().map(|v| v.path().join("bin")).collect();
+            // Roughly newest first, by name: any one of them with claude in it will do.
+            bins.sort();
+            parts.extend(bins.into_iter().rev());
+        }
+        parts.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].map(PathBuf::from));
+    }
     if let Some(existing) = std::env::var_os("PATH") {
         parts.extend(std::env::split_paths(&existing));
     }
@@ -441,7 +452,7 @@ fn checkout_index() -> HashMap<String, String> {
             roots.extend(["source/repos", "Documents/GitHub", "Documents/code", "OneDrive/Documents/GitHub"]);
         }
         let mut seen = std::collections::HashSet::new();
-        let mut visit = |dir: &Path, index: &mut HashMap<String, String>| {
+        let visit = |dir: &Path, index: &mut HashMap<String, String>| {
             let Some(config) = git_config(dir) else { return false };
             for repo in github_remotes(&config) {
                 index.entry(repo).or_insert_with(|| dir.to_string_lossy().into_owned());
@@ -582,13 +593,19 @@ fn open_setup_terminal(step: String) -> Result<(), String> {
         }
         _ => return Err(format!("Unknown setup step {step}")),
     };
+    // The step goes in a .command file that Terminal opens and runs. Opening a file needs no
+    // permission, where scripting Terminal (osascript) needs Automation access that macOS asks for
+    // and the person may decline, which the app couldn't see.
     #[cfg(target_os = "macos")]
     {
-        let run = format!("tell application \"Terminal\" to do script \"{}\"", script.replace('\\', "\\\\").replace('"', "\\\""));
-        Command::new("osascript")
-            .args(["-e", &run, "-e", "tell application \"Terminal\" to activate"])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        let file = std::env::temp_dir().join(format!("demian-{step}.command"));
+        std::fs::write(&file, format!("#!/bin/zsh -l\nclear\n{script}\n")).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        let out = Command::new("open").args(["-a", "Terminal"]).arg(&file).output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
     }
     #[cfg(windows)]
     {

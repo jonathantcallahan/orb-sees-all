@@ -22,7 +22,7 @@ const LINK_TITLE = `Each title is a short, descriptive label of what the link is
  * The user's standing rule: asking someone is the last resort. Claude can read the code, Jira,
  * Slack, email and Drive, which answers most questions without bothering anyone.
  */
-export const FIND_IT_FIRST = `Find answers before asking anyone. Claude can read the project's code (local checkouts and GitHub), Jira, Slack history, email and Google Drive, which answers most questions (what's covered by tests, how something behaves, who owns what, what was decided, where a link or build is). So don't plan a step that asks someone for something these sources can tell; plan the research step instead, and ask a person only for what genuinely isn't written down anywhere: their decision, their opinion, something they alone know, or something not yet done (a build not yet made, an approval not yet given). When a question to someone remains, say what was checked first.`;
+export const FIND_IT_FIRST = `Find answers before asking anyone. Claude can read the project's code (local checkouts and GitHub), Jira, Slack history, email, Google Drive, Zoom meeting summaries and product analytics in Amplitude, which answers most questions (what's covered by tests, how something behaves, who owns what, what was decided, what was said in a meeting, how a feature is used, where a link or build is). U-Know isn't available: never plan a step that uses it, even when its instructions are visible; use the sources above instead. So don't plan a step that asks someone for something these sources can tell; plan the research step instead, and ask a person only for what genuinely isn't written down anywhere: their decision, their opinion, something they alone know, or something not yet done (a build not yet made, an approval not yet given). When a question to someone remains, say what was checked first.`;
 
 const CLAUDE_STEP_RULE = `A step is Claude's only if Claude is confident it can complete it independently, start to finish, with read access to Slack, email, Google Drive and Jira plus its own writing: finding and reading things, summarizing, comparing, drafting a message, doc, spec or ticket text for the user to review, and posting messages in Slack or following up with people there (asking for a status, an answer or a file, or nudging someone), which the user approves before each post. Drafting a Google Doc (a brief, a summary, a spec) is also Claude's: the user reviews it before it's created. Anything else that sends, files or changes something (email, Jira tickets, editing existing docs), makes a decision, needs a meeting, or needs access Claude doesn't have is the user's. Waiting on another person's reply isn't the user's step: Claude can follow up in Slack.
 
@@ -33,10 +33,10 @@ const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude ca
   - automation: "human" = needs the user's judgment, relationships or presence (a decision, a negotiation, a 1:1); "assisted" = the user does it, but Claude can do much of the legwork (research, a first draft, a summary, a ticket write-up); "claude" = Claude could produce the finished result for the user to review and send (a status summary, a ticket from a clear spec, a reply that only restates facts).
   - suggestion: one sentence with a concrete first take: how to approach it, or what Claude would produce.
   - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.
-  - estimate_minutes: realistic total working time to finish the task: the user's own hands-on time plus the time Claude spends on its steps (research, drafting, follow-ups), added together. Don't count time spent waiting on other people. Use 5, 10, 15, 30, 45, 60, 90, 120, 180 or 240. For a vague task, estimate the likely version.
+  - estimate_minutes: the user's own hands-on time to finish the task: reading, deciding, writing, reviewing what Claude drafts, and any meeting they must hold. Not the time Claude spends on its steps, and not waiting on other people. Base it on what the task involves as you found it (how much there is to read or review, how many people to align), not on how it sounds. Use 5, 10, 15, 30, 45, 60, 90, 120, 180 or 240. null when the task is too vague to judge; a plan made later gives a better estimate.
   - priority: how much the task matters now. "critical" = part of a P0 project, blocks others or a launch, has an exec or external deadline, or is due within two days; "high" = someone is actively waiting on it, or it moves a high-priority project; "medium" = should happen this week or two; "low" = nice to have, no one is waiting.
   - claude_steps: up to four short, ordered steps that Claude can do on its own toward this task, by this rule: ${CLAUDE_STEP_RULE} Required, with at least one step, whenever automation is "assisted" or "claude": if Claude can do or help with the task, say what it would do. Empty only when automation is "human". When a task carried over from the previous refresh has an assessment without claude_steps, add them.`;
-const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}`;
+const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number|null, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}`;
 
 /**
  * The user's open tasks from every source, and how to use them: new work that matches one refines it
@@ -128,6 +128,8 @@ export interface ProjectPromptInput {
   /** Channels the user unlinked from it; searches leave them out too. */
   excluded?: string[];
   learning?: Learning;
+  /** A status the user set for it since the last refresh, and why. */
+  statusSetByUser?: { status: string; reason: string | null; at: string } | null;
 }
 
 export function projectPrompt(p: ProjectPromptInput): string {
@@ -172,7 +174,7 @@ ${taskIndexSection(p.index ?? [], "my_tasks")}
 Fields:
 - name: the project's proper name as people refer to it, two to four words in sentence case (e.g. "Asset refunds", "UPM paid products"). Not the channel name.
 - description: what the project is and what it delivers, at most two short lines (about 160 characters). No status here.
-- status: "blocked" = progress cannot continue until someone acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.
+- status: "blocked" = progress cannot continue until someone acts; "at_risk" = a deadline or scope is threatened, or an important dependency is late; "on_track" = moving normally; "idle" = no meaningful activity in 14 days.${p.statusSetByUser ? ` The user set this project's status to "${p.statusSetByUser.status}" on ${p.statusSetByUser.at.slice(0, 10)}${p.statusSetByUser.reason ? ` (${p.statusSetByUser.reason})` : ""}: keep it, unless something since then clearly changes it, and then say what in status_reason.` : ""}
 - status_reason: one short sentence that leads with the most important blocker and who it's waiting on (e.g. "Waiting on legal sign-off for screenshot search."). With no blockers, name the next milestone or what's most in motion. Don't list every blocker; they're shown separately.
 - raci: the user's role, inferred from how they participate. "accountable" = they own the outcome (they set direction, make the calls, report status upward, or others ask them for decisions). "responsible" = they do the work but someone else owns the outcome. "consulted" = people ask their input but they don't drive. "informed" = they mostly read along. reason: one short sentence of evidence.
 - priority: strategic priority to the business, not urgency. "P0" = company-critical: exec-visible, revenue or legal/compliance impact, or a hard external date; "P1" = a committed roadmap item or a dependency for other teams; "P2" = planned work with moderate impact; "P3" = low impact or nice to have; "P4" = exploratory, informational or social. reason: one short sentence.
@@ -244,9 +246,9 @@ Look for new items since ${since.date}:
 Also check whether each currently open task has been resolved (the user replied or did it, or the requester withdrew it); open its thread only if unsure.
 
 ${taskIndexSection(p.index ?? [], "tasks")}
-Sort what's still open into two lists:
-- replies: every Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, quick or not, including in project channels. Drop a carried-over reply once the user has responded.
-- tasks: everything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply. A message that needs both a response and real work goes in both lists, with the same id.
+Sort what's still open into two lists. Each message goes in one of them, never both:
+- tasks: anything that needs real work (research, a doc, a decision with tradeoffs, a ticket, coordination), even if it ends in a reply.
+- replies: every other Slack DM, group DM, @-mention and email addressed to the user that expects a response from them and that they haven't answered, including in project channels: things a response alone settles. Drop a carried-over reply once the user has responded. (The user can turn a reply into a task themselves.)
 
 Return the full lists of what's still open: carried-over items that aren't resolved, plus new ones.
 - id: for Slack, the message permalink; for email, "gmail:<thread id>". Reuse the existing id for carried-over tasks.
@@ -291,6 +293,8 @@ ${JSON_ONLY} Shape: {"date": "${p.date}", "events": [{"id": string, "title": str
 export interface PlanPromptInput {
   title: string;
   description: string | null;
+  /** The user's own note on the task as they typed it, when its title was written from it. */
+  brief?: string | null;
   link: string | null;
   requester: string | null;
   source: string;
@@ -302,18 +306,18 @@ export function planPrompt(p: PlanPromptInput): string {
   return `The user (${profile}${p.userId ? `, Slack user ${p.userId}` : ""}) has this task and wants a proposed plan for getting it done.
 
 Task: ${p.title}
-${p.description ? `Description: ${p.description}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
+${p.description ? `Description: ${p.description}\n` : ""}${p.brief ? `The user's own note on it, as they wrote it: ${p.brief}\n` : ""}${p.requester ? `Requested by: ${p.requester}\n` : ""}Source: ${p.source}${p.link ? ` (${p.link})` : ""}
 ${baseSection("plan")}${learningSection(p.learning, "plan")}
 First research it. Read the source thread if there's a link. Search Slack, Gmail, Google Drive and Jira for related discussion, docs and tickets, and the code when the task depends on how something is built. Spend effort in proportion to the task: a quick reply needs little research.
 
 Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
-- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you".
+- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you". minutes is the user's own hands-on time for the step, judged from your research (how long the doc or thread is, how many people, how much there is to decide or write): for their steps, the whole of it; for Claude's, only the time to review what Claude produces (often 5), or 0 when there's nothing to review. Never count Claude's own time or waiting on other people. Use 0, 5, 10, 15, 30, 45, 60, 90 or 120.
 - open_questions: what's unclear or needs a decision before or during the work. Empty if none.
 - sources: the threads, docs and tickets you relied on. ${LINK_TITLE}
 
 ${READ_ONLY} Don't take any of the steps yourself; only propose them.
-${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null, "by": "claude"|"you"}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
+${JSON_ONLY} Shape: {"approach": string, "steps": [{"title": string, "detail": string|null, "link": string|null, "by": "claude"|"you", "minutes": number}], "open_questions": [string], "sources": [{"title": string, "link": string}]}`;
 }
 
 export interface AssessPromptInput {
@@ -328,13 +332,14 @@ Tasks:
 ${JSON.stringify(p.tasks)}
 
 For each task:
+- title: what the user typed is sometimes a detailed note (context, names, links, what they want) rather than a title. When it's longer than a short to-do line, write a short title for it: three to eight words saying what the task is, in the user's terms (e.g. "Review the launch checklist with Sam"). Treat the full text as the brief: use every detail in it for your research, the description and the steps. When it's already a short title, return null.
 - description: when the task has no description, write two or three sentences on what it most likely involves and why, using context you find. Search Slack (slack_search_public_and_private), Gmail (search_threads) and Jira (jira_search) for the task's key terms, people and tickets; a quick search or two per task is enough. Say what you found, not what you guessed: if you found nothing, describe the task only as far as its wording supports. When the task already has a description, return null.
 - ${ASSESSMENT_GUIDE}
 
 Return exactly one entry per task, with the same id.
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"assessments": [{"id": string, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}]}`;
+${JSON_ONLY} Shape: {"assessments": [{"id": string, "title": string|null, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number|null, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}]}`;
 }
 
 export function readingPrompt(context: unknown): string {

@@ -39,7 +39,7 @@ export const Assessment = z.object({
   needs_details: z.boolean(),
   /** What to ask the user when needs_details is true. */
   details_question: z.string().nullish(),
-  /** Expected total working time, the user's plus Claude's, in minutes. */
+  /** The user's own hands-on time to finish it, in minutes; none when it's too vague to judge. A plan's per-step minutes replace it. */
   estimate_minutes: z.number().nullish(),
   priority: Priority.nullish(),
   /** Steps Claude is confident it can complete on its own (research, drafting); never sending or deciding. */
@@ -314,6 +314,16 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("add_project_repos"), project_id: z.string(), local: z.array(z.string()).default([]), github: z.array(z.string()).default([]) }),
   /** Context entries in the user's words about a project; refreshes keep to them. */
   z.object({ type: z.literal("add_project_context"), project_id: z.string(), entries: z.array(z.string()).min(1) }),
+  /** Removes context entries (Demian's or the user's) from a project; refreshes leave them out. */
+  z.object({ type: z.literal("remove_project_context"), project_id: z.string(), entries: z.array(z.string()).min(1) }),
+  /** The project's status as the user sees it; "auto" goes back to what refreshes find. */
+  z.object({ type: z.literal("set_project_status"), project_id: z.string(), status: z.enum(["blocked", "at_risk", "on_track", "idle", "auto"]), reason: z.string().nullish() }),
+  /** Marks a project's blocker or active item done, as its Mark done does. */
+  z.object({ type: z.literal("resolve_project_item"), project_id: z.string(), item_id: z.string(), what: z.string().nullish() }),
+  /** Has Claude double-check a blocker or active item, as its Double check does. */
+  z.object({ type: z.literal("check_project_item"), project_id: z.string(), item_id: z.string(), what: z.string().nullish() }),
+  /** Unlinks a channel from a project, as Settings > Projects does. */
+  z.object({ type: z.literal("unlink_channel"), project_id: z.string(), channel_id: z.string() }),
   z.object({ type: z.literal("add_note"), text: z.string() }),
   z.object({ type: z.literal("update_profile"), text: z.string() }),
   z.object({ type: z.literal("add_task"), title: z.string(), project_id: z.string().nullish() }),
@@ -365,6 +375,8 @@ export const DailyReading = z.object({
 export const ManualAssessment = Assessment.extend({
   id: z.string(),
   description: z.string().nullish(),
+  /** A short title, when what the user typed was a detailed note rather than a title. */
+  title: z.string().nullish(),
 });
 export type ManualAssessment = z.infer<typeof ManualAssessment>;
 
@@ -379,6 +391,8 @@ export const TaskPlan = z.object({
       link: z.string().nullish(),
       /** Who does it: "claude" only if Claude can complete it independently. Older plans lack it. */
       by: z.enum(["claude", "you"]).nullish(),
+      /** The user's hands-on minutes for it (for Claude's steps, reviewing what it made). Older plans lack it. */
+      minutes: z.number().nullish(),
     }),
   ),
   open_questions: z.array(z.string()),

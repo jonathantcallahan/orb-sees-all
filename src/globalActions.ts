@@ -6,7 +6,9 @@
  */
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading } from "./jobs";
+import { assessPendingTasks, checkBlocker, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading } from "./jobs";
+import { projectContext, projectName } from "./projects";
+import { blockerKey } from "./tasks";
 import { setUserProfile } from "./prompts";
 import type { GlobalAction } from "./schema";
 import { localDate } from "./scheduler";
@@ -15,11 +17,13 @@ const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 
 /** A project's name for a card, by id; the id itself if it isn't known. */
 type Names = (id: string) => string;
+/** A project's blocker or active item, by project and item id, as the project shows it; null if it isn't there. */
+type Items = (projectId: string, itemId: string) => string | null;
 
 const channelList = (names: string[]) => names.map((n) => `#${n.replace(/^#/, "")}`).join(", ");
 
 /** What a change will do, in a line, for its card. */
-export function describeAction(a: GlobalAction, project: Names, channel: Names): string {
+export function describeAction(a: GlobalAction, project: Names, channel: Names, item: Items): string {
   switch (a.type) {
     case "create_project":
       return `Add the project "${a.name}", from ${channelList(a.channels.map((c) => c.name))}`;
@@ -35,6 +39,21 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
       return `Add to the context of "${project(a.project_id)}": ${a.entries.join(" · ")}`;
     case "add_project_repos":
       return `Read code for "${project(a.project_id)}" from ${[...a.github, ...a.local].join(", ")}`;
+    case "remove_project_context":
+      return `Remove from the context of "${project(a.project_id)}": ${a.entries.join(" · ")}`;
+    case "set_project_status":
+      return a.status === "auto"
+        ? `Let refreshes set the status of "${project(a.project_id)}" again`
+        : `Set "${project(a.project_id)}" to ${STATUS_WORDS[a.status]}${a.reason ? `: ${a.reason}` : ""}`;
+    case "resolve_project_item":
+    case "check_project_item": {
+      // Named from the item the id points to, not the chat's words for it, so the card says what Apply does.
+      const what = item(a.project_id, a.item_id);
+      if (!what) return `An item that isn't on "${project(a.project_id)}" any more (Apply will do nothing)`;
+      return a.type === "resolve_project_item" ? `Mark "${what}" done in "${project(a.project_id)}"` : `Double check "${what}" in "${project(a.project_id)}"`;
+    }
+    case "unlink_channel":
+      return `Unlink ${channel(a.channel_id)} from "${project(a.project_id)}"`;
     case "add_note":
       return `Remember: ${a.text}`;
     case "update_profile":
@@ -54,6 +73,8 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names):
   }
 }
 
+const STATUS_WORDS = { blocked: "blocked", at_risk: "at risk", on_track: "on track", idle: "idle" } as const;
+
 const KIND: Partial<Record<GlobalAction["type"], db.FeedbackKind>> = {
   create_project: "project_create",
   split_project: "project_split",
@@ -61,6 +82,8 @@ const KIND: Partial<Record<GlobalAction["type"], db.FeedbackKind>> = {
   rename_project: "project_rename",
   set_project_tracking: "project_track",
   add_project_context: "project_focus",
+  remove_project_context: "project_focus",
+  unlink_channel: "channel_unlink",
   add_note: "note",
 };
 
@@ -129,6 +152,42 @@ async function apply(a: GlobalAction): Promise<string> {
       quiet(refreshProject(a.project_id));
       return "Added to its context; it's being read again with it in mind.";
     }
+    case "remove_project_context": {
+      const focus = (await db.listFocus()).get(a.project_id);
+      const p = await db.getProject(a.project_id);
+      if (!p) throw new Error("Unknown project");
+      const drop = new Set(a.entries.map((e) => e.trim().toLowerCase()));
+      const gone = (t: string) => drop.has(t.trim().toLowerCase());
+      // The user's own entries just go; Demian's are remembered as removed, so refreshes leave them out.
+      const theirs = projectContext(p).filter((c) => c.by === "demian" && gone(c.text)).map((c) => c.text);
+      await db.saveFocus(a.project_id, { context: (focus?.context ?? []).filter((t) => !gone(t)), removed: [...(focus?.removed ?? []), ...theirs] });
+      return "Removed from its context.";
+    }
+    case "set_project_status":
+      await db.setProjectStatus(a.project_id, a.status === "auto" ? null : a.status, a.reason ?? null);
+      return a.status === "auto" ? "Its status comes from refreshes again." : `It's ${STATUS_WORDS[a.status]} now; refreshes keep to that unless something clearly changes.`;
+    case "resolve_project_item": {
+      const p = await db.getProject(a.project_id);
+      const item = [...(p?.snapshot?.blockers ?? []), ...(p?.snapshot?.active ?? [])].find((b) => b.id === a.item_id);
+      if (!item) throw new Error("That item isn't on the project any more");
+      await db.setTaskState(blockerKey(item.id), { dismissed: true });
+      if (item.owners.some((o) => o.is_me)) await db.setTaskState(item.id, { status: "done" });
+      return "Marked done.";
+    }
+    case "check_project_item": {
+      const p = await db.getProject(a.project_id);
+      const blocker = p?.snapshot?.blockers.find((b) => b.id === a.item_id);
+      const active = p?.snapshot?.active?.find((b) => b.id === a.item_id);
+      const item = blocker ?? active;
+      if (!p || !item) throw new Error("That item isn't on the project any more");
+      const reminders = await db.getReminders();
+      quiet(checkBlocker(projectName(p), p.channel_id, item, reminders[item.id], blocker ? "blocker" : "active"));
+      return "Checking it; the result shows on the project.";
+    }
+    case "unlink_channel":
+      if (!(await db.unlinkChannel(a.channel_id, a.project_id))) throw new Error("That channel isn't one of the project's related channels");
+      quiet(refreshProject(a.project_id));
+      return "Unlinked; the project is being read again without it.";
     case "add_note": {
       const notes = [...(await db.getNotes()), a.text.trim()];
       await db.saveNotes(notes);

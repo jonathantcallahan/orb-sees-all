@@ -8,6 +8,8 @@ export interface SessionTask {
   id?: string;
   title: string;
   description?: string | null;
+  /** The user's own note on the task as they typed it, when its title was written from it. */
+  brief?: string | null;
   link?: string | null;
   requester?: string | null;
   projectName?: string | null;
@@ -35,6 +37,7 @@ export function sessionPrompt(task: SessionTask, plan: TaskPlan | null, quick?: 
   if (task.requester) lines.push(`Requested by: ${task.requester}`);
   if (task.link) lines.push(`Source: ${task.link}`);
   if (task.description) lines.push("", task.description);
+  if (task.brief) lines.push("", `My own note on it, as I wrote it: ${task.brief}`);
 
   let hasSteps = false;
   if (plan) {
@@ -94,6 +97,7 @@ function taskLines(task: SessionTask): string[] {
   if (task.requester) lines.push(`Requested by: ${task.requester}`);
   if (task.link) lines.push(`Source: ${task.link}`);
   if (task.description) lines.push("", task.description);
+  if (task.brief) lines.push("", `My own note on it, as I wrote it: ${task.brief}`);
   return lines;
 }
 
@@ -217,6 +221,11 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
     '- {"type": "add_project_context", "project_id": "C111", "entries": ["one plain statement about it", "Not part of it: …"]}: adds to the project\'s context, which every refresh keeps to. Use it when I say what a project is or isn\'t about, or anything else that should shape how it\'s read.',
     '- {"type": "add_project_repos", "project_id": "C111", "github": ["owner/name"], "local": ["/Users/me/code/repo"]}: where a project\'s code lives, so plans and chats can read it. Offer it when a question needs the code and the project has no repos listed.',
+    '- {"type": "remove_project_context", "project_id": "C111", "entries": ["the entry, as listed"]}: takes entries out of a project\'s context; refreshes leave them out.',
+    '- {"type": "set_project_status", "project_id": "C111", "status": "blocked" | "at_risk" | "on_track" | "idle" | "auto", "reason": "why, in my words"}: sets the status the board shows; refreshes keep to it unless something clearly changes. "auto" hands it back to refreshes.',
+    '- {"type": "resolve_project_item", "project_id": "C111", "item_id": "<id of an open blocker or active item>", "what": "<what it is>"}: marks it done, as its Mark done does.',
+    '- {"type": "check_project_item", "project_id": "C111", "item_id": "...", "what": "..."}: has Claude double-check whether a blocker or active item is still real, as its Double check does.',
+    '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s linked channels (not its main one).',
     '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
     '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
     '- {"type": "add_task", "title": "...", "project_id": "C111" or null}: a new task of my own.',

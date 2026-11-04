@@ -15,7 +15,7 @@
  * - The halo is a camera-facing disc behind the orb.
  *
  * Calm, the fields are cool pastels; under stress they warm toward pink and peach and everything
- * moves faster. A finished task sends a bright ring across the surface, an update's hit swirls the
+ * moves faster. A finished task sends low, wide ripples across the surface, an update's hit swirls the
  * fields, an overdue task darkens and multiplies the specks, and while Orb works the rays brighten.
  */
 import * as THREE from "three";
@@ -61,7 +61,26 @@ vec4 field(vec3 p, float t, float seed) {
 }
 `;
 
+/**
+ * A finished task's ripple on Ephedra: low, wide rings spreading from where it began, like a stone
+ * dropped in still water. Unlike the shared ripple it's broad and gentle, and it moves the surface
+ * and bends the fields rather than lighting them. Needs RIPPLE (its uniforms) included before it.
+ */
+const SWELL = /* glsl */ `
+// The rings' height at an arc distance from the origin, -1 to 1, fading as they spread.
+float swellAt(float angle) {
+  float behind = uRippleAge * 0.75 - angle;
+  if (behind <= 0.0 || uRippleAge > 8.0) return 0.0;
+  return sin(behind * 5.5) * smoothstep(0.0, 0.5, behind) * (1.0 - smoothstep(1.4, 3.2, behind)) * exp(-uRippleAge * 0.55);
+}
+float swellAngle(vec3 n) {
+  return 2.0 * asin(clamp(length(normalize(n) - uRippleOrigin) * 0.5, 0.0, 1.0));
+}
+`;
+
 const BODY_VERTEX = /* glsl */ `
+${RIPPLE}
+${SWELL}
 varying vec3 vObj;
 varying vec3 vEyeObj;
 varying vec3 vView;
@@ -70,7 +89,9 @@ varying vec3 vNormal;
 void main() {
   vObj = position;
   vEyeObj = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
-  vec4 view = modelViewMatrix * vec4(position, 1.0);
+  // A finished task's rings lift the surface a little.
+  vec3 moved = position * (1.0 + 0.03 * swellAt(swellAngle(position)));
+  vec4 view = modelViewMatrix * vec4(moved, 1.0);
   vView = view.xyz;
   vCenter = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   vNormal = normalize(normalMatrix * normal);
@@ -89,6 +110,7 @@ varying vec3 vCenter;
 varying vec3 vNormal;
 ${NOISE}
 ${RIPPLE}
+${SWELL}
 ${FERRO}
 ${FIELDS}
 
@@ -133,6 +155,12 @@ void main() {
   vec3 n = normalize(vObj);
   // An update's hit swirls the fields along it.
   vec3 p = n + 0.25 * shock(n) * vec3(n.y, -n.x, 0.0);
+  // A finished task's rings bend the fields outward from where they began, like light through water.
+  float ringAngle = swellAngle(n);
+  float ring = swellAt(ringAngle);
+  float ringSlope = (swellAt(ringAngle + 0.03) - ring) / 0.03;
+  vec3 away = normalize(n - uRippleOrigin * dot(n, uRippleOrigin) + 1e-4);
+  p += away * ring * 0.12;
 
   // The outer orb: milky white with pastel fields drifting over it.
   vec4 outer = field(p * 1.2, t, 0.0);
@@ -173,8 +201,8 @@ void main() {
   }
   col += vec3(1.0) * sparkle;
 
-  // A finished task: a bright ring spreading over the surface.
-  col += vec3(1.0, 0.98, 0.9) * max(ripple(n), 0.0) * 0.5;
+  // The rings' slopes catch a little shade and light, so they read as relief, not a glow.
+  col *= 1.0 - clamp(ringSlope * 0.06, -0.14, 0.14);
 
   // The dark specks, on the surface.
   col = mix(col, vec3(0.5, 0.16, 0.22), specks(n) * mix(0.6, 0.85, uSpike));

@@ -59,17 +59,13 @@ export function RefreshButton({
   busy: boolean;
   onClick: () => void;
   title: string;
-  /** What the refresh is doing, shown beside the spinner while it runs. */
+  /** What the refresh is doing: the spinner's tooltip while it runs (the spinner alone is shown). */
   status?: string;
 }) {
+  const label = busy && status ? `${status}…` : title;
   return (
     <span className="refresh-wrap">
-      {busy && status && (
-        <span className="refresh-status" title={status}>
-          <ScrambleText text={`${status}…`} />
-        </span>
-      )}
-      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={title} aria-label={title}>
+      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={label} aria-label={label}>
         {busy ? <Spinner /> : "↻"}
       </button>
     </span>
@@ -127,9 +123,9 @@ export function updatedText(at: string): string {
 }
 
 export function Updated({ at }: { at: string | null | undefined }) {
-  if (!at) return <span className="timestamp small">never refreshed</span>;
+  if (!at) return <span className="timestamp small updated-stamp">never refreshed</span>;
   const today = new Date(at).toDateString() === new Date().toDateString();
-  return <span className={`timestamp small${today ? "" : " stale"}`}>updated {updatedText(at)}</span>;
+  return <span className={`timestamp small updated-stamp${today ? "" : " stale"}`}>updated {updatedText(at)}</span>;
 }
 
 /** Claude Code's working indicator: a star that grows through these glyphs and back. */

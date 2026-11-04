@@ -12,14 +12,16 @@ export const ORB_LOOK_NAMES: Record<OrbLook, string> = { crystal: "Demian", glas
  */
 export const ORB_LOOKS: OrbLook[] = ["crystal", "film", "resin", "opal", "aura"];
 
+/** The orb until you pick another in Settings: Ephedra. (Onboarding always shows Demian.) */
+export const DEFAULT_ORB_LOOK: OrbLook = "aura";
+
 /**
- * Kept in localStorage like the theme, so the chosen orb shows from the first frame. Looks that
- * have since been retired or set aside fall back to Demian.
+ * Kept in localStorage like the theme, so the chosen orb shows from the first frame. No choice yet,
+ * or a look that has since been retired or set aside, means the default.
  */
 export function storedOrbLook(): OrbLook {
   const look = localStorage.getItem(KEY);
-  // A look that's set aside or retired falls back to Demian.
-  return (ORB_LOOKS as (string | null)[]).includes(look) ? (look as OrbLook) : "crystal";
+  return (ORB_LOOKS as (string | null)[]).includes(look) ? (look as OrbLook) : DEFAULT_ORB_LOOK;
 }
 
 /** Told when the orb look changes, so everything showing its name updates. */

@@ -12,7 +12,7 @@ import { useOrbName } from "../orbLook";
 
 /**
  * A change the chat proposed, as a card: what it does, with Apply and Not this. Applying it runs the
- * change, tells the session what came of it, and leaves the card showing the result.
+ * change and tells the session what came of it; the card then goes (View learnings shows what stuck).
  */
 function ActionRow({
   chatKey,
@@ -33,7 +33,8 @@ function ActionRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const result = link?.applied?.[item.key];
-  if (link?.dismissedKeys?.includes(item.key)) return null;
+  // Once applied (or turned down) it's done here; what Demian learned lives in Settings (View learnings).
+  if (link?.dismissedKeys?.includes(item.key) || result) return null;
   const summary = describe(item);
   const apply = async () => {
     if (!item.action) return;
@@ -51,10 +52,10 @@ function ActionRow({
     }
   };
   return (
-    <div className={`handoff action-card small${result ? " applied" : ""}`}>
+    <div className="handoff action-card small">
       <div className="handoff-head">
         <span className="action-summary">{summary}</span>
-        {!result && item.action && (
+        {item.action && (
           <span className="action-buttons">
             <button
               className="cta-ghost"
@@ -72,7 +73,6 @@ function ActionRow({
           </span>
         )}
       </div>
-      {result && <div className="muted">✓ {result.result}</div>}
       {error && <div className="error">Couldn't apply it: {error}</div>}
     </div>
   );
@@ -108,9 +108,20 @@ function examplePrompts(projects: Project[]): string[] {
 /**
  * The global chat, opened from the corner beside Refresh all: tell Demian what it has wrong or
  * missing, and it proposes changes (split or add a project, a standing correction, a refresh) to
- * apply one by one. One ongoing conversation, kept across restarts; New chat starts another.
+ * apply one by one. One ongoing conversation, kept across restarts. View learnings opens what it has
+ * learned, in Settings.
  */
-export function GlobalChat({ projects, onClose, onApplied }: { projects: Project[]; onClose: () => void; onApplied: () => void }) {
+export function GlobalChat({
+  projects,
+  onClose,
+  onApplied,
+  onViewLearnings,
+}: {
+  projects: Project[];
+  onClose: () => void;
+  onApplied: () => void;
+  onViewLearnings: () => void;
+}) {
   const [key, setKey] = useState<string | null>(null);
   const [link, setLink] = useState<SessionLink | undefined>();
   useEffect(() => {
@@ -123,6 +134,11 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
   const progress = useSessionProgress(key ?? "", key ? link : undefined, reload);
   const working = useJobStatus(`session:${key}`);
   const orbName = useOrbName();
+  // How many things Demian has learned (what it knows plus its lessons), beside View learnings.
+  const [learnings, setLearnings] = useState(0);
+  useEffect(() => {
+    Promise.all([db.getNotes(), db.listLessons()]).then(([notes, lessons]) => setLearnings(notes.length + lessons.length), () => {});
+  }, [link?.applied]);
 
   // Names for the cards: projects by id, channels by id.
   const project = (id: string) => {
@@ -130,7 +146,11 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
     return p ? projectName(p) : id;
   };
   const channel = (id: string) => projects.flatMap((p) => p.channels).find((c) => c.channel_id === id)?.name ?? id;
-  const describe = (item: PendingAction) => (item.action ? describeAction(item.action, project, channel) : (item.error ?? "Couldn't read this change"));
+  const projectItem = (projectId: string, itemId: string) => {
+    const s = projects.find((x) => x.channel_id === projectId)?.snapshot;
+    return [...(s?.blockers ?? []), ...(s?.active ?? [])].find((b) => b.id === itemId)?.what ?? null;
+  };
+  const describe = (item: PendingAction) => (item.action ? describeAction(item.action, project, channel, projectItem) : (item.error ?? "Couldn't read this change"));
 
   if (!key) return null;
   const hints = examplePrompts(projects);
@@ -149,17 +169,9 @@ export function GlobalChat({ projects, onClose, onApplied }: { projects: Project
       // Example prompts only until the conversation starts; then an ordinary reply box.
       placeholder={started ? "Reply to Demian…" : hints}
       headAction={
-        started && (
-          <button
-            className="link-button small more-link"
-            onClick={async () => {
-              setLink(undefined);
-              setKey(await globalChatKey(true));
-            }}
-          >
-            New chat
-          </button>
-        )
+        <button className="link-button more-link learnings-link" onClick={onViewLearnings}>
+          View learnings{learnings > 0 && <span className="timestamp"> {learnings}</span>}
+        </button>
       }
       extra={(progress?.actions ?? []).map((item) => (
         <ActionRow

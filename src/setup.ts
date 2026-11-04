@@ -25,9 +25,11 @@ export interface SetupReport {
   login: { ok: boolean; method?: string; email?: string } | null;
   connectors: ConnectorCheck[] | null;
   /**
-   * The probe saw no claude.ai connectors at all: Claude Code isn't using a claude.ai account. (The
-   * login method from `auth status` can't tell: a gateway in settings.json shows as a token login,
-   * though the app's runs switch the gateway off and use the claude.ai login underneath.)
+   * The probe saw no claude.ai connectors and Claude Code isn't signed in with a Claude account, so
+   * it may be on an API key or a gateway token. (A gateway in settings.json shows as a token login,
+   * though the app's runs switch the gateway off and use a claude.ai login underneath if there is
+   * one.) Signed in with a Claude account and seeing none just means none are added yet: that's the
+   * connectors step, every one marked to add, not a sign-in problem.
    */
   noClaudeAi?: boolean;
   /** Set when the probe couldn't run, e.g. Claude Code failed to start. */
@@ -35,13 +37,23 @@ export interface SetupReport {
   gh: { ok: boolean } | null;
 }
 
-/** The connectors the app uses, matched against Claude Code's MCP server names. */
-const CONNECTORS: { id: string; label: string; purpose: string; required: boolean; match: (name: string) => boolean }[] = [
-  { id: "slack", label: "Slack", purpose: "Projects, tasks, replies and news", required: true, match: (n) => n === "claude.ai Slack" },
-  { id: "gmail", label: "Gmail", purpose: "Email tasks and replies", required: true, match: (n) => n === "claude.ai Gmail" },
-  { id: "calendar", label: "Google Calendar", purpose: "Today's meetings and prep", required: true, match: (n) => n === "claude.ai Google Calendar" },
-  { id: "drive", label: "Google Drive", purpose: "Research when planning a task", required: false, match: (n) => n === "claude.ai Google Drive" },
-  { id: "jira", label: "Jira", purpose: "Tickets when planning and checking tasks", required: false, match: (n) => n === "mcp-jira" },
+/**
+ * The connectors the app uses, matched against Claude Code's MCP server names. Keep this in step with
+ * the tool lists in claude.ts: a connector whose tools the runs use belongs here, so setup can say
+ * what to connect and why.
+ */
+export const CONNECTORS: { id: string; label: string; purpose: string; required: boolean; /** Its MCP server name in Claude Code. */ server: string }[] = [
+  { id: "slack", label: "Slack", purpose: "Projects, tasks, replies and news", required: true, server: "claude.ai Slack" },
+  { id: "gmail", label: "Gmail", purpose: "Email tasks and replies", required: true, server: "claude.ai Gmail" },
+  { id: "calendar", label: "Google Calendar", purpose: "Today's meetings, prep and finding times", required: true, server: "claude.ai Google Calendar" },
+  { id: "drive", label: "Google Drive", purpose: "Finding docs, and creating the ones you approve", required: false, server: "claude.ai Google Drive" },
+  { id: "docs", label: "Google Docs", purpose: "Reading docs linked in your work", required: false, server: "claude.ai Google Docs" },
+  { id: "sheets", label: "Google Sheets", purpose: "Reading sheets linked in your work", required: false, server: "claude.ai Google Sheets" },
+  { id: "slides", label: "Google Slides", purpose: "Reading decks linked in your work", required: false, server: "claude.ai Google Slides" },
+  { id: "claude_docs", label: "Claude Docs", purpose: "Reading docs people share from Claude", required: false, server: "claude.ai Claude Docs" },
+  { id: "zoom", label: "Zoom", purpose: "Meeting summaries", required: false, server: "claude.ai Zoom for Claude" },
+  { id: "amplitude", label: "Amplitude", purpose: "Product analytics for planning", required: false, server: "claude.ai Amplitude" },
+  { id: "jira", label: "Jira", purpose: "Tickets when planning and checking tasks", required: false, server: "mcp-jira" },
 ];
 
 /** The "init" line of a stream-json transcript: the session's tools and MCP servers. */
@@ -59,8 +71,8 @@ export function findInit(stdout: string): { mcp_servers?: { name: string; status
 
 /** Each connector the app uses and its state, from the init line's MCP server list. */
 export function connectorChecks(servers: { name: string; status: string }[]): ConnectorCheck[] {
-  return CONNECTORS.map(({ match, ...c }) => {
-    const status = servers.find((s) => match(s.name))?.status;
+  return CONNECTORS.map(({ server, ...c }) => {
+    const status = servers.find((s) => s.name === server)?.status;
     const state: ConnectorState =
       status === "connected"
         ? "connected"
@@ -137,7 +149,7 @@ export async function runSetupChecks(
     }
     const servers = init.mcp_servers ?? [];
     report.connectors = connectorChecks(servers);
-    report.noClaudeAi = !servers.some((s) => s.name.startsWith("claude.ai "));
+    report.noClaudeAi = report.login.method !== "claude.ai" && !servers.some((s) => s.name.startsWith("claude.ai "));
     if (!report.connectors.some((c) => c.required && c.state === "pending")) break;
     step();
   }

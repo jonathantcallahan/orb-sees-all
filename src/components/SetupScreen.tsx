@@ -3,9 +3,10 @@ import { createPortal } from "react-dom";
 import * as db from "../db";
 import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
-import { INSTALL_CLAUDE, isWindows, TERMINAL } from "../platform";
+import { INSTALL_CLAUDE, isWindows, LOGIN_CLAUDE, TERMINAL } from "../platform";
 
-export const CONNECTORS_URL = "https://claude.ai/settings/connectors";
+/** claude.ai's own list of your connectors, under Customize. */
+export const CONNECTORS_URL = "https://claude.ai/new#customize/connectors/yours";
 
 type Mark = "ok" | "bad" | "warn" | "wait" | "todo";
 
@@ -14,21 +15,35 @@ function StatusMark({ mark }: { mark: Mark }) {
   return <span className={`setup-mark ${mark}`}>{{ ok: "✓", bad: "×", warn: "!", todo: "○" }[mark]}</span>;
 }
 
-/** A shell command with a Copy button, for steps the user runs in Terminal (PowerShell on Windows). */
+/**
+ * A shell command to run in Terminal (PowerShell on Windows), on one line, with a copy icon inside
+ * the block. A long command scrolls sideways rather than wrapping.
+ */
 export function Command({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="setup-command">
       <code>{text}</code>
       <button
-        className="link-button small"
+        className="setup-command-copy"
+        title={copied ? "Copied" : "Copy"}
+        aria-label={copied ? "Copied" : "Copy command"}
         onClick={async () => {
           await navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }}
       >
-        {copied ? "Copied" : "Copy"}
+        {copied ? (
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M2.5 6.2 5 8.5l4.5-5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <rect x="3.75" y="3.75" width="6.5" height="6.5" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M8.25 2.4V2.2A1.2 1.2 0 0 0 7.05 1H2.2A1.2 1.2 0 0 0 1 2.2v4.85a1.2 1.2 0 0 0 1.2 1.2h.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+        )}
       </button>
     </div>
   );
@@ -147,8 +162,9 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
           <Step mark={mark(r?.login)} title={r?.login?.ok ? `Claude Code is signed in${r.login.email ? ` as ${r.login.email}` : ""}` : "Sign in to Claude Code"}>
             {r?.login && !r.login.ok && (
               <>
-                In {TERMINAL}, run <code>claude</code>, type <code>/login</code> and choose your Claude account (a Pro, Max, Team or Enterprise subscription). Then
-                check again.
+                Being signed in at claude.ai in your browser isn't enough; Claude Code signs in on its own. In {TERMINAL}, run this and approve it in your
+                browser with your Claude account (Pro, Max, Team or Enterprise), then check again:
+                <Command text={LOGIN_CLAUDE} />
               </>
             )}
           </Step>
@@ -157,8 +173,9 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
             {r?.probeError && <span className="error">Claude Code didn't start: {r.probeError}</span>}
             {r?.noClaudeAi && (
               <span className="error">
-                Claude Code can't see any claude.ai connectors, so it isn't using a claude.ai account. In {TERMINAL}, run <code>claude</code>, type{" "}
-                <code>/login</code> and choose your Claude account (not an API key), then check again.
+                Claude Code is signed in with an API key or a company token, so it can't reach the claude.ai connectors. Sign it in with your Claude
+                account in {TERMINAL}, then check again:
+                <Command text={LOGIN_CLAUDE} />
               </span>
             )}
             {r?.connectors && (
@@ -170,10 +187,14 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
                 </ul>
                 {!ready && !r.noClaudeAi && (
                   <p>
-                    Add or sign in to the ones marked × at <ExternalLink href={CONNECTORS_URL}>claude.ai → Settings → Connectors</ExternalLink>, then check
+                    Add or sign in to the ones marked × at <ExternalLink href={CONNECTORS_URL}>claude.ai → Customize → Connectors</ExternalLink>, then check
                     again.{" "}
-                    {r.connectors.some((c) => c.id === "jira" && c.state !== "connected") &&
-                      "Jira is a local MCP server named mcp-jira; set it up in Claude Code if you want it (see the README)."}
+                    {r.connectors.some((c) => c.id === "jira" && c.state !== "connected") && (
+                      <>
+                        Jira isn't a claude.ai connector: it's an MCP server named <code>mcp-jira</code> your team sets up in Claude Code, and it may
+                        need your company's VPN.
+                      </>
+                    )}
                   </p>
                 )}
               </>

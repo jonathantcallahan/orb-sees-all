@@ -1,7 +1,7 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
 import type { Blocker, CalendarDay, ManualAssessment, Priority } from "./schema";
 import { projectName } from "./projects";
-import { blockerKey, myBlockingIds, stateOf, taskPriority, type TaskState } from "./tasks";
+import { blockerKey, myBlockingIds, stateOf, taskEstimate, taskPriority, type TaskState } from "./tasks";
 
 export interface ReadingInput {
   projects: Project[];
@@ -13,6 +13,8 @@ export interface ReadingInput {
   today: string;
   /** Priorities the user set by hand, which outrank the assessed ones. */
   priorityOverrides?: Record<string, Priority>;
+  /** Tasks' plans, whose step-by-step minutes make the better estimates. */
+  plans?: Map<string, { plan: { steps: { minutes?: number | null }[] } }>;
 }
 
 /**
@@ -65,7 +67,7 @@ export function readingContext(r: ReadingInput) {
       title: t.title,
       project: t.project,
       priority: taskPriority(t.a?.priority, t.projectPriority, t.blocking, r.priorityOverrides?.[t.id]),
-      estimate_minutes: t.a?.estimate_minutes ?? null,
+      estimate_minutes: taskEstimate(r.plans?.get(t.id)?.plan, t.a),
       due: t.due ?? null,
       planned_today: planned(t.id),
     }));

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
+import { channelLabel } from "./projects";
 import { GlobalAction } from "./schema";
 
 /** A task's link to the Claude Code session Orb opened for it. */
@@ -503,9 +504,11 @@ export function chatView(
  */
 export function sendDestination(send: { to: string; label?: string }): string {
   const thread = /^https?:\/\//.test(send.to);
-  if (send.label) return thread ? `the thread in ${send.label}` : send.label;
-  if (!thread) return send.to;
   const id = send.to.match(/\/archives\/([A-Z0-9]+)/)?.[1] ?? "";
+  // A group DM or DM by its people, never "#mpdm-…" or a pound sign (see channelLabel).
+  const label = send.label && (/^#?mpdm-/.test(send.label) || /^[DG]/.test(id) ? channelLabel({ name: send.label, channel_id: id.startsWith("D") ? id : undefined }).replace(/^#/, "") : send.label);
+  if (label) return thread ? `the thread in ${label}` : label;
+  if (!thread) return send.to;
   const kind = id.startsWith("D") ? "a DM" : id.startsWith("G") ? "a group DM" : id.startsWith("C") ? "a channel" : null;
   return kind ? `the thread in ${kind}` : "the thread";
 }

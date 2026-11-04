@@ -6,6 +6,8 @@ import { runCliStreaming, type StreamingCliRunner } from "./cli";
 const SLACK = "mcp__claude_ai_Slack__";
 const GMAIL = "mcp__claude_ai_Gmail__";
 const GCAL = "mcp__claude_ai_Google_Calendar__";
+const ZOOM = "mcp__claude_ai_Zoom_for_Claude__";
+const AMPLITUDE = "mcp__claude_ai_Amplitude__";
 
 export const TOOLS = {
   slackRead: [
@@ -43,6 +45,36 @@ export const TOOLS = {
     "mcp__claude_ai_Claude_Docs__guide",
   ],
   jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
+  /**
+   * Amplitude product analytics, reading only: its context, taxonomy and saved charts, and ad-hoc
+   * queries. Nothing that creates, changes or shares (events, properties, dashboards, flags, cohorts,
+   * comments), none of its UI widgets (render_*), and not run_amp, which can write.
+   */
+  amplitudeRead: [
+    "get_amplitude_context",
+    "search_amp_entities",
+    "search_amp_data_taxonomy",
+    "get_amp_taxonomy",
+    "get_amplitude_charts",
+    "query_amplitude_data",
+    "get_from_url",
+    "get_amp_user_data",
+    "get_group_types",
+    "get_amp_session_replay_info",
+    "get_agent_results",
+    "use_amplitude_ai_feedback",
+  ].map((t) => `${AMPLITUDE}${t}`),
+  /** Zoom meetings: their AI summaries, notes, transcripts and recordings, reading only. */
+  zoomRead: [
+    "search_meetings",
+    "get_meeting_assets",
+    "get_recording_resource",
+    "recordings_list",
+    "my_notes_get_note_content",
+    "search",
+    "search_describe_capabilities",
+    "ask",
+  ].map((t) => `${ZOOM}${t}`),
   /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
   slackSend: [`${SLACK}slack_send_message`],
   /** Creating a Google Doc, used only for a doc the user reviewed and clicked Create on. */
@@ -68,6 +100,10 @@ const DISALLOWED = [
   "WebSearch",
   "Agent",
   ...["ask_uknow", "ask_uknow_session", "list_knowledge_bases"].map((t) => `mcp__claude_ai_U-Know__${t}`),
+  // The Atlassian (Rovo) connector reaches Jira Cloud, where the team's issues aren't yet: it would
+  // answer with empty or stale results that read like real ones. Jira comes from mcp-jira only.
+  "mcp__claude_ai_Atlassian",
+  "mcp__claude_ai_Atlassian_Rovo",
 ];
 
 /**
@@ -125,6 +161,19 @@ const SESSION_DISALLOWED = [
   ...["update_spreadsheet", "update_values", "update_formulas", "insert_dimension"].map((t) => `mcp__claude_ai_Google_Sheets__${t}`),
   "mcp__claude_ai_Google_Slides__update_presentation",
   ...["create", "update", "delete", "batch", "export"].map((t) => `mcp__claude_ai_Claude_Docs__${t}`),
+  // Zoom: scheduling, changing or controlling meetings, and its file and collaborator writes.
+  ...[
+    "meeting_create",
+    "meeting_update",
+    "meeting_delete",
+    "in_meeting_control",
+    "capabilities_invoke_write",
+    "create_new_file_with_markdown",
+    "hub_create_file_from_content",
+    "canvas_add_file_collaborators",
+    "canvas_modify_file_collaborator_role",
+    "canvas_remove_file_collaborator",
+  ].map((t) => `${ZOOM}${t}`),
   // With these visible, a session asked for a doc tries to make it itself and stalls on the
   // permission instead of handing it to Orb.
   ...["create_file", "copy_file", "update_file", "share_file", "trash_file"].map((t) => `mcp__claude_ai_Google_Drive__${t}`),
@@ -406,7 +455,7 @@ export const SESSION_DISPLAY = [
   "You can't create Google Docs yourself either: Drive's write tools are turned off here, so whenever I ask for a doc (\"make this a Google doc\", \"put the plan in a doc\"), never try a Drive tool or tell me it needs a permission; hand it to Orb. When a doc is ready (a brief, a summary, a spec), hand it to Orb as a block: a line `[orb] doc step N: <the doc's title>` (or `[orb] doc: <title>` when it isn't a plan step), then the doc's content in Markdown (headings, lists and tables are fine there), then a line `[orb] end`. Then, if it's a plan step, write `[orb] step N waiting: review and create the doc`, and stop. Orb shows it to me to review and creates it in my Google Drive, then tells you its link.",
   "Think things through before you agree with something or draft a reply on it. Test what you're told (by a colleague, a doc or a search result) against what you know of the task: the numbers involved, who asked and why, what's been done before. Search Slack and Jira for precedent, and when a claim doesn't fit (a limit far below what's needed, a process that doesn't explain why the person reached out), say so and dig before writing anything. Don't hand me a draft that just restates an answer you haven't checked.",
   `How to get plans and messages right (my own lessons, given with each turn, win where they differ): ${[...PLAN_RULES, ...WRITING_RULES].join(" ")}`,
-  "Find answers yourself before asking anyone. Search the code you can read (Read, Grep, Glob over the folders you're given), Jira, Slack, my email and Drive, and keep at it across sources before concluding something isn't written down. Never draft a question to a colleague, or add one to a message, for something those sources can answer (whether tests cover a flow, how code behaves, a status, a decision, an owner, a link). Ask a person only for their decision, their opinion, or what only they know or haven't done yet, and then say in the message what you already checked. If you find you can't reach a source (a folder, a tool), tell me plainly which and why rather than routing the question to a person.",
+  "Find answers yourself before asking anyone. Search the code you can read (Read, Grep, Glob over the folders you're given), Jira, Slack, my email, Drive, Zoom meeting summaries and product analytics in Amplitude, and keep at it across sources before concluding something isn't written down. U-Know is off-limits here, even though its instructions may be loaded: don't try it or plan around it. Never draft a question to a colleague, or add one to a message, for something those sources can answer (whether tests cover a flow, how code behaves, a status, a decision, an owner, a link). Ask a person only for their decision, their opinion, or what only they know or haven't done yet, and then say in the message what you already checked. If you find you can't reach a source (a folder, a tool), tell me plainly which and why rather than routing the question to a person.",
   "Orb also shows the plan's steps with their progress, so keep that list true to what's actually happening.",
   "When something in our conversation finishes a step, even out of order or one of mine, report it done straight away. When a step is no longer needed, write `[orb] step N skipped: <why>` on its own line.",
   "When a step can't move until someone else acts (an answer, an approval, a fix from another team), write `[orb] step N blocked: <who or what, in a few words>`. That's different from waiting, which is for things I need to do. Report the step started or done again once it moves.",

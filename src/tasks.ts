@@ -380,3 +380,12 @@ export function reorder(ids: string[], id: string, before: string | null): strin
   const at = before ? rest.indexOf(before) : -1;
   return at < 0 ? [...rest, id] : [...rest.slice(0, at), id, ...rest.slice(at)];
 }
+
+/**
+ * A task's estimate: the user's own hands-on minutes. A plan's, step by step after its research,
+ * when every step has one; otherwise the first assessment's; null when there's neither.
+ */
+export function taskEstimate(plan: { steps: { minutes?: number | null }[] } | null | undefined, assessment: { estimate_minutes?: number | null } | null | undefined): number | null {
+  if (plan?.steps.length && plan.steps.every((st) => typeof st.minutes === "number")) return plan.steps.reduce((sum, st) => sum + (st.minutes ?? 0), 0);
+  return assessment?.estimate_minutes ?? null;
+}

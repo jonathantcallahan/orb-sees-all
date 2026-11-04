@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { setProjectState, type Project } from "../db";
 import { refreshProject } from "../jobs";
-import { activeChannels, nameFromChannel } from "../projects";
+import { activeChannels, channelLabel, nameFromChannel } from "../projects";
 
 /**
  * Projects discovery found outside the #tmp- convention. They stay off the board until the user
@@ -20,7 +20,7 @@ export function SuggestedProjects({ projects, onChange }: { projects: Project[];
           <div key={p.channel_id} className="suggested-project small">
             <div className="body">
               <strong>{p.snapshot?.name || nameFromChannel(p.name)}</strong>{" "}
-              <span className="muted">{activeChannels(p).map((c) => `#${c.name}`).join(", ")}</span>
+              <span className="muted">{activeChannels(p).map(channelLabel).join(", ")}</span>
               {p.found_reason && <div className="muted">{p.found_reason}</div>}
             </div>
             <div className="actions">

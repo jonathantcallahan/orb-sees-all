@@ -39,6 +39,26 @@ export interface Project {
   last_error: string | null;
   /** What the project is, as the user means it (see ProjectFocus); null until they say. */
   focus: ProjectFocus | null;
+  /** A status the user set (through the Demian chat), when, and why; see projectStatus. */
+  status_override: StatusOverride | null;
+}
+
+export interface StatusOverride {
+  status: "blocked" | "at_risk" | "on_track" | "idle";
+  reason: string | null;
+  at: string;
+}
+
+async function getStatusOverrides(): Promise<Record<string, StatusOverride>> {
+  return json<Record<string, StatusOverride>>(await getSetting("project_status")) ?? {};
+}
+
+/** Sets the status the user gave a project, or clears it (null) so the refreshes' own shows. */
+export async function setProjectStatus(projectId: string, status: StatusOverride["status"] | null, reason: string | null = null) {
+  const all = await getStatusOverrides();
+  if (status) all[projectId] = { status, reason, at: nowIso() };
+  else delete all[projectId];
+  await setSetting("project_status", JSON.stringify(all));
 }
 
 interface ProjectRow {
@@ -63,7 +83,12 @@ export async function listProjectChannels(): Promise<ProjectChannel[]> {
 
 export async function listProjects(): Promise<Project[]> {
   const d = await db();
-  const [rows, channels, focus] = await Promise.all([d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"), listProjectChannels(), listFocus()]);
+  const [rows, channels, focus, statuses] = await Promise.all([
+    d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"),
+    listProjectChannels(),
+    listFocus(),
+    getStatusOverrides(),
+  ]);
   return rows.map((r) => ({
     ...r,
     hidden: r.hidden === 1,
@@ -74,6 +99,7 @@ export async function listProjects(): Promise<Project[]> {
     profile: json<ProjectProfile>(r.profile),
     repo_state: json<RepoState>(r.repo_state),
     focus: focus.get(r.channel_id) ?? null,
+    status_override: statuses[r.channel_id] ?? null,
   }));
 }
 
@@ -110,10 +136,13 @@ export async function linkChannel(projectId: string, c: { channel_id: string; na
 }
 
 /** Unlinks a related channel; it's remembered so discovery won't link it again. */
-export async function unlinkChannel(channelId: string) {
-  await (await db()).execute("UPDATE project_channels SET role = 'excluded', origin = 'user' WHERE channel_id = $1 AND role = 'related'", [
-    channelId,
-  ]);
+/** Unlinks one of a project's related channels. False if it isn't one (its main channel, or another project's). */
+export async function unlinkChannel(channelId: string, projectId: string): Promise<boolean> {
+  const { rowsAffected } = await (await db()).execute(
+    "UPDATE project_channels SET role = 'excluded', origin = 'user' WHERE channel_id = $1 AND project_id = $2 AND role = 'related'",
+    [channelId, projectId],
+  );
+  return rowsAffected > 0;
 }
 
 export async function setProjectState(id: string, state: "tracked" | "ignored") {
@@ -466,13 +495,38 @@ export async function listManualTasks(): Promise<ManualTask[]> {
   return (await db()).select<ManualTask[]>("SELECT * FROM manual_tasks ORDER BY created_at");
 }
 
-export async function addManualTask(title: string, projectId: string | null = null) {
-  await (await db()).execute("INSERT INTO manual_tasks (id, title, project_id, created_at) VALUES ($1, $2, $3, $4)", [
+export async function addManualTask(title: string, projectId: string | null = null, description: string | null = null) {
+  await (await db()).execute("INSERT INTO manual_tasks (id, title, project_id, created_at, description) VALUES ($1, $2, $3, $4, $5)", [
     `manual:${crypto.randomUUID()}`,
     title,
     projectId,
     nowIso(),
+    description,
   ]);
+}
+
+/** The user's own notes on tasks they added, as typed, by task id, kept when a short title replaced them. */
+export async function getTaskBriefs(): Promise<Record<string, string>> {
+  try {
+    return JSON.parse((await getSetting("task_briefs")) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Gives a task added as a detailed note its short title, keeping what the user typed as its brief
+ * (plans and sessions are given it word for word). Only if the title is still `original`, the one
+ * the assessment read: an edit made meanwhile is the user's and stays. The first brief is kept, so
+ * a later re-assessment can't replace the user's note with an earlier short title.
+ */
+export async function retitleManualTask(id: string, title: string, original: string) {
+  const { rowsAffected } = await (await db()).execute("UPDATE manual_tasks SET title = $1 WHERE id = $2 AND title = $3", [title, id, original]);
+  if (!rowsAffected) return;
+  const briefs = await getTaskBriefs();
+  if (briefs[id]) return;
+  briefs[id] = original;
+  await setSetting("task_briefs", JSON.stringify(briefs));
 }
 
 export async function updateManualTask(id: string, fields: { title: string; description: string | null }) {

@@ -9,3 +9,6 @@ export const TERMINAL = isWindows ? "PowerShell" : "Terminal";
 
 /** The one-line Claude Code installer for this platform. */
 export const INSTALL_CLAUDE = isWindows ? "irm https://claude.ai/install.ps1 | iex" : "curl -fsSL https://claude.ai/install.sh | bash";
+
+/** Signs Claude Code in with a Claude account (not an API key), from a terminal. */
+export const LOGIN_CLAUDE = "claude auth login --claudeai";

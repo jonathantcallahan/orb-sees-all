@@ -18,7 +18,19 @@ describe("setup checks", () => {
     ].join("\n");
     const checks = connectorChecks(findInit(stdout)!.mcp_servers!);
     const state = Object.fromEntries(checks.map((c) => [c.id, c.state]));
-    expect(state).toEqual({ slack: "connected", gmail: "needs_auth", calendar: "missing", drive: "missing", jira: "failed" });
+    expect(state).toEqual({
+      slack: "connected",
+      gmail: "needs_auth",
+      calendar: "missing",
+      drive: "missing",
+      docs: "missing",
+      sheets: "missing",
+      slides: "missing",
+      claude_docs: "missing",
+      zoom: "missing",
+      amplitude: "missing",
+      jira: "failed",
+    });
     expect(checks.find((c) => c.id === "jira")?.rawStatus).toBe("failed");
   });
 
@@ -78,6 +90,20 @@ describe("setup checks", () => {
       async () => ({ code: 0, stdout: init, stderr: "" }),
     );
     expect(report.noClaudeAi).toBe(true);
+  });
+
+  it("treats a Claude account with no connectors added as the connectors step, not a sign-in problem", async () => {
+    const init = JSON.stringify({ type: "system", subtype: "init", mcp_servers: [] });
+    const report = await runSetupChecks(
+      () => {},
+      async (_program, args) =>
+        args[0] === "--version"
+          ? { code: 0, stdout: "2.1.311\n", stderr: "" }
+          : { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "" },
+      async () => ({ code: 0, stdout: init, stderr: "" }),
+    );
+    expect(report.noClaudeAi).toBe(false);
+    expect(report.connectors?.filter((c) => c.required).every((c) => c.state === "missing")).toBe(true);
   });
 
   it("looks again while a needed connector is still connecting", async () => {

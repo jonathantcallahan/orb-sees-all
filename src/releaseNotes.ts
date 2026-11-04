@@ -11,6 +11,21 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.7",
+    date: "2026-11-03",
+    notes: [
+      "A simpler layout: the detail view is the only view, with the calendar's times in the rail, a calendar that scrolls on its own and drifts back to now, and Ephedra as the default orb.",
+      "Setup walks you through every step, with one-click and copy-paste options for installing Claude Code, signing in and connecting tools, and notices on its own when each is done.",
+      "Tasks you type as a detailed note get a short title, with your note kept for planning. Time estimates count only your own hands-on time.",
+      "A task's chat opens beside it in place of All tasks. Tasks that need you show a Human status, and Open in chat is always there.",
+      "The Demian chat can set a project's status, mark or double check its items and unlink channels. Applied learnings move to Settings.",
+      "Claude can read Zoom meetings and Amplitude.",
+      "Ask why after a change can be dismissed, asked less often, or set in Settings.",
+      "Ephedra ripples when you finish a task. Everything loading shows its steps at the bottom of the window.",
+      "Fixes: lost task notes, chat panes left blank, double-created tasks, group DMs shown as channels and duplicated decisions.",
+    ],
+  },
+  {
     version: "0.6.6",
     date: "2026-11-02",
     notes: [
