@@ -248,3 +248,14 @@ describe("where a message goes", () => {
     expect(sendDestination({ to: "#launch-team" })).toBe("#launch-team");
   });
 });
+
+describe("a chat adopted as a task's", () => {
+  it("gives the steps and how to report them, hidden from the chat", async () => {
+    const { adoptAsTaskNote } = await import("./openInClaude");
+    const { withoutOrbNotes } = await import("./sessions");
+    const note = adoptAsTaskNote("Reply to Sam", ["Read the thread", "[Me] Send the reply"]);
+    expect(note).toContain("1. Read the thread");
+    expect(note).toContain("[orb] step N done");
+    expect(withoutOrbNotes(`Carry on\n\n${note}`)).toBe("Carry on");
+  });
+});

@@ -770,11 +770,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
-/* Each step on one line: its text cut short with "…", so a Human tag after it always fits. */
-.plan-outline-steps li > .hover-tip-anchor { flex: 1; min-width: 0; display: flex; }
-.plan-outline-steps .step-line { display: flex; align-items: baseline; min-width: 0; }
-.plan-outline-steps .step-line > .clip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-outline-steps .step-line > .step-by { flex-shrink: 0; }
+/* Each step wraps to as many lines as it needs. */
+.plan-outline-steps li > .hover-tip-anchor { flex: 1; min-width: 0; }
+.plan-outline-steps .step-line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.plan-outline-steps li > .hover-tip-anchor > .step-line { display: block; }
 .step-circle { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
 .step-circle.done { color: var(--green); }
 .step-circle.skipped { color: var(--muted); opacity: 0.7; }
@@ -786,14 +785,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
 .plan-outline-steps li.step-skipped > .hover-tip-anchor > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); }
+/* Your own steps: an orange circle in place of a Human tag. */
+.step-circle.human { color: var(--amber); }
 .step-circle.started { color: var(--accent); animation: step-turn 2.4s linear infinite; }
 @keyframes step-turn { to { transform: rotate(360deg); } }
 .plan-outline-steps li.step-done > .hover-tip-anchor > .small { color: var(--muted); }
-.step-by { margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--grey-bg); color: var(--muted); }
-.step-by.claude { color: var(--accent); }
-/* The step holding the task up right now (waiting on you) says Human in yellow while the card is
-   hovered, like the Human status badge; your steps still to come say it in gray. */
-.card:hover .plan-outline-steps .step-by.you.now { color: var(--amber); background: var(--amber-bg); }
 
 /* Plan panel actions: the Claude-style approve button, then text links */
 .plan-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
@@ -945,6 +941,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Badges stay gray until you hover their card, so color draws the eye only where you're looking. */
 .card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { transition: filter 0.15s ease; }
 .card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { filter: grayscale(1); }
+/* At rest every priority reads in the same grey, so none looks heavier than the others (brighter text renders bolder); hovering brings their colors back. */
+.card:not(:hover) .badge.priority:not(.blocking) { color: var(--muted); opacity: 1; }
 
 /* Double check follows More / Edit / Show links on the left, and appears when you hover the card. */
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }

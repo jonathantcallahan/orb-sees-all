@@ -462,7 +462,8 @@ export function TaskColumn({
   );
   // A chat whose task has left the board (dismissed, merged, done elsewhere) has no card to show it,
   // so the dock gives All tasks back rather than staying blank.
-  const ownerShown = !chatOwner || planned.some((t) => t.id === chatOwner.id) || allTasks.some((t) => t.id === chatOwner.id);
+  // What's actually shown: All tasks hides some (done ones, by the filters), and a hidden card draws no chat.
+  const ownerShown = !chatOwner || planned.some((t) => t.id === chatOwner.id) || keep(allTasks).some((t) => t.id === chatOwner.id);
   useEffect(() => {
     if (!ownerShown) setChatOwner(null);
   }, [ownerShown]);

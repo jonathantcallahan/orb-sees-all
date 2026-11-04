@@ -65,6 +65,20 @@ export function sessionPrompt(task: SessionTask, plan: TaskPlan | null, quick?: 
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
 }
 
+/**
+ * A note for a chat that began as something else (a Draft response, an Explain) and is now a task's
+ * chat in the planner: the task's numbered steps and how to report them, so the card follows its
+ * progress. Added to the user's next message as an Orb note (the chat doesn't show it).
+ */
+export function adoptAsTaskNote(title: string, steps: string[]): string {
+  return [
+    `(From Orb: this chat is now the task "${title}" in my planner.`,
+    ...(steps.length ? ["Its steps, numbered as I track them:", ...steps.map((st, i) => `${i + 1}. ${st}`)] : []),
+    ...progressInstructions(),
+    "Report where each step stands now (done, skipped or waiting), revising the plan if this conversation changed it, then answer my message.)",
+  ].join("\n");
+}
+
 /** First line of every session Orb opens; Orb searches transcripts for it. */
 export function sessionMarker(taskId: string): string {
   return `Orb task: ${taskId}`;
@@ -228,7 +242,7 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s linked channels (not its main one).',
     '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
     '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
-    '- {"type": "add_task", "title": "...", "project_id": "C111" or null}: a new task of my own.',
+    '- {"type": "add_task", "title": "...", "project_id": "C111" or null, "description": "<what you found, with links>" or null, "today": true or null, "status": "in_progress" or null, "priority": "high" or null}: a new task of my own. A new task has no id until it\'s applied, so set Today, status and priority here, in the same card, rather than in separate ones.',
     '- {"type": "plan_today", "task_id": "<id from my task list>", "title": "<its title>", "today": true}: put one of my existing tasks in Today\'s tasks (today false takes it off). When I ask whether I have a task about something, find it in my task list (match on meaning, not just words), tell me which, and propose this if I want it today.',
     '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "done"}',
     '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',

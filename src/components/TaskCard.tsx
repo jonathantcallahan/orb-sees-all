@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
-import { claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
+import { adoptAsTaskNote, claudeSessionUrl, discussPrompt, resumeSessionUrl, sessionPrompt, startPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, markCorrectionApplied, markNotDuplicate, mergeTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { approveDiscussedPlan, assessPendingTasks, checkTask, continueTaskSession, discussTaskPlan, planTask, recheckSessionSteps, sendHandoff, startTaskSession } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
@@ -367,9 +367,9 @@ const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)"
  * A plan step's marker: dashed when not started, turning while in progress, amber and still while waiting on you,
  * checked when done, a red bar when blocked on someone else, struck through when skipped.
  */
-function StepCircle({ state }: { state?: StepState }) {
+function StepCircle({ state, human = false }: { state?: StepState; human?: boolean }) {
   return (
-    <svg className={`step-circle${state ? ` ${state}` : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+    <svg className={`step-circle${state ? ` ${state}` : ""}${human ? " human" : ""}`} width="12" height="12" viewBox="0 0 12 12" aria-hidden>
       {state === "skipped" ? (
         <>
           <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.3" />
@@ -477,28 +477,22 @@ function PlanOutline({
         <ol className="plan-outline-steps">
           {steps.map((step, i) => (
             <li key={i} className={[step.by && `by-${step.by}`, step.progress && `step-${step.progress.state}`].filter(Boolean).join(" ") || undefined}>
-              {onMarkDone && step.progress?.state !== "done" && step.progress?.state !== "skipped" ? (
-                <button className="step-circle-button" onClick={() => onMarkDone(i)} aria-label={`Mark "${step.title}" done`}>
-                  <StepCircle state={step.progress?.state} />
-                </button>
-              ) : (
-                <StepCircle state={step.progress?.state} />
-              )}
-              {/* One line each, cut short with its Human tag kept after it; hovering shows the whole step
-                  (and why, for a blocked one). */}
-              <HoverTip
-                text={step.progress?.state === "blocked" ? `${step.title}${step.progress.note ? ` (blocked: ${step.progress.note})` : " (blocked)"}` : step.title}
-                whenClipped={step.progress?.state !== "blocked"}
-              >
-                <span className="small step-line">
-                  <span className="clip-text">{step.title}</span>
-                  {/* "Human" on the step waiting on you now (yellow on hover), whoever's step it is, and
-                      on your own steps still to come (gray). */}
-                  {(step.progress?.state === "waiting" ||
-                    (step.by === "you" && step.progress?.state !== "done" && step.progress?.state !== "skipped" && step.progress?.state !== "blocked")) && (
-                    <span className={`step-by you${step.progress?.state === "waiting" ? " now" : ""}`}>Human</span>
-                  )}
-                </span>
+              {(() => {
+                // A step that's yours (or waiting on you) has an orange circle, until it's done.
+                const settled = step.progress?.state === "done" || step.progress?.state === "skipped" || step.progress?.state === "blocked";
+                const human = !settled && (step.by === "you" || step.progress?.state === "waiting");
+                const circle = <StepCircle state={step.progress?.state} human={human} />;
+                return onMarkDone && step.progress?.state !== "done" && step.progress?.state !== "skipped" ? (
+                  <button className="step-circle-button" onClick={() => onMarkDone(i)} aria-label={`Mark "${step.title}" done`}>
+                    {circle}
+                  </button>
+                ) : (
+                  circle
+                );
+              })()}
+              {/* Each step wraps to as many lines as it needs; a blocked one says why on hover. */}
+              <HoverTip text={step.progress?.state === "blocked" ? `${step.title}${step.progress.note ? ` (blocked: ${step.progress.note})` : " (blocked)"}` : null}>
+                <span className="small step-line">{step.title}</span>
               </HoverTip>
               {step.links && step.links.length > 0 && <LinkChips links={step.links} />}
               {onRemind && step.progress?.state === "blocked" && (
@@ -1691,6 +1685,16 @@ export function TaskCard({
       <SessionChat
         taskId={task.id}
         title={task.title}
+        // A chat that began as something else (its Draft response) learns the task's steps with your next message.
+        onSend={
+          sessionLink.topic
+            ? (message) => {
+                db.updateSessionLink(task.id, { topic: false })
+                  .then(() => continueTaskSession(task.id, `${message}\n\n${adoptAsTaskNote(task.title, outlineSteps.map((st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`))}`))
+                  .then(onChange, onChange);
+              }
+            : undefined
+        }
         hideSteps={!!chatDock}
         ask={chatAsk}
         messages={progress?.messages ?? []}

@@ -24,3 +24,10 @@ describe("action cards", () => {
     expect(describeAction(a, project, channel, items)).toMatch(/isn't on "Store" any more/);
   });
 });
+
+describe("adding a task from the chat", () => {
+  it("describes Today, status and priority on the card", () => {
+    const a = { type: "add_task", title: "Get codes", today: true, status: "in_progress", priority: "high" } as const;
+    expect(describeAction(a, project, channel, items)).toBe('Add the task "Get codes", in Today\'s tasks, in progress, high priority');
+  });
+});

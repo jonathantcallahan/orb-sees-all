@@ -495,14 +495,17 @@ export async function listManualTasks(): Promise<ManualTask[]> {
   return (await db()).select<ManualTask[]>("SELECT * FROM manual_tasks ORDER BY created_at");
 }
 
-export async function addManualTask(title: string, projectId: string | null = null, description: string | null = null) {
+/** Adds a task of the user's own; returns its id. */
+export async function addManualTask(title: string, projectId: string | null = null, description: string | null = null): Promise<string> {
+  const id = `manual:${crypto.randomUUID()}`;
   await (await db()).execute("INSERT INTO manual_tasks (id, title, project_id, created_at, description) VALUES ($1, $2, $3, $4, $5)", [
-    `manual:${crypto.randomUUID()}`,
+    id,
     title,
     projectId,
     nowIso(),
     description,
   ]);
+  return id;
 }
 
 /** The user's own notes on tasks they added, as typed, by task id, kept when a short title replaced them. */

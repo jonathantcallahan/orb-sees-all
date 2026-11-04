@@ -326,7 +326,16 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("unlink_channel"), project_id: z.string(), channel_id: z.string() }),
   z.object({ type: z.literal("add_note"), text: z.string() }),
   z.object({ type: z.literal("update_profile"), text: z.string() }),
-  z.object({ type: z.literal("add_task"), title: z.string(), project_id: z.string().nullish() }),
+  /** A new task of the user's own; it can go straight into Today with a status and priority, since it has no id to name yet. */
+  z.object({
+    type: z.literal("add_task"),
+    title: z.string(),
+    project_id: z.string().nullish(),
+    description: z.string().nullish(),
+    today: z.boolean().nullish(),
+    status: z.enum(["todo", "in_progress", "waiting"]).nullish(),
+    priority: z.enum(["critical", "high", "medium", "low"]).nullish(),
+  }),
   /** Plans an existing task for today (Today's tasks), or takes it off. */
   z.object({ type: z.literal("plan_today"), task_id: z.string(), title: z.string().nullish(), today: z.boolean().default(true) }),
   z.object({ type: z.literal("set_task_status"), task_id: z.string(), title: z.string().nullish(), status: z.enum(["todo", "in_progress", "waiting", "done"]) }),

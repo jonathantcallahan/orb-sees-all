@@ -45,6 +45,12 @@ export interface SessionLink {
   recheck?: StepRecheckResult;
   /** The transcript state ("reports:messages") last re-checked, so the same drift isn't re-checked twice. */
   recheckedKey?: string;
+  /**
+   * Started as a chat about something else (an update to explain, a message to reply to), so it
+   * hasn't been given a task's steps or how to report them. A task that shares its key (an inbox
+   * item that's also a task) gives it them with your next message there.
+   */
+  topic?: boolean;
   /** The session is talking the plan through with the user (Discuss plan) and hasn't started the work. */
   discussing?: boolean;
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */

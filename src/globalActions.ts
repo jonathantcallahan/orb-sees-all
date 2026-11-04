@@ -59,7 +59,14 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
     case "update_profile":
       return `Update how Demian describes you: ${a.text}`;
     case "add_task":
-      return `Add the task "${a.title}"${a.project_id ? ` to "${project(a.project_id)}"` : ""}`;
+      return [
+        `Add the task "${a.title}"${a.project_id ? ` to "${project(a.project_id)}"` : ""}`,
+        a.today ? "in Today's tasks" : "",
+        a.status && a.status !== "todo" ? { in_progress: "in progress", waiting: "waiting" }[a.status] : "",
+        a.priority ? `${a.priority} priority` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
     case "plan_today":
       return a.today ? `Move "${a.title ?? "this task"}" into Today's tasks` : `Take "${a.title ?? "this task"}" off Today's tasks`;
     case "set_task_status":
@@ -200,10 +207,14 @@ async function apply(a: GlobalAction): Promise<string> {
       setUserProfile(a.text);
       quiet(refreshReading());
       return "Updated how Demian describes you; the daily briefing is being rebuilt.";
-    case "add_task":
-      await db.addManualTask(a.title, a.project_id ?? null);
+    case "add_task": {
+      const id = await db.addManualTask(a.title, a.project_id ?? null, a.description?.trim() || null);
+      if (a.today || a.status) await db.setTaskState(id, { ...(a.today ? { todayOn: localDate(new Date()) } : {}), ...(a.status ? { status: a.status } : {}) });
+      if (a.priority) await db.setPriorityOverride(id, a.priority);
       quiet(assessPendingTasks());
-      return `Added "${a.title}" to your tasks.`;
+      // Its id, so the chat can change it in later cards without waiting for the task list.
+      return `Added "${a.title}" to your tasks${a.today ? ", in Today's tasks" : ""} (id ${id}).`;
+    }
     case "plan_today":
       await db.setTaskState(a.task_id, { todayOn: a.today ? localDate(new Date()) : null });
       return a.today ? "It's in Today's tasks." : "It's off Today's tasks.";

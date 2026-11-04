@@ -581,6 +581,11 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     ...(calendar?.day.events ?? []).flatMap((ev) => ev.prep.map((p) => ({ id: p.id, title: p.title, where: `prep for ${ev.title}`, gist: null }))),
   ].filter((t) => open(t.id));
   const today = localDate(new Date());
+  // Past the cap, the ones least likely to come up go: Today's tasks first, then my own (newest
+  // first, so one just added is always there), then the rest.
+  const added = new Map(manual.map((t) => [t.id, t.created_at ?? ""]));
+  const rank = (t: (typeof tasks)[number]) => (states.get(t.id)?.todayOn === today ? 0 : added.has(t.id) ? 1 : 2);
+  const byRelevance = (list: typeof tasks) => [...list].sort((a, b) => rank(a) - rank(b) || (added.get(b.id) ?? "").localeCompare(added.get(a.id) ?? ""));
   const taskLine = (t: (typeof tasks)[number]) => {
     const st = states.get(t.id);
     const gist = t.gist ? ` — ${t.gist.replace(/\s+/g, " ").slice(0, 120)}` : "";
@@ -592,7 +597,7 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     notes.length ? `Corrections I've already given:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
     `Projects (tracked ones are on the board; suggested and ignored ones aren't):\n${projectLines.join("\n") || "(none)"}`,
     reading ? `Today's briefing: ${reading.text}` : "",
-    `My open tasks (use these ids in task changes):\n${tasks.slice(0, 120).map(taskLine).join("\n") || "(none)"}`,
+    `My open tasks (use these ids in task changes):\n${byRelevance(tasks).slice(0, 120).map(taskLine).join("\n") || "(none)"}`,
     link?.applied && Object.keys(link.applied).length
       ? `Changes you proposed that I've applied (the rest I haven't, or turned down):\n${Object.values(link.applied).map((a) => `- ${a.summary}. ${a.result}`).join("\n")}`
       : "",
@@ -667,6 +672,7 @@ export async function discussTaskPlan(taskId: string, prompt: string, onTurn: ()
  */
 export async function startChatSession(key: string, prompt: string, onTurn: () => void): Promise<void> {
   await linkSession(key);
+  await db.updateSessionLink(key, { topic: true });
   bump();
   runTaskSession(key, prompt).then(onTurn, onTurn);
 }

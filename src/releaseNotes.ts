@@ -11,6 +11,17 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.9",
+    date: "2026-11-03",
+    notes: [
+      "Plan steps show in full, and your own steps have an orange circle.",
+      "A Draft response chat that's also a task now follows the task's steps and ticks them off.",
+      "The Demian chat can add a task straight into Today, with its status and priority.",
+      "Priority badges look the same weight until you hover a card.",
+      "Fixes: All tasks coming back after a task finishes in its chat, and the Demian chat missing tasks you just added.",
+    ],
+  },
+  {
     version: "0.6.8",
     date: "2026-11-03",
     notes: ["Settings shows everything Demian has learned in one list: what you told the chat and the lessons from your corrections."],
