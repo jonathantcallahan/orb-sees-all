@@ -143,6 +143,7 @@ export function TaskColumn({
   taskChecks,
   sessionLinks,
   priorityOverrides,
+  projectOverrides = {},
   taskAliases,
   refinedDescriptions,
   taskBriefs = {},
@@ -182,6 +183,8 @@ export function TaskColumn({
   sessionLinks: Record<string, SessionLink>;
   /** Priorities the user set by hand, by task id. */
   priorityOverrides: Record<string, Priority>;
+  /** Projects the user moved tasks to, by task id: shown under that project instead of where they were found. */
+  projectOverrides?: Record<string, string>;
   /** Other ids for the same tasks, mapped to their canonical ids. */
   taskAliases: Aliases;
   /** Descriptions refreshes brought up to date, by canonical id; the user's own edits win. */
@@ -252,25 +255,37 @@ export function TaskColumn({
   };
   const isRecommended = (id: string) => recommended.has(id) || recommended.has(canonicalId(id, taskAliases));
 
-  // Slack and email items share one inbox; dated items first, soonest first.
+  // The project a task was moved to (see setTaskProject), if it's still on the board.
+  const movedTo = (id: string) => {
+    const to = projectOverrides[canonicalId(id, taskAliases)] ?? projectOverrides[id];
+    return to ? projects.find((p) => p.channel_id === to) : undefined;
+  };
+  const projectFields = (p: Project) => ({ project: { id: p.channel_id, name: projectName(p) }, projectPriority: p.snapshot?.priority?.level, repoFolder: p.local_repos[0] ?? null });
+
+  // Slack and email items share one inbox; dated items first, soonest first. One you filed under a
+  // project shows its badge.
   const rawInbox = [...adhoc.tasks]
     .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
-    .map((t) => ({ ...t, description: editedDescription(t.id) ?? t.description, recommended: isRecommended(t.id) }));
+    .map((t) => {
+      const to = movedTo(t.id);
+      return { ...t, ...(to ? projectFields(to) : {}), description: editedDescription(t.id) ?? t.description, recommended: isRecommended(t.id) };
+    });
 
-  // The user's tasks from project snapshots: blockers first, then by due date.
-  const rawProjects = (filterProject ? [filterProject] : projects).flatMap((p) => {
-    const blocking = new Set(myBlockingIds(p.snapshot?.blockers, taskStates));
-    return (p.snapshot?.my_tasks ?? []).map((t) => ({
-      ...t,
-      source: "project" as const,
-      project: { id: p.channel_id, name: projectName(p) },
-      description: editedDescription(t.id) ?? t.description,
-      blocking: blocking.has(t.id),
-      recommended: isRecommended(t.id),
-      projectPriority: p.snapshot?.priority?.level,
-      repoFolder: p.local_repos[0] ?? null,
-    }));
-  });
+  // The user's tasks from project snapshots, under the project you moved one to if you did: blockers
+  // first, then by due date.
+  const rawProjects = projects
+    .flatMap((p) => {
+      const blocking = new Set(myBlockingIds(p.snapshot?.blockers, taskStates));
+      return (p.snapshot?.my_tasks ?? []).map((t) => ({
+        ...t,
+        source: "project" as const,
+        ...projectFields(movedTo(t.id) ?? p),
+        description: editedDescription(t.id) ?? t.description,
+        blocking: blocking.has(t.id),
+        recommended: isRecommended(t.id),
+      }));
+    })
+    .filter((t) => !filterProject || t.project.id === filterProject.channel_id);
   rawProjects.sort((a, b) => Number(b.blocking) - Number(a.blocking) || (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
   const rawMine = manual

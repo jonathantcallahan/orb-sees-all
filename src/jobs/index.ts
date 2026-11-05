@@ -1,10 +1,11 @@
+import { invoke } from "@tauri-apps/api/core";
 import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, projectStatus, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
-import { createDocPrompt, createEventPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
-import { approvedPlanMessage, globalChatPrompt } from "../openInClaude";
-import { linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
+import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
+import { codeRequests, currentSessionSteps, linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
@@ -13,7 +14,7 @@ import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, Task
 import { blockerKey, longTitled, stateOf } from "../tasks";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
-import { codeFor, codeNote, githubReposOf, projectOfTask } from "../code";
+import { codeFor, codeNote, githubReposOf, projectOfTask, resolveCheckout, type CodeSource } from "../code";
 import { acceptedMerges } from "../duplicates";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
@@ -576,6 +577,29 @@ const WATCH_CHAT_CONTEXT = [
   "No [Me] markers and no task-style steps. My planner takes that list as the topic's actions and hides the block, so say in a sentence what changed.",
 ].join(" ");
 
+/**
+ * Given on every turn of a task's chat: the project it's filed under, the projects it could move
+ * to, and how to propose the move (a card the user applies), plus what came of earlier ones.
+ */
+async function taskProjectNote(own: db.Project | null, link: SessionLink | undefined): Promise<string> {
+  const tracked = (await db.listProjects()).filter((p) => p.state === "tracked");
+  const applied = Object.values(link?.applied ?? {});
+  return [
+    own ? `My planner files this task under the project "${projectName(own)}" [id ${own.channel_id}].` : "My planner doesn't file this task under any project.",
+    `If I say it belongs to a different project, propose the move as its own block, which my planner shows me as a card to apply:\n[orb] action\n{"type": "set_task_project", "project_id": "<id from the list below>"}\n[orb] end\nThat's the only kind of change to propose here. Use an id from this list, and ask me if more than one could fit:\n${tracked.map((p) => `- ${projectName(p)} [id ${p.channel_id}]`).join("\n")}`,
+    applied.length ? `Changes you proposed that I applied: ${applied.map((a) => `${a.summary}. ${a.result}`).join(" ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Given on every turn of a task's chat, so the steps on its card follow the conversation: a session
+ * left to judge it on its own often carries on with work the steps don't list.
+ */
+const PLAN_REMINDER =
+  "If what I just said changes the work (it asks for something the steps don't cover, drops or changes a step, or moves one between us), restate the whole plan as an [orb] plan block before you carry on, finished steps included, and number your reports against it.";
+
 /** Tasks per Claude call when assessing the user's own tasks. */
 const ASSESS_BATCH = 12;
 
@@ -757,10 +781,18 @@ const PREFERENCE_REMINDER =
 const EVENT_ASK = /\b(schedul\w*|invite|meeting|calendar|book (a|some) time|set up a (call|meeting|sync))\b/i;
 const EVENT_REMINDER =
   ORB_NOTE + " you can read my calendar, find a time that's free for every attendee with suggest_time (look up their emails in Slack first, and never pick a time from my calendar alone), and have me create events: write the invite as a block, a line `[orb] event: <title>` (or `[orb] event step N: <title>`), then `when:`, `who:` and optionally `meet: yes` lines, a blank line, the description, and `[orb] end`. I show it to the user to review, create it and send the invites. Don't call create_event yourself, and don't say you lack calendar access.)";
+/** A message that asks for a Jira ticket. */
+const TICKET_ASK = /\b(jira|tickets?)\b/i;
+/** Said with such a message, every time: a session that once decided it can't file tickets keeps saying so otherwise. */
+const TICKET_REMINDER =
+  ORB_NOTE + " you can file Jira tickets here, through me. Write the ticket as a block, a line `[orb] ticket: <summary>` (or `[orb] ticket step N: <summary>` for a plan step), then `project:`, `type:` and, when they apply, `epic:`, `component:`, `priority:`, `labels:` and `links:` lines, a blank line, the description, and `[orb] end`. I show it to the user to review and file it in Jira as them, then send you its link. Don't call any Jira tool that creates or changes issues, and don't say you can't file tickets or that it's the user's step; if you said so earlier, that was wrong.)";
+
 const DOC_REMINDER =
   ORB_NOTE + " you can make Google Docs here, through me. Write the doc as a block, a line `[orb] doc: <title>` (or `[orb] doc step N: <title>` for a plan step), then its content in Markdown, then `[orb] end`. I show it to the user to review and create it in their Drive, then send you its link. Don't call any Drive or Docs tool, and don't say you can't make docs or that it needs a permission; if you said so earlier, that was wrong.)";
 
-const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead];
+// A task's chat also gets Amplitude's experiment and flag tools, which can change them too: the user
+// is in the conversation, and SESSION_DISPLAY says to change one only when they ask.
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead, ...TOOLS.amplitudeExperiments];
 
 /**
  * Runs the next turn of a task's working session in the background: the first turn from the start
@@ -773,10 +805,17 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
       const link = (await db.getSessionLinks())[taskId];
       await db.updateSessionLink(taskId, { lastError: null });
       try {
-        // After a re-check, the session sees the list Orb shows, so its step numbers match it.
-        const steps = link?.recheck?.plan
+        const global = taskId.startsWith("global:");
+        const watched = taskId.startsWith(WATCH_CHAT) ? await db.getWatchedTopic(taskId.slice(WATCH_CHAT.length)) : null;
+        /** A task's own chat, with a plan to keep current (not the Demian chat, a watched topic, or a chat about something else). */
+        const taskChat = !global && !watched && !link?.topic;
+        // Once the plan has moved on from the opening prompt's (the session restated it, or Orb
+        // re-checked it), the session sees the list the card shows, with where each step stands, so
+        // its step numbers match it.
+        const shown = taskChat && link ? await currentSessionSteps(link).catch(() => null) : null;
+        const steps = shown?.plan
           .map((st, i) => {
-            const s = link.recheck!.states[i + 1];
+            const s = shown.steps[i + 1];
             return `${i + 1}. ${st.by === "you" ? "[Me] " : ""}${st.title} (${s ? s.state : "not started"})`;
           })
           .join("\n");
@@ -786,8 +825,6 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         // already on hand (it spans them all, so it doesn't clone).
         // A task filed under no project gets the same as the Demian chat, so a question only the code
         // answers never finds it missing.
-        const global = taskId.startsWith("global:");
-        const watched = taskId.startsWith(WATCH_CHAT) ? await db.getWatchedTopic(taskId.slice(WATCH_CHAT.length)) : null;
         const own = global
           ? null
           : watched
@@ -795,15 +832,26 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
             : await projectOfTask(taskId);
         const everyProject = !own;
         const codeProjects = everyProject ? (await db.listProjects()).filter((p) => p.state === "tracked") : [own];
-        const code = codeProjects.length ? await codeFor(codeProjects, !everyProject, everyProject ? 12 : 4) : [];
+        const projectCode = codeProjects.length ? await codeFor(codeProjects, !everyProject, everyProject ? 12 : 4) : [];
+        // Plus code the session asked for along the way ("[orb] code …"), while it's still on disk.
+        const onDisk = link?.code?.length ? await invoke<string[]>("existing_dirs", { paths: link.code.map((c) => c.dir) }).catch(() => []) : [];
+        const code = [...projectCode, ...(link?.code ?? []).filter((c) => onDisk.includes(c.dir) && !projectCode.some((p) => p.dir === c.dir))];
         const context = [
           taskId.startsWith("global:")
             ? await globalContext(link)
             : watched
               ? WATCH_CHAT_CONTEXT
-              : steps
-              ? `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
-              : "",
+              : [
+                  taskChat ? await taskProjectNote(own, link) : "",
+                  steps
+                    ? shown?.rechecked
+                      ? `I re-checked your steps against our conversation, so my planner's list, and its step numbers, may differ from the ones you've been using. From now on, number every [orb] report against this list, not your earlier one:\n${steps}`
+                      : `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
+                    : "",
+                  taskChat ? PLAN_REMINDER : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
           lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "",
           codeNote(code, everyProject ? [] : codeProjects),
         ]
@@ -829,7 +877,7 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         };
         // Asked for a doc: say plainly how, every time. A session that once decided it can't make
         // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
-        const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
+        const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
         const turn = await runSessionTurn({ prompt: asked, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
           // transcript's copy arrives.
@@ -839,6 +887,10 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         });
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
         if (turn.error) throw new Error(turn.error);
+        // Code it asked to read: added for its next turns, and it's told so it carries on. That turn
+        // waits for this one to finish (see continueTaskSession), so it isn't awaited here.
+        const note = await addRequestedCode(taskId).catch(() => null);
+        if (note) void continueTaskSession(taskId, note).catch(() => {});
         return { value: undefined, costUsd: turn.costUsd };
       } catch (e) {
         await db.updateSessionLink(taskId, { lastError: (e as Error).message });
@@ -848,6 +900,41 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
   );
 }
 
+/**
+ * The code a session asked for ("[orb] code …"), or tried to read and was refused (its file tools
+ * only reach its own folders), that it hasn't been answered about: each found checkout is added to
+ * its code folders (see resolveCheckout), and the note to tell it comes back, or null when there's
+ * nothing new. A refused read counts as asking for the git checkout it's in, outside the folders
+ * macOS guards (see checkout_root): sessions don't reliably ask.
+ */
+async function addRequestedCode(taskId: string): Promise<string | null> {
+  const link = (await db.getSessionLinks())[taskId];
+  if (!link?.path) return null;
+  const { lines, blocked = [] } = await invoke<{ lines: string[]; blocked?: string[] }>("read_session_progress", { path: link.path });
+  const refused = await Promise.all(blocked.map((path) => invoke<string | null>("checkout_root", { path }).catch(() => null)));
+  const fresh = [...new Set([...codeRequests(lines), ...refused.filter((r): r is string => !!r)])].filter((ask) => !link.codeAsked?.includes(ask));
+  if (!fresh.length) return null;
+  const found: CodeSource[] = [];
+  const missing: string[] = [];
+  for (const ask of fresh) {
+    const source = await resolveCheckout(ask);
+    if (source) found.push(source);
+    else missing.push(ask);
+  }
+  const code = [...(link.code ?? []), ...found.filter((f) => !link.code?.some((c) => c.dir === f.dir))];
+  await db.updateSessionLink(taskId, { code, codeAsked: [...(link.codeAsked ?? []), ...fresh] });
+  return [
+    ORB_NOTE,
+    found.length ? `you can read ${found.map((f) => `${f.label} (${f.dir})`).join(", ")} now, read-only, with Read, Grep and Glob; reads there that were refused will work if you try them again.` : "",
+    missing.length
+      ? `I couldn't find ${missing.map((m) => `"${m}"`).join(", ")} as a code checkout on this computer or a GitHub repo I can copy. Ask me for it by its GitHub owner/name if you know it, or tell the user which repo you need so they can add it to a project in Settings.`
+      : "",
+    "Carry on where you left off.)",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** How many of a project's open blockers and active items the global chat's context lists. */
 const CONTEXT_ITEMS = 3;
 /** The same for a blocked or at-risk project. */
@@ -855,7 +942,7 @@ const CONTEXT_ITEMS_URGENT = 8;
 
 /** What the planner shows right now, for the global chat's next turn, so it works from current ids. */
 async function globalContext(link: SessionLink | undefined): Promise<string> {
-  const [projects, reading, adhoc, manual, states, profile, notes] = await Promise.all([
+  const [projects, reading, adhoc, manual, states, profile, notes, aliases, moved, sessions] = await Promise.all([
     db.listProjects(),
     db.getReading(),
     db.getAdhoc(),
@@ -863,6 +950,9 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     db.getTaskStates(),
     db.getSetting("user_profile"),
     db.getNotes(),
+    db.getTaskAliases(),
+    db.getProjectOverrides(),
+    db.getSessionLinks(),
   ]);
   const open = (id: string) => !["done"].includes(states.get(id)?.status ?? "todo") && !states.get(id)?.dismissed;
   const projectLines = projects
@@ -889,14 +979,27 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
       return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}. Code: ${repos.length ? repos.join(", ") : "none mapped"}${items.length ? `\n  Open: ${items.join("; ")}` : ""}`;
     });
   const calendar = await db.getCalendarDay(localDate(new Date()));
+  // Each task as its card shows it: one merged into another isn't listed on its own (its card is the
+  // other's), and one you moved shows under the project you moved it to.
+  const nameOf = (id: string | null | undefined) => {
+    const p = id ? projects.find((x) => x.channel_id === id) : undefined;
+    return p ? projectName(p) : null;
+  };
+  const filedIn = (id: string, found: string | null) => nameOf(moved[id]) ?? found;
   const tasks = [
     ...projects
       .filter((p) => p.state === "tracked")
-      .flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: projectName(p), gist: t.description }))),
-    ...adhoc.tasks.map((t) => ({ id: t.id, title: t.title, where: t.source, gist: t.description })),
-    ...manual.map((t) => ({ id: t.id, title: t.title, where: "added by me", gist: t.description })),
+      .flatMap((p) => (p.snapshot?.my_tasks ?? []).map((t) => ({ id: t.id, title: t.title, where: filedIn(t.id, projectName(p)) ?? projectName(p), gist: t.description }))),
+    ...adhoc.tasks.map((t) => ({ id: t.id, title: t.title, where: filedIn(t.id, null) ?? t.source, gist: t.description })),
+    ...manual.map((t) => ({ id: t.id, title: t.title, where: nameOf(t.project_id) ? `added by me, in ${nameOf(t.project_id)}` : "added by me", gist: t.description })),
     ...(calendar?.day.events ?? []).flatMap((ev) => ev.prep.map((p) => ({ id: p.id, title: p.title, where: `prep for ${ev.title}`, gist: null }))),
-  ].filter((t) => open(t.id));
+  ].filter((t) => !aliases.has(t.id) && open(t.id));
+  // What a task's own chat agreed its steps are (they can say more about it than its title).
+  const chatSteps = (id: string) => {
+    const s = sessions[id];
+    const steps = s?.recheck?.plan.map((st) => st.title) ?? s?.loggedPlan?.map((st) => st.replace(/^\[Me\]\s*/, ""));
+    return steps?.length ? ` Steps agreed in its chat: ${steps.join("; ").replace(/\s+/g, " ").slice(0, 400)}` : "";
+  };
   const today = localDate(new Date());
   // Past the cap, the ones least likely to come up go: Today's tasks first, then my own (newest
   // first, so one just added is always there), then the rest.
@@ -906,9 +1009,11 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
   const taskLine = (t: (typeof tasks)[number]) => {
     const st = states.get(t.id);
     const gist = t.gist ? ` — ${t.gist.replace(/\s+/g, " ").slice(0, 120)}` : "";
-    return `- [id ${t.id}] ${t.title} (${t.where}${st?.todayOn === today ? ", in Today's tasks" : ""}${st?.status && st.status !== "todo" ? `, ${st.status.replace("_", " ")}` : ""})${gist}`;
+    return `- [id ${t.id}] ${t.title} (${t.where}${st?.todayOn === today ? ", in Today's tasks" : ""}${st?.status && st.status !== "todo" ? `, ${st.status.replace("_", " ")}` : ""})${gist}${chatSteps(t.id)}`;
   };
   return [
+    // The current changes and rules, every turn: a chat open since before one was added still knows it.
+    `The changes you can propose, as [orb] action blocks (the current list, which replaces any earlier one):\n${GLOBAL_ACTION_DOCS}\n\n${GLOBAL_TASK_RULES}`,
     "What my planner shows right now:",
     `About me: ${profile?.trim() || "(not set)"}`,
     notes.length ? `Corrections I've already given:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
@@ -925,8 +1030,9 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
 }
 
 /**
- * Re-checks a working session's steps against its conversation when they've drifted (a report went
- * missing, or a decision changed the plan), and keeps the result: the card shows it, with the
+ * Re-checks a task chat's steps against its conversation when they may have drifted (a report went
+ * missing, a step was reported that the card doesn't have, or you said something the session didn't
+ * restate the plan for), and keeps the result: the card shows it, with the
  * session's later reports on top, and the session is shown the same list on its next turn so its
  * step numbers line up.
  */
@@ -935,6 +1041,8 @@ export function recheckSessionSteps(
   task: string,
   steps: { title: string; by: "claude" | "you" | null; progress?: StepProgress }[],
   progress: SessionProgress,
+  /** The list the session's own step numbers follow: the plan it last wrote, else the one it started with. */
+  sessionSteps: { title: string; by: "claude" | "you" | null }[] = steps,
 ): Promise<void> {
   const key = `${progress.reports ?? 0}:${progress.messages?.length ?? 0}`;
   return track(`recheck:${taskId}`, (status) =>
@@ -958,26 +1066,35 @@ export function recheckSessionSteps(
       data.steps.forEach((st, i) => {
         if (st.state !== "todo") states[i + 1] = st.note ? { state: st.state, note: st.note } : { state: st.state };
       });
-      if (plan.length) await db.updateSessionLink(taskId, { recheck: { plan, states, reports: progress.reports ?? 0 } });
+      if (plan.length) await db.updateSessionLink(taskId, { recheck: { plan, states, reports: progress.reports ?? 0, userMessages: progress.userMessages ?? 0 } });
+      // The card's list isn't the one the session numbers by (steps added, dropped, reworded or
+      // reordered since it last wrote its plan): the session restates it, so its step numbers match
+      // the card's from here on. Otherwise it goes on reporting, and handing over, against its own
+      // list, and a report or a sent message lands on the wrong step. Once per list, so a session
+      // that doesn't restate isn't asked again and again.
+      const line = (st: { title: string; by: string | null }) => `${st.by === "you" ? "[Me] " : ""}${st.title}`;
+      const shown = plan.map(line).join("\n");
+      const link = (await db.getSessionLinks())[taskId];
+      if (plan.length && shown !== sessionSteps.map(line).join("\n") && shown !== link?.alignAsked) {
+        await db.updateSessionLink(taskId, { alignAsked: shown });
+        const list = plan.map((st, i) => `${i + 1}. ${line(st)} (${states[i + 1]?.state ?? "not started"})`).join("\n");
+        void continueTaskSession(
+          taskId,
+          `${ORB_NOTE} I re-checked your steps against our conversation, and my planner now shows this list:\n${list}\nRestate it as your plan, an [orb] plan block with these steps in this order, and from now on number every report and hand-off against it. Hand over again, with its new step number, anything still waiting for the user to send or create. Then carry on where you left off without redoing finished work; if we're still talking the plan through, keep talking it through.)`,
+        ).catch(() => {});
+      }
       return { value: undefined, costUsd };
     }),
   );
 }
 
-/** Starts a working session for a task (Approve & start). */
-export async function startTaskSession(taskId: string, prompt: string): Promise<void> {
-  await linkSession(taskId);
-  bump();
-  return runTaskSession(taskId, prompt);
-}
-
 /**
- * Opens a task's session to talk the plan through first (Discuss plan). Resolves once the task is
- * linked, while Claude's opening turn runs on; `onTurn` hears when that turn ends.
+ * Opens a task's chat (Open in chat): the session talks the plan through, then carries it out once
+ * you tell it to go ahead there. Resolves once the task is linked, while Claude's opening turn runs
+ * on; `onTurn` hears when that turn ends.
  */
-export async function discussTaskPlan(taskId: string, prompt: string, onTurn: () => void): Promise<void> {
+export async function startTaskChat(taskId: string, prompt: string, onTurn: () => void): Promise<void> {
   await linkSession(taskId);
-  await db.updateSessionLink(taskId, { discussing: true });
   bump();
   runTaskSession(taskId, prompt).then(onTurn, onTurn);
 }
@@ -1010,13 +1127,6 @@ export async function startGlobalChat(key: string, message: string, onTurn: () =
   runTaskSession(key, globalChatPrompt(key, message)).then(onTurn, onTurn);
 }
 
-/** The user approved the plan they discussed: the same session starts the work, as agreed. */
-export async function approveDiscussedPlan(taskId: string): Promise<void> {
-  await db.updateSessionLink(taskId, { discussing: false });
-  bump();
-  return continueTaskSession(taskId, approvedPlanMessage());
-}
-
 /** Continues a task's working session with the user's answer to what it asked. */
 export async function continueTaskSession(taskId: string, message: string): Promise<void> {
   // One turn at a time: a turn still running would swallow this one (the queue dedupes by key), so wait it out.
@@ -1034,41 +1144,48 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
     logged("send", taskId, async () => {
       const doc = send.kind === "doc";
       const event = send.kind === "event";
-      const thread = doc || event ? null : slackThread(send.to);
+      const ticket = send.kind === "ticket";
+      const thread = doc || event || ticket ? null : slackThread(send.to);
       const { data, costUsd } = await runClaude({
-        onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : "Posting to Slack") : s),
+        onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : ticket ? "Filing the ticket" : "Posting to Slack") : s),
         prompt: doc
           ? createDocPrompt(send.to, text)
           : event
             ? createEventPrompt(send.to, text)
-            : thread
-              ? sendReplyPrompt(thread.channelId, thread.threadTs, text)
-              : sendToChannelPrompt(send.to, text),
+            : ticket
+              ? createTicketPrompt(send.to, text)
+              : thread
+                ? sendReplyPrompt(thread.channelId, thread.threadTs, text)
+                : sendToChannelPrompt(send.to, text),
         schema: SentMessage,
         // A channel by name needs looking up first.
-        tools: doc ? TOOLS.docCreate : event ? TOOLS.eventCreate : thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
+        tools: doc ? TOOLS.docCreate : event ? TOOLS.eventCreate : ticket ? TOOLS.ticketCreate : thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
         model: "sonnet",
-        maxTurns: 6,
+        maxTurns: ticket ? 10 : 6,
       });
       if (!data.sent)
-        throw new Error(data.error ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : "Slack didn't accept the message"));
+        throw new Error(
+          data.error ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : ticket ? "Jira didn't create the ticket" : "Slack didn't accept the message"),
+        );
       const link = (await db.getSessionLinks())[taskId];
       // Its link, kept with the step it finished, for a chip beside that step.
+      // The step it finished, by title too: the chip stays beside that step if the steps are renumbered later.
+      const stepTitle = send.step && link ? (await currentSessionSteps(link).catch(() => null))?.plan[send.step - 1]?.title : undefined;
       const artifact = data.link
-        ? [{ ...(send.step ? { step: send.step } : {}), url: data.link, title: doc || event ? send.to : `Message in ${sendDestination(send)}` }]
+        ? [{ ...(send.step ? { step: send.step } : {}), ...(stepTitle ? { stepTitle } : {}), url: data.link, title: doc || event || ticket ? send.to : `Message in ${sendDestination(send)}` }]
         : [];
       await db.updateSessionLink(taskId, {
         sentKeys: [...(link?.sentKeys ?? []), send.key],
         artifacts: [...(link?.artifacts ?? []), ...artifact],
         ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
       });
-      const edited = text !== send.text ? ` I edited it first; this is what ${doc || event ? "it says" : "went out"}:\n\n${text}` : "";
+      const edited = text !== send.text ? ` I edited it first; this is what ${doc || event || ticket ? "it says" : "went out"}:\n\n${text}` : "";
       // How the user rewrote Claude's draft says something about how they write.
       if (text !== send.text)
         db.logFeedback({ kind: "message_edit", subject: "message", subject_id: taskId, before: { to: send.to, text: send.text }, after: { text } }).catch(() => {});
       continueTaskSession(
         taskId,
-        `${doc ? `I created the Google Doc "${send.to}"` : event ? `I created the event "${send.to}" and sent its invites${data.moved ? `, moved to ${data.moved} since the reviewed time was no longer free for everyone` : ""}` : `I sent the message to ${sendDestination(send)}${send.to.startsWith("http") ? ` (${send.to})` : ""}`}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`,
+        `${doc ? `I created the Google Doc "${send.to}"` : ticket ? `I filed the Jira ticket "${send.to}"${data.error ? ` (${data.error})` : ""}` : event ? `I created the event "${send.to}" and sent its invites${data.moved ? `, moved to ${data.moved} since the reviewed time was no longer free for everyone` : ""}` : `I sent the message to ${sendDestination(send)}${send.to.startsWith("http") ? ` (${send.to})` : ""}`}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`,
       ).catch(() => {});
       return { value: undefined, costUsd };
     }),

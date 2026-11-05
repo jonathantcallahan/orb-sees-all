@@ -10,14 +10,14 @@ export function longTitled<T extends { title: string }>(tasks: T[]): T[] {
 
 /**
  * The status a task should move to as its plan's steps get blocked and unblocked, or null to leave
- * it. A step blocked on someone else blocks the task, while the plan is still being discussed too
- * (the discussion found the blocker). Once no step is blocked, a task that was blocked goes back to
- * in progress, or to do if its plan hasn't been approved yet. A finished task is left alone.
+ * it. A step blocked on someone else blocks the task, before the work has started too (talking
+ * the plan through found the blocker). Once no step is blocked, a task that was blocked goes back to
+ * in progress. A finished task is left alone.
  */
-export function statusForBlockedSteps(anyBlocked: boolean, wasBlocked: boolean, status: TaskStatus, discussing: boolean): TaskStatus | null {
+export function statusForBlockedSteps(anyBlocked: boolean, wasBlocked: boolean, status: TaskStatus): TaskStatus | null {
   if (status === "done") return null;
   if (anyBlocked) return status === "blocked" ? null : "blocked";
-  if (wasBlocked && status === "blocked") return discussing ? "todo" : "in_progress";
+  if (wasBlocked && status === "blocked") return "in_progress";
   return null;
 }
 

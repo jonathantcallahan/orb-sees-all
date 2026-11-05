@@ -4,7 +4,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("./db", () => ({}));
 
 const { parseProgress, parsePlan, currentPlan, readableReply, parseSends } = await import("./sessions");
-const { startPrompt, sessionMarker, resumeSessionUrl } = await import("./openInClaude");
+const { taskChatPrompt, sessionMarker, resumeSessionUrl } = await import("./openInClaude");
 
 describe("session progress", () => {
   it("keeps each step's latest report", () => {
@@ -19,21 +19,35 @@ describe("session progress", () => {
       ]),
     ).toEqual({
       1: { state: "done" },
-      // Never reported done, but step 3 came after it.
-      2: { state: "done" },
+      // Never reported done: step 3 coming after it doesn't finish it (a re-check settles it).
+      2: { state: "started" },
       3: { state: "waiting", note: "need Eric's export" },
       4: { state: "done" },
     });
   });
 
-  it("puts the marker first and asks for progress lines in Approve & start", () => {
-    const p = startPrompt({ id: "t-42", title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read CPS-1", by: "claude" }]);
+  it("finishes the plan only when every step is done and nothing is left to send", async () => {
+    const { planFinished } = await import("./sessions");
+    expect(planFinished([{ state: "done" }, { state: "skipped" }, { state: "done" }], 0)).toBe(true);
+    // The last step is done, but an earlier one isn't.
+    expect(planFinished([{ state: "done" }, { state: "waiting", note: "review and create the doc" }, { state: "done" }], 0)).toBe(false);
+    expect(planFinished([{ state: "done" }, { state: "started" }, { state: "done" }], 0)).toBe(false);
+    expect(planFinished([{ state: "done" }, undefined], 0)).toBe(false);
+    // Every step is done, but a draft is still waiting for you to send or create it.
+    expect(planFinished([{ state: "done" }, { state: "done" }], 1)).toBe(false);
+    // Nothing done at all isn't finished.
+    expect(planFinished([{ state: "skipped" }], 0)).toBe(false);
+    expect(planFinished([], 0)).toBe(false);
+  });
+
+  it("puts the marker first and asks for progress lines in a task's chat", () => {
+    const p = taskChatPrompt({ id: "t-42", title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read ABC-1", by: "claude" }]);
     expect(p.startsWith(`${sessionMarker("t-42")}\n`)).toBe(true);
     expect(p).toContain("[orb] step N done");
   });
 
   it("leaves the marker out without a task id", () => {
-    const p = startPrompt({ title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read CPS-1", by: "claude" }]);
+    const p = taskChatPrompt({ title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read ABC-1", by: "claude" }]);
     expect(p).not.toContain("Orb task:");
     expect(p).not.toContain("[orb]");
   });
@@ -56,10 +70,12 @@ describe("step state", () => {
 });
 
 describe("progress reports", () => {
-  it("counts an earlier started step as done once a later one is reported", async () => {
-    const { parseProgress } = await import("./sessions");
+  it("doesn't count an earlier started step as done because a later one moved", async () => {
+    const { parseProgress, looksOutOfSync } = await import("./sessions");
     const steps = parseProgress(["[orb] step 1 started", "[orb] step 2 started", "[orb] step 2 done", "[orb] step 3 waiting: confirm the channel"]);
-    expect(steps).toEqual({ 1: { state: "done" }, 2: { state: "done" }, 3: { state: "waiting", note: "confirm the channel" } });
+    expect(steps).toEqual({ 1: { state: "started" }, 2: { state: "done" }, 3: { state: "waiting", note: "confirm the channel" } });
+    // That's out of order, so the card re-checks it against the conversation instead.
+    expect(looksOutOfSync([steps[1], steps[2], steps[3]])).toBe(true);
   });
 
   it("leaves an earlier step that's waiting on the user as waiting", async () => {
@@ -151,17 +167,128 @@ describe("re-checked steps", () => {
   });
 });
 
-describe("discussing the plan", () => {
-  it("opens the session with the plan and holds the work until it's approved", async () => {
-    const { discussPrompt, approvedPlanMessage } = await import("./openInClaude");
-    const p = discussPrompt({ id: "t-1", title: "Confirm refunds" }, "Draft the summary", [
+describe("a task's chat", () => {
+  it("opens with the plan, holds the work until you say go, and keeps the steps current", async () => {
+    const p = taskChatPrompt({ id: "t-1", title: "Confirm refunds" }, "Draft the summary", [
       { title: "Draft the summary", by: "claude" },
       { title: "Post it", by: "you" },
     ]);
     expect(p).toMatch(/^Orb task: t-1\n/);
     expect(p).toContain("2. [Me] Post it");
-    expect(p).toContain("Don't start the work yet.");
-    expect(approvedPlanMessage()).toMatch(/^The plan's agreed\./);
+    expect(p).toMatch(/Until I tell you to go ahead, .*don't start the steps/);
+    // Extra work you ask for is a step, restated before it's done, before and after the go-ahead.
+    expect(p).toMatch(/anything I ask for that the steps don't cover yet .* which is a new step/);
+    expect(p).toMatch(/It holds after you've started too/);
+  });
+
+  it("knows whether you've spoken since the plan was last restated", async () => {
+    const { heardSincePlan } = await import("./sessions");
+    const opening = { role: "user" as const, text: "Orb task: t-1\n\nI'd like to work through this task" };
+    expect(heardSincePlan([opening, { role: "assistant", text: "Here's my take." }])).toEqual({ userMessages: 0, userSincePlan: false });
+    // You asked for more and Claude carried on without restating the plan.
+    expect(
+      heardSincePlan([opening, { role: "assistant", text: "Here's my take." }, { role: "user", text: "Go, and split it by region too" }, { role: "assistant", text: "Done.\n[orb] step 4 done" }]),
+    ).toEqual({ userMessages: 1, userSincePlan: true });
+    // It restated the plan after your message (in a code span too).
+    expect(
+      heardSincePlan([opening, { role: "user", text: "Add the region split" }, { role: "assistant", text: "Added it.\n`[orb] plan`\n1. Read it\n2. Split by region\n[orb] end" }]),
+    ).toEqual({ userMessages: 1, userSincePlan: false });
+  });
+
+  it("reads requests for more code, and hides Orb's own notes to the session", async () => {
+    const { codeRequests, readableMessages, heardSincePlan, ORB_NOTE } = await import("./sessions");
+    expect(codeRequests(["[orb] step 2 started", "[orb] code acme/storefront-ui", "[orb] code: acme/storefront-ui", "[orb] code ~/code/search-api"])).toEqual(["acme/storefront-ui", "~/code/search-api"]);
+    const note = { role: "user" as const, text: `${ORB_NOTE} you can read acme/storefront-ui now. Carry on where you left off.)` };
+    const raw = [{ role: "user" as const, text: "Go ahead" }, { role: "assistant" as const, text: "I need the UI code.\n[orb] code acme/storefront-ui" }, note, { role: "assistant" as const, text: "Reading it now." }];
+    expect(readableMessages(raw).map((m) => m.text)).toEqual(["Go ahead", "I need the UI code.", "Reading it now."]);
+    // The note isn't you speaking, so it doesn't count toward re-checking the steps.
+    expect(heardSincePlan(raw)).toEqual({ userMessages: 1, userSincePlan: true });
+  });
+
+  it("re-checks the steps when they may not reflect the chat", async () => {
+    const { stepsNeedRecheck } = await import("./sessions");
+    const shown = [{ state: "done" as const }, undefined, undefined];
+    // Nothing new: you haven't spoken since the plan, and the reports fit the list.
+    expect(stepsNeedRecheck({ steps: { 1: { state: "done" } }, userMessages: 1, userSincePlan: false }, shown, 0)).toBe(false);
+    // You said something it didn't restate the plan for, and the last re-check hasn't seen it.
+    expect(stepsNeedRecheck({ steps: { 1: { state: "done" } }, userMessages: 2, userSincePlan: true }, shown, 1)).toBe(true);
+    // The last re-check already heard it.
+    expect(stepsNeedRecheck({ steps: { 1: { state: "done" } }, userMessages: 2, userSincePlan: true }, shown, 2)).toBe(false);
+    // It reported a step the list doesn't have.
+    expect(stepsNeedRecheck({ steps: { 4: { state: "done" } }, userMessages: 0, userSincePlan: false }, shown, 0)).toBe(true);
+    // A later step moved while an earlier one isn't done.
+    expect(stepsNeedRecheck({ steps: {} }, [undefined, { state: "started" }], 0)).toBe(true);
+  });
+
+  it("asks the re-check to add work you asked for and leave a list that matches", async () => {
+    const { recheckStepsPrompt } = await import("./prompts");
+    const p = recheckStepsPrompt({ task: "Investigate the dip", steps: [{ title: "Read the results", by: "claude", state: null }], conversation: [{ role: "user", text: "Also split it by region" }] });
+    expect(p).toMatch(/if it already matches, return it as it is/);
+    expect(p).toMatch(/When I asked for work the steps don't cover .* that's a step/);
+    expect(p).toMatch(/Until I've told Claude to go ahead, we're only talking the plan through/);
+  });
+});
+
+describe("restating the plan", () => {
+  const opening = {
+    role: "user" as const,
+    text: "Orb task: t-1\n\nI'd like to work through this task\n\nThe plan, in order. Steps marked [Me] are mine; the rest are yours:\n1. Read the API thread\n2. Read the epic's tickets\n3. Draft the ticket\n4. [Me] File the ticket\n\nReport progress so my planner can follow along.",
+  };
+
+  it("reads the plan a chat opened with", async () => {
+    const { openingPlan } = await import("./sessions");
+    expect(openingPlan([opening])).toEqual([
+      { title: "Read the API thread", by: "claude" },
+      { title: "Read the epic's tickets", by: "claude" },
+      { title: "Draft the ticket", by: "claude" },
+      { title: "File the ticket", by: "you" },
+    ]);
+    expect(openingPlan([{ role: "user", text: "Hello" }])).toBeNull();
+  });
+
+  it("keeps each step's state when the plan is restated with a step added", async () => {
+    const { stepsNow, openingPlan } = await import("./sessions");
+    const lines = ["[orb] step 1 done", "[orb] step 2 done", "[orb] step 3 done", "[orb] plan", "[orb] step 4 started", "[orb] step 4 done", "[orb] step 5 waiting: file the ticket"];
+    const blocks = [{ header: "[orb] plan", body: "1. Read the API thread\n2. Read the epic's tickets\n3. Draft the ticket\n4. Rewrite the ticket to match the others\n5. [Me] File the ticket" }];
+    const now = stepsNow(lines, blocks, undefined, openingPlan([opening]));
+    expect(now.plan?.map((st) => st.title)).toEqual(["Read the API thread", "Read the epic's tickets", "Draft the ticket", "Rewrite the ticket to match the others", "File the ticket"]);
+    // Steps 1 to 3 stay done; the new step 4 and step 5 follow the reports after the restatement.
+    expect(now.steps).toEqual({ 1: { state: "done" }, 2: { state: "done" }, 3: { state: "done" }, 4: { state: "done" }, 5: { state: "waiting", note: "file the ticket" } });
+  });
+
+  it("keeps a re-check's states when the session restates the same plan after it", async () => {
+    const { stepsNow } = await import("./sessions");
+    const recheck = { plan: [{ title: "Read it", by: "claude" as const }, { title: "File it", by: "claude" as const }], states: { 1: { state: "done" as const }, 2: { state: "started" as const } }, reports: 1 };
+    const now = stepsNow(["[orb] step 1 done", "[orb] plan", "[orb] step 2 waiting: review and create the ticket"], [{ header: "[orb] plan", body: "1. Read it\n2. [Me] File it" }], recheck);
+    expect(now.steps).toEqual({ 1: { state: "done" }, 2: { state: "waiting", note: "review and create the ticket" } });
+  });
+
+  it("starts a reworded step fresh, and carries nothing when the old plan isn't known", async () => {
+    const { carryStates } = await import("./sessions");
+    const before = [{ title: "Read it", by: "claude" as const }, { title: "Draft it", by: "claude" as const }];
+    expect(carryStates(before, { 1: { state: "done" }, 2: { state: "done" } }, [{ title: "Draft it", by: "claude" }, { title: "Draft it again, shorter", by: "claude" }])).toEqual({ 1: { state: "done" } });
+    expect(carryStates(null, { 1: { state: "done" } }, [{ title: "Read it", by: "claude" }])).toEqual({});
+  });
+});
+
+describe("tickets handed to Orb", () => {
+  it("reads a ticket block and hides it from the chat", async () => {
+    const { parseSends, readableReply } = await import("./sessions");
+    const body = "project: ABC\ntype: Task\nepic: ABC-12\ncomponent: Web\n\nAdd an export button to the report page.";
+    const [ticket] = parseSends([{ header: "[orb] ticket step 5: Add the export button", body }]);
+    expect(ticket).toMatchObject({ kind: "ticket", step: 5, to: "Add the export button", text: body });
+    expect(readableReply(`Here it is.\n[orb] ticket step 5: Add the export button\n${body}\n[orb] end\n[orb] step 5 waiting: review and create the ticket`)).toBe("Here it is.");
+  });
+
+  it("files it as reviewed, in its epic, and tells every session how to hand one over", async () => {
+    const { createTicketPrompt } = await import("./prompts");
+    const { SESSION_DISPLAY } = await import("./claude");
+    const p = createTicketPrompt("Add the export button", "project: ABC\ntype: Task\nepic: ABC-12\n\nAdd an export button to the report page.");
+    expect(p).toMatch(/jira_create_issue exactly once/);
+    expect(p).toMatch(/"epicKey"/);
+    expect(p).toMatch(/exactly as written/);
+    expect(SESSION_DISPLAY).toMatch(/\[orb\] ticket step N: /);
+    expect(SESSION_DISPLAY).toMatch(/Filing it is your step, not mine/);
   });
 });
 

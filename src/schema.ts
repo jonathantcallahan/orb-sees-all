@@ -333,17 +333,30 @@ export const GlobalAction = z.discriminatedUnion("type", [
     project_id: z.string().nullish(),
     description: z.string().nullish(),
     today: z.boolean().nullish(),
-    status: z.enum(["todo", "in_progress", "waiting"]).nullish(),
+    status: z.enum(["todo", "in_progress", "waiting", "blocked"]).nullish(),
     priority: z.enum(["critical", "high", "medium", "low"]).nullish(),
   }),
+  // Changes to an existing task name it by id, with its title: the planner finds it by title when the
+  // id doesn't match one (see findTask).
   /** More about an existing task, in the user's words: added to the end of its description. */
-  z.object({ type: z.literal("add_task_context"), task_id: z.string(), title: z.string().nullish(), text: z.string().min(1) }),
+  z.object({ type: z.literal("add_task_context"), task_id: z.string().nullish(), title: z.string().nullish(), text: z.string().min(1) }),
+  /** Renames or rewrites one of the user's own tasks, when what it's about has changed. */
+  z.object({ type: z.literal("update_task"), task_id: z.string().nullish(), title: z.string().nullish(), new_title: z.string().nullish(), description: z.string().nullish() }),
+  /** Files a task under another project (project_id null: under where it was found again, or no project for one of the user's own). */
+  z.object({ type: z.literal("set_task_project"), task_id: z.string().nullish(), title: z.string().nullish(), project_id: z.string().nullable() }),
+  /** Replaces a task's plan: every step in order, the user's marked "you". */
+  z.object({
+    type: z.literal("set_task_plan"),
+    task_id: z.string().nullish(),
+    title: z.string().nullish(),
+    steps: z.array(z.object({ title: z.string().min(1), by: z.enum(["claude", "you"]) })).min(1),
+  }),
   /** A topic to watch, in the user's words: what to follow, and what to do if it happens or doesn't by a date. */
   z.object({ type: z.literal("watch_topic"), text: z.string().min(1) }),
   /** Plans an existing task for today (Today's tasks), or takes it off. */
-  z.object({ type: z.literal("plan_today"), task_id: z.string(), title: z.string().nullish(), today: z.boolean().default(true) }),
-  z.object({ type: z.literal("set_task_status"), task_id: z.string(), title: z.string().nullish(), status: z.enum(["todo", "in_progress", "waiting", "done"]) }),
-  z.object({ type: z.literal("set_task_priority"), task_id: z.string(), title: z.string().nullish(), priority: z.enum(["critical", "high", "medium", "low"]) }),
+  z.object({ type: z.literal("plan_today"), task_id: z.string().nullish(), title: z.string().nullish(), today: z.boolean().default(true) }),
+  z.object({ type: z.literal("set_task_status"), task_id: z.string().nullish(), title: z.string().nullish(), status: z.enum(["todo", "in_progress", "waiting", "blocked", "done"]) }),
+  z.object({ type: z.literal("set_task_priority"), task_id: z.string().nullish(), title: z.string().nullish(), priority: z.enum(["critical", "high", "medium", "low"]) }),
   z.object({
     type: z.literal("refresh"),
     what: z.enum(["all", "project", "briefing", "calendar", "tasks"]),

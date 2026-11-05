@@ -123,46 +123,26 @@ export interface StartStep {
   by: "claude" | "you" | null;
 }
 
-/**
- * The prompt behind "Approve & start". The session runs in the background (Orb starts it with
- * `claude -p`), so it works through the plan unattended and stops only when it needs the user,
- * who answers in Orb; Orb continues the session with the answer. Steps marked [Me] are the
- * user's: Claude stops to ask for their result when it needs it.
- */
-export function startPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
-  const lines = [
-    ...(task.id ? [sessionMarker(task.id), ""] : []),
-    "I've approved your suggested approach for this task from my day planner. Please carry it out.",
-    "",
-    ...taskLines(task),
-  ];
-  lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
-  steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
-  if (task.id) lines.push(...progressInstructions());
-  lines.push("", ...workInstructions());
-  const prompt = lines.join("\n");
-  return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
-}
-
-/** How a session carries out an approved plan in the background. */
+/** How a session carries out the plan once the user tells it to go ahead. */
 function workInstructions(): string[] {
   return [
-    "You're running in the background: I'm not watching this conversation, and my planner tells me when you need me. So keep going on your own through your steps in order, and stop only when you need something from me.",
+    "Once you've started, keep going on your own through your steps in order, and stop only when you need something from me. I may not be watching this chat: my planner tells me when you need me.",
     "Don't do the steps marked [Me]. When one of your steps depends on an earlier step of mine, prepare everything you can without it, then ask me for that step's result (as a waiting report) and stop.",
-    "When you stop for me, put everything I need to answer in the waiting report and the message just before it: the question, the options, and any draft I'm approving, since I'll read it in my planner rather than here. Ask one clear thing at a time.",
-    "You can read Slack, email, Google Drive, Jira and the calendar. Don't send email, file tickets or change anything outside this session, and don't make decisions for me; ask me instead. Slack messages go to my planner as described above.",
+    "When you stop for me, put everything I need to answer in the waiting report and the message just before it: the question, the options, and any draft I'm approving, since I may read it in my planner rather than here. Ask one clear thing at a time.",
+    "You can read Slack, email, Google Drive, Jira and the calendar. Don't send email or change anything outside this session yourself, and don't make decisions for me; ask me instead. Slack messages, docs, invites and Jira tickets go to my planner to review and send or create, as described above.",
     "When all your steps are done, write a short summary of what you did and what's left for me.",
   ];
 }
 
 /**
- * The prompt behind "Discuss plan": the same session Approve & start would open, but it talks the
- * plan through with the user first and doesn't start the work until they approve it (approvedPlan).
+ * The prompt behind a task's "Open in chat": the session talks the plan through with the user
+ * first, then carries it out once they tell it to go ahead in the chat. Throughout, the steps on
+ * the card follow the chat: the session restates the plan whenever what's agreed changes it.
  */
-export function discussPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
+export function taskChatPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
   const lines = [
     ...(task.id ? [sessionMarker(task.id), ""] : []),
-    "Before you start on this task from my day planner, I'd like to talk through your suggested plan with you.",
+    "I'd like to work through this task from my day planner with you, here in its chat.",
     "",
     ...taskLines(task),
   ];
@@ -171,18 +151,18 @@ export function discussPrompt(task: SessionTask, suggestion: string, steps: Star
   if (task.id) lines.push(...progressInstructions());
   lines.push(
     "",
-    "Don't start the work yet. Look things up only as far as you need to answer my questions about the plan.",
-    "Open with a short take on the plan, a few sentences, and ask what I'd like to change. Then answer my questions and suggest changes where they'd help.",
-    "Whenever we agree a change to the steps (added, dropped, reworded, reordered, or moved between you and me), restate the whole plan as an [orb] plan block, with [Me] in front of my steps, so my planner shows it.",
-    "I'll tell you when the plan's agreed and you can start.",
+    "Talk the plan through with me first. Open with a short take on it, a few sentences, and ask what I'd like to change. Until I tell you to go ahead, look things up only as far as you need to answer my questions about the plan, and don't start the steps.",
+    // Without a task, there's no planner following along (and no [orb] reports).
+    ...(task.id
+      ? [
+          "The steps in my planner follow this chat, so keep them current. Whenever what we agree changes the work, restate the whole plan as an [orb] plan block, finished steps included, with [Me] in front of my steps. That's any step added, dropped, reworded, reordered or moved between you and me, and anything I ask for that the steps don't cover yet (another analysis, a further check, a change to a draft), which is a new step. It holds after you've started too, and when I tell you to go ahead and add something in the same message: restate the plan first, then carry on and number your reports against it.",
+        ]
+      : []),
+    "When I tell you to go ahead, carry out the plan as we last stated it.",
+    ...workInstructions(),
   );
   const prompt = lines.join("\n");
   return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
-}
-
-/** What the user's approval says to a session that's been discussing the plan: go, as agreed. */
-export function approvedPlanMessage(): string {
-  return ["The plan's agreed. Please carry it out now, as we last stated it.", "", ...workInstructions()].join("\n");
 }
 
 /** An update from the briefing, as the Explain this chat sees it. */
@@ -263,9 +243,24 @@ export const GLOBAL_ACTION_DOCS = [
   '- {"type": "add_task_context", "task_id": "<id from my task list>", "title": "<its title>", "text": "..."}: adds what I said to the end of an existing task\'s description (details, links, who\'s involved), so its plan and chat take it into account.',
   '- {"type": "watch_topic", "text": "<in my words: what to follow, and what to do if it happens or doesn\'t by a date>"}: something to keep an eye on rather than do now. My planner adds it to Watched topics, works out its title, project and conditional actions from the text, and checks it every refresh.',
   '- {"type": "plan_today", "task_id": "<id from my task list>", "title": "<its title>", "today": true}: put one of my existing tasks in Today\'s tasks (today false takes it off). When I ask whether I have a task about something, find it in my task list (match on meaning, not just words), tell me which, and propose this if I want it today.',
-  '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "done"}',
+  '- {"type": "update_task", "task_id": "<id from my task list>", "title": "<its title now>", "new_title": "..." or null, "description": "..." or null}: renames or rewrites one of my own tasks (ids starting "manual:") when what it\'s about has changed. Use it rather than adding a second task for the same piece of work. Its new title: ' + TITLE_RULE + ' For tasks from Slack, email or a project, use add_task_context instead.',
+  '- {"type": "set_task_project", "task_id": "<id from my task list>", "title": "<its title>", "project_id": "C111" or null}: files a task under another project, when it belongs to a different one than it shows; null takes one of my own out of its project. Use it whenever I say a task is for a different project: never make a copy and mark the original done.',
+  '- {"type": "set_task_plan", "task_id": "<id from my task list>", "title": "<its title>", "steps": [{"title": "...", "by": "claude" | "you"}]}: replaces the task\'s plan with these steps, in order, finished ones included, "you" for mine. Use it when I ask to change or adjust a task\'s plan. If the task has its own chat, my planner passes the plan to it.',
+  '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "blocked" | "done"}: "blocked" when it can\'t move until someone else acts (an answer, an approval); "waiting" when it\'s waiting on me.',
   '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',
   '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',
+].join("\n");
+
+/**
+ * How the Demian chat changes existing tasks. In its opening prompt and, with the list of changes,
+ * on every turn, so a chat that's been open a while knows the current ones.
+ */
+export const GLOBAL_TASK_RULES = [
+  "When I talk about a task I'm looking at, find it by what I describe (in Today's tasks, its project, its steps), and trust what I say about it. If I say it belongs to a different project or is about something other than its title says, change that task (set_task_project, update_task, add_task_context): don't point me to a different task, and don't take my words as a sign it's a duplicate. Only mark a task done when I've said it's done. If two tasks could fit what I describe, name both and ask which, without proposing changes yet.",
+  "My task list is current every turn, and includes the tasks you added through cards I applied (their ids are also among the applied changes). When I mention a task, find it there, matching on meaning, before saying it isn't there. Never ask me whether I applied a card, or to send another message so you can see the list. Propose one card per change, not alternatives depending on what I did.",
+  "To change an existing task, change that task rather than adding another: update_task when one of my own tasks is now about something different, add_task_context for more detail, set_task_status (blocked when someone else has to act first), set_task_plan for its steps.",
+  "Give each task change its task_id from the list and its exact title. If you truly can't find the id, give the exact title and leave task_id out: my planner finds the task by its title.",
+  "This chat has no plan or steps of its own, so don't write [orb] plan or [orb] step lines here. A task's plan changes through set_task_plan.",
 ].join("\n");
 
 /**
@@ -285,6 +280,7 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     "[orb] end",
     "The changes you can propose, as JSON:",
     GLOBAL_ACTION_DOCS,
+    GLOBAL_TASK_RULES,
     "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
     `My message: ${firstMessage}`,
   ].join("\n");

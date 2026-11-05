@@ -267,8 +267,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Project cards: badges, description, blockers, selection */
 .project { cursor: pointer; }
-/* Inset so the scrolling column can't clip the outline. */
-.project.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* Inset so the scrolling column can't clip the outline. A task whose chat is open in the dock
+   beside the list is marked the same way. */
+.project.selected, .task-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
 .badge.priority.critical { color: var(--red); background: var(--red-bg); }
 .badge.priority.high { color: var(--amber); background: var(--amber-bg); }
@@ -314,7 +315,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-badge, .menu-badge { position: relative; flex-shrink: 0; cursor: pointer; }
 .status-badge select, .menu-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
 /* A ring only when the menu was reached from the keyboard: picking with the mouse leaves it focused, and the ring would stay. */
-.status-badge:has(select:focus-visible), .menu-badge:has(select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Keyboard focus only (see usePointerFocus), and drawn inside the badge: the row it sits in clips anything outside. */
+.status-badge:has(select:focus-visible):not(.pointer-focus), .menu-badge:has(select:focus-visible):not(.pointer-focus) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 /* To do in the muted gray the other badges show (it would otherwise take the text color). */
 .status-badge.todo { color: var(--muted); }
@@ -353,6 +355,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Shared by everything that opens and closes in place (task cards, Reveal). */
 :root { --open-ease: cubic-bezier(0.16, 1, 0.3, 1); --close-ease: cubic-bezier(0.4, 0, 1, 1); }
 .task-card.collapsed { cursor: pointer; }
+/* An open card closes from its title, so the title reads as clickable there too. */
+.task-card:not(.collapsed) .task-title-wrap, .task-card:not(.collapsed) .task-title-wrap .task-title { cursor: pointer; }
 /* A collapsed card is a handle: pressing its title starts a drag, not a text selection. */
 .task-card.collapsed .task-card-header, .task-card.collapsed .task-card-header .task-title { user-select: none; -webkit-user-select: none; cursor: grab; }
 /* Collapsed cards sit a little tighter. The padding eases with the body's height, so the title row
@@ -770,10 +774,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .suggested-project .actions { display: flex; gap: 6px; flex-shrink: 0; }
 .mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
-/* High-level plan inside the assessment: numbered circles, then Approve & start */
+/* High-level plan inside the assessment: numbered circles, then Open in chat */
 .plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.plan-outline-steps li { display: flex; gap: 8px; align-items: flex-start; }
+.plan-outline-steps li { display: flex; gap: 4px 8px; align-items: flex-start; flex-wrap: wrap; }
+/* What was sent or made for a step goes on its own line under the title, lined up with it, so a long chip never squeezes the title. */
+.plan-outline-steps li > .link-chips { order: 1; flex-basis: calc(100% - 20px); min-width: 0; margin-left: 20px; }
 /* Each step wraps to as many lines as it needs. */
 .plan-outline-steps li > .hover-tip-anchor { flex: 1; min-width: 0; }
 .plan-outline-steps .step-line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -801,8 +807,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .session-status { flex-basis: 100%; }
 .cta-primary { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #1c1c1a; font-size: 12px; }
 .cta-ghost { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; }
-.cta-ghost:hover { background: var(--grey-bg); }
-.cta-primary:hover { opacity: 0.88; }
+.cta-ghost:hover:not(:disabled) { background: var(--grey-bg); }
+.cta-primary:hover:not(:disabled) { opacity: 0.88; }
 
 /* Description: cut to two lines with "…" and a gray More at the end */
 .description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; min-width: 0; overflow: hidden; }
@@ -949,6 +955,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { filter: grayscale(1); }
 /* At rest every priority reads in the same grey, so none looks heavier than the others (brighter text renders bolder); hovering brings their colors back. */
 .card:not(:hover) .badge.priority:not(.blocking) { color: var(--muted); opacity: 1; }
+/* The same in a project's details beside the list: its tags, link icons and Project context link stay
+   gray until you hover the details. */
+.project-detail-pane :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .link-chip-icon, .understanding-link) { transition: filter 0.15s ease; }
+.project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .link-chip-icon, .understanding-link) { filter: grayscale(1); }
 
 /* Double check follows More / Edit / Show links on the left, and appears when you hover the card. */
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }
@@ -966,9 +976,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Baseline-aligned like the links beside it: the text sets the baseline, the icon centers on it. */
 .claude-link { display: inline-flex; align-items: baseline; gap: 4px; }
 .claude-link img { align-self: center; }
-/* Claude's mark is gray until the card is hovered, like the other badges and icons. */
-.claude-link img { transition: filter 0.15s ease; }
-.card:not(:hover) .claude-link img { filter: grayscale(1); }
+/* In the plan box's bottom-right corner, gray, words and mark; Claude's mark turns orange only while
+   you hover the link itself, and the words stay gray. */
+.plan-actions > .claude-link { margin-left: auto; }
+.link-button.more-link.claude-link, .link-button.more-link.claude-link:hover { color: var(--muted); }
+.claude-link img { transition: filter 0.15s ease; filter: grayscale(1); }
+.claude-link:hover img { filter: none; }
 .tab-close { color: var(--muted); }
 .work-tab:hover .tab-close { color: var(--text); }
 
@@ -992,6 +1005,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* What Demian (or you) merged into this task: just so, not a warning, so in grey; Separate undoes it. */
 .duplicate-note.merged-note { background: var(--grey-bg); color: var(--muted); }
 .duplicate-note.merged-note + .duplicate-note.merged-note { margin-top: 4px; }
+.merged-note .duplicate-actions { align-items: center; }
+.merged-close { line-height: 0; padding: 2px; }
 
 /* Your RSVP on calendar blocks: no response is grayed out, maybe is striped, yes is full color.
    Declined meetings aren't shown. */
@@ -1021,13 +1036,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   top: 158px;
   width: 620px;
   height: 620px;
-  transform: translate(-50%, -50%);
+  /* --music (0 to 1, set while Artemis hears music) swells and brightens it, gently. */
+  transform: translate(-50%, -50%) scale(calc(1 + 0.025 * var(--music, 0)));
   pointer-events: none;
   /* Light mode needs much more: faint color barely shows against a light wall. */
-  opacity: 0.12;
+  opacity: calc(0.12 * (1 + 0.3 * var(--music, 0)));
 }
-[data-theme="dark"] .orb-glow { opacity: 0.11; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .orb-glow { opacity: 0.11; } }
+[data-theme="dark"] .orb-glow { opacity: calc(0.11 * (1 + 0.3 * var(--music, 0))); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .orb-glow { opacity: calc(0.11 * (1 + 0.3 * var(--music, 0))); } }
+@media (prefers-reduced-motion: reduce) { .orb-glow { transform: translate(-50%, -50%); } }
 .orb-glow span {
   position: absolute;
   width: 46%;
@@ -1233,7 +1250,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 }
 .chat-ask-step { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .chat-ask-step .step-circle { margin-top: 0; }
-.chat-ask-action { margin-top: 6px; }
 .chat-ask-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
 /* Chat text is the size of a task description, not larger. */
@@ -1633,7 +1649,6 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 .release-head { display: flex; align-items: baseline; gap: 8px; }
 .release-notes { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.5; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .release-more { align-self: flex-start; margin-top: 8px; }
-/* Talking through the plan: the plan as it stands, at the top of the chat. */
 
 /* An epic's issues, opened under its row in the tracking feed, with who each is assigned to. */
 .epic-toggle { margin-left: auto; }

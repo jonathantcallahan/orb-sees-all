@@ -395,7 +395,8 @@ type Store =
   | "not_duplicates"
   | "project_tracking"
   | "epic_children"
-  | "merged_from";
+  | "merged_from"
+  | "project_overrides";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -446,6 +447,25 @@ export interface StoredTaskCheck extends TaskCheck {
 
 /** Priorities the user set by hand, keyed by task id. */
 export const getPriorityOverrides = () => getRows<Priority>("priority_overrides");
+
+/** Projects you moved tasks to, by task id: a task found in one project's channels (or in Slack or email) that belongs to another. */
+export const getProjectOverrides = () => getRows<string>("project_overrides");
+
+/**
+ * Files a task under another project. Your own tasks just change project; one from a project's
+ * channels, Slack or email keeps where it was found and is shown under this project instead, or
+ * with null under where it was found again.
+ */
+export async function setTaskProject(taskId: string, projectId: string | null) {
+  const conn = await db();
+  const mine = await conn.select<{ id: string }[]>("SELECT id FROM manual_tasks WHERE id = $1", [taskId]);
+  if (mine.length) {
+    await conn.execute("UPDATE manual_tasks SET project_id = $1 WHERE id = $2", [projectId, taskId]);
+    return;
+  }
+  if (projectId) await putRow("project_overrides", taskId, projectId);
+  else await deleteRow("project_overrides", taskId);
+}
 
 /** Sets a task's priority by hand, or with null goes back to the automatic one. */
 export async function setPriorityOverride(taskId: string, priority: Priority | null) {
@@ -533,6 +553,8 @@ export interface MergedTask {
   id: string;
   title: string;
   at: string;
+  /** You closed its note on the card; the merge stands. */
+  hidden?: boolean;
 }
 
 /** What was merged into each task, by the kept task's id. */
@@ -554,7 +576,7 @@ export async function mergeTasks(keepId: string, dropId: string, dropTitle: stri
   await conn.execute(
     `INSERT OR IGNORE INTO task_data (store, task_id, value, updated_at)
      SELECT store, $1, value, $3 FROM task_data
-     WHERE task_id = $2 AND store IN ('priority_overrides', 'session_links', 'description_overrides', 'refined_descriptions')`,
+     WHERE task_id = $2 AND store IN ('priority_overrides', 'session_links', 'description_overrides', 'refined_descriptions', 'project_overrides')`,
     [keepId, dropId, nowIso()],
   );
   await conn.execute(
@@ -571,6 +593,12 @@ export async function mergeTasks(keepId: string, dropId: string, dropTitle: stri
  * all still there), and the pair is remembered as different work, so neither a refresh nor the
  * merge pass joins them again. Sources a refresh had folded into drop before the merge stay with keep.
  */
+/** Hides a merge's note on the kept task's card, keeping the merge. */
+export async function hideMergedNote(keepId: string, dropId: string) {
+  const merged = (await getMergedFrom())[keepId] ?? [];
+  await putRow("merged_from", keepId, merged.map((m) => (m.id === dropId ? { ...m, hidden: true } : m)));
+}
+
 export async function separateTasks(keepId: string, dropId: string) {
   await (await db()).execute("DELETE FROM task_sources WHERE ref = $1 AND task_id = $2", [dropId, keepId]);
   await markNotDuplicate(keepId, dropId);

@@ -1,3 +1,4 @@
+mod listen;
 mod sessions;
 
 use std::collections::HashMap;
@@ -552,11 +553,75 @@ fn origin_repo(config: &str) -> Option<String> {
     None
 }
 
-/// The user's own checkouts of these GitHub repos, where they have one: (repo as given, folder).
+/// The user's own checkouts of these GitHub repos, where they have one: (repo as given, folder). A
+/// bare name ("payments-api", no owner) finds the checkout of the one repo with that name, if only
+/// one has it.
 #[tauri::command]
 async fn find_checkouts(repos: Vec<String>) -> Vec<(String, String)> {
     let index = tauri::async_runtime::spawn_blocking(checkout_index).await.unwrap_or_default();
-    repos.into_iter().filter_map(|r| index.get(&r.to_lowercase()).map(|dir| (r, dir.clone()))).collect()
+    repos
+        .into_iter()
+        .filter_map(|r| {
+            let key = r.to_lowercase();
+            if key.contains('/') {
+                return index.get(&key).map(|dir| (r, dir.clone()));
+            }
+            let suffix = format!("/{key}");
+            let mut named = index.iter().filter(|(repo, _)| repo.ends_with(&suffix));
+            match (named.next(), named.next()) {
+                (Some((_, dir)), None) => Some((r, dir.clone())),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Home folders macOS guards. Code there is never looked for: even checking whether a path exists
+/// inside one makes macOS ask the user to let the app in.
+const GUARDED: &[&str] = &["Desktop", "Documents", "Downloads", "Library", "Pictures", "Music", "Movies", "Public"];
+
+/// The git checkout a path is in: the nearest folder above it (or the path itself) with a .git,
+/// below the home folder. None for a path in one of the folders macOS guards (decided from the path
+/// alone, before touching the disk), or one that isn't in a checkout.
+#[tauri::command]
+fn checkout_root(path: String) -> Option<String> {
+    checkout_root_in(&home_dir()?, Path::new(&path)).map(|dir| dir.to_string_lossy().into_owned())
+}
+
+fn checkout_root_in(home: &Path, path: &Path) -> Option<PathBuf> {
+    let rest = path.strip_prefix(home).ok()?;
+    let first = rest.components().next()?.as_os_str().to_string_lossy().into_owned();
+    if GUARDED.contains(&first.as_str()) || first.starts_with('.') {
+        return None;
+    }
+    path.ancestors()
+        .take_while(|dir| *dir != home && dir.starts_with(home))
+        .find(|dir| dir.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod checkout_root_tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_checkout_a_path_is_in_but_never_looks_in_guarded_folders() {
+        let home = std::env::temp_dir().join(format!("orb-checkouts-{}", std::process::id()));
+        let repo = home.join("storefront-ui");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("apps/web/src")).unwrap();
+        std::fs::create_dir_all(home.join("Documents/code/.git")).unwrap();
+        std::fs::create_dir_all(home.join("notes")).unwrap();
+        assert_eq!(checkout_root_in(&home, &repo.join("apps/web/src")), Some(repo.clone()));
+        assert_eq!(checkout_root_in(&home, &repo.join(".git/HEAD")), Some(repo.clone()));
+        // A checkout in a guarded folder is turned down from the path alone.
+        assert_eq!(checkout_root_in(&home, &home.join("Documents/code/src")), None);
+        // Not in a checkout, the home folder itself, or outside it.
+        assert_eq!(checkout_root_in(&home, &home.join("notes")), None);
+        assert_eq!(checkout_root_in(&home, &home), None);
+        assert_eq!(checkout_root_in(&home, Path::new("/usr/share")), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
 
 /// The folders that exist, of the ones given (project repos the user mapped may have moved).
@@ -757,9 +822,13 @@ pub fn run() {
             mirror_repo,
             existing_dirs,
             find_checkouts,
+            checkout_root,
             sessions::find_session,
-            sessions::read_session_progress
+            sessions::read_session_progress,
+            listen::start_listening,
+            listen::stop_listening
         ])
+        .manage(listen::Listening::default())
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Demian", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;

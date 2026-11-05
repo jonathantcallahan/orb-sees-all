@@ -311,6 +311,7 @@ export default function App() {
           taskChecks={data.taskChecks}
           sessionLinks={data.sessionLinks}
           priorityOverrides={data.priorityOverrides}
+          projectOverrides={data.projectOverrides}
           taskAliases={data.taskAliases}
           refinedDescriptions={data.refinedDescriptions}
           taskBriefs={data.taskBriefs}

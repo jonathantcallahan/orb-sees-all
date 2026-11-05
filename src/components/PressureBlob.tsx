@@ -12,14 +12,17 @@ import { buildOrenOrb } from "./orenOrb";
 import { buildResinOrb } from "./resinOrb";
 import { buildOpalOrb } from "./opalOrb";
 import { buildAuraOrb } from "./auraOrb";
+import { buildFrostOrb } from "./frostOrb";
+import { buildPrismOrb } from "./prismOrb";
+import { listenToMusic, MusicResponse } from "../orbMusic";
 
 /** Rotation speed in radians per second at stress 0 and 1. */
 const SPIN = { calm: 0.1, stressed: 2.2 };
 /** How far the orb turns toward the cursor, in radians (about 35 degrees). */
 const FACE_ANGLE = 0.6;
 
-/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain), Oren (film), Penelope (resin), Edith (opal) and Ephedra (aura). */
-export type OrbLook = "crystal" | "glass" | "porcelain" | "film" | "resin" | "opal" | "aura";
+/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain), Oren (film), Penelope (resin), Edith (opal), Ephedra (aura), Artemis (frost, the listening orb) and Moss (prism). */
+export type OrbLook = "crystal" | "glass" | "porcelain" | "film" | "resin" | "opal" | "aura" | "frost" | "prism";
 
 /** Mote colors for each look while Orb works: bright on a dark page, deeper on a light one. */
 /** How far above its surroundings a point must stand to count as a wave tip, per look (their waves differ in depth). */
@@ -31,6 +34,8 @@ const TIP: Record<OrbLook, [number, number]> = {
   resin: [0.006, 0.03],
   opal: [0.006, 0.03],
   aura: [0.006, 0.03],
+  frost: [0.006, 0.03],
+  prism: [0.006, 0.03],
 };
 
 const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [number, number, number] }> = {
@@ -41,6 +46,8 @@ const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [num
   resin: { dark: [1.0, 0.92, 0.7], light: [0.85, 0.45, 0.6] },
   opal: { dark: [0.7, 0.95, 0.9], light: [0.25, 0.5, 0.7] },
   aura: { dark: [1.0, 0.97, 0.85], light: [0.55, 0.6, 0.75] },
+  frost: { dark: [0.85, 0.85, 1.0], light: [0.45, 0.45, 0.85] },
+  prism: { dark: [0.6, 0.9, 0.95], light: [0.1, 0.5, 0.6] },
 };
 
 /**
@@ -85,7 +92,7 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uWorking: { value: 0 },
     };
     const orb =
-      look === "aura" ? buildAuraOrb(uniforms) : look === "opal" ? buildOpalOrb(uniforms, renderer) : look === "resin" ? buildResinOrb(uniforms) : look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
+      look === "prism" ? buildPrismOrb(uniforms) : look === "frost" ? buildFrostOrb(uniforms, renderer) : look === "aura" ? buildAuraOrb(uniforms) : look === "opal" ? buildOpalOrb(uniforms, renderer) : look === "resin" ? buildResinOrb(uniforms) : look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
     if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
     // Motes off the wave tips while Orb works; they ride along as the orb turns.
@@ -160,8 +167,10 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // The molten orbs turn slowly, so their oozing reads as weight rather than spin. Penelope, a
     // still piece of glass, turns slower still, a third of their pace.
     // Edith, a stone, barely turns: about a tenth of their pace.
-    const spinScale = look === "resin" ? 0.2 : look === "opal" ? 0.06 : 0.6;
-    const upright = look === "opal";
+    // Artemis turns slowly too, about a sixth of their pace, so the music, not the spin, moves her.
+    // Moss, a standing crystal, turns at about a fifth of their pace.
+    const spinScale = look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : 0.6;
+    const upright = look === "opal" || look === "prism";
 
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
@@ -212,8 +221,8 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       const burst = spinAge < 3 ? 6 * push * push * (3 - 2 * push) * Math.exp(-spinAge * 2.4) : 0;
       const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress + burst) * motion * spinScale;
       blob.rotation.y += dt * spin;
-      // Edith stands upright: she turns only about her long axis (and leans toward the cursor with
-      // the facing group, coming back upright when it leaves); the others also tumble.
+      // Edith and Moss stand upright: they turn only about their long axis (and lean toward the
+      // cursor with the facing group, coming back upright when it leaves); the others also tumble.
       if (upright) blob.rotation.x -= blob.rotation.x * Math.min(dt * 3, 1);
       else blob.rotation.x += dt * spin * 0.35;
       // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
@@ -222,6 +231,8 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       facing.rotation.x += (toward.y * FACE_ANGLE * motion - facing.rotation.x) * ease;
       // A look that sees part of itself through another part (Edith's stone through her glass)
       // draws that part first.
+      // A look that moves with something besides the shared uniforms (Artemis's music) steps it here.
+      if ("update" in orb) (orb.update as (dt: number) => void)(dt);
       if ("prerender" in orb) (orb.prerender as (r: THREE.WebGLRenderer, s: THREE.Scene, c: THREE.Camera) => void)(renderer, scene, camera);
       renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
@@ -298,6 +309,18 @@ function glowColors(look: OrbLook, level: number): string[] {
       [[90, 140, 255], [240, 80, 60]],
       [[180, 120, 255], [255, 120, 90]],
     ],
+    // Artemis: the pastels of her inner orb, pink, sky blue and cyan, warming to magenta under stress.
+    frost: [
+      [[255, 175, 225], [235, 110, 205]],
+      [[110, 185, 255], [150, 110, 245]],
+      [[120, 240, 235], [190, 150, 255]],
+    ],
+    // Moss: the crystal's film colors, cyan, yellow and pink when calm, warming to red and orange under stress.
+    prism: [
+      [[90, 205, 235], [235, 70, 50]],
+      [[250, 235, 60], [245, 155, 40]],
+      [[230, 110, 160], [225, 50, 110]],
+    ],
     // Oren: sea blue and aqua when calm, deepening to indigo under stress.
     film: [
       [[60, 150, 255], [70, 80, 220]],
@@ -313,8 +336,29 @@ function glowColors(look: OrbLook, level: number): string[] {
  * faint. Drawn behind the whole page, centered on the orb, so it can spread past its column.
  */
 export function OrbGlow({ look, level }: { look: OrbLook; level: number }) {
+  const glow = useRef<HTMLDivElement>(null);
+  // Artemis's glow pulses lightly with the music: a little brighter and larger with the bass and on
+  // each hit. Set as a style variable each frame, not through React.
+  useEffect(() => {
+    if (look !== "frost") return;
+    const music = new MusicResponse();
+    const stop = listenToMusic((heard) => music.hear(heard));
+    let last = performance.now();
+    let frame = requestAnimationFrame(function tick(now) {
+      music.step(Math.min((now - last) / 1000, 0.1));
+      last = now;
+      const pulse = Math.min(1, 0.55 * music.breath + 0.6 * music.hit + 0.25 * music.level);
+      glow.current?.style.setProperty("--music", pulse.toFixed(3));
+      frame = requestAnimationFrame(tick);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      stop();
+      glow.current?.style.removeProperty("--music");
+    };
+  }, [look]);
   return (
-    <div className="orb-glow" aria-hidden>
+    <div ref={glow} className="orb-glow" aria-hidden>
       {glowColors(look, level).map((color, i) => (
         <span key={i} className={`orb-glow-${i}`} style={{ backgroundColor: color }} />
       ))}

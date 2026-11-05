@@ -56,6 +56,40 @@ export async function codeFor(projects: Project[], cloneNew = true, maxRepos = 4
   return sources;
 }
 
+/** Home folders macOS guards: a run never reads code there (see RUN_SETTINGS), even when asked. */
+const GUARDED = ["Desktop", "Documents", "Downloads", "Library", "Pictures", "Music", "Movies", "Public"];
+
+/**
+ * A checkout a session asked to read ("[orb] code …"): a GitHub repo ("owner/name", or a link to
+ * it) or a bare repo name, as your own checkout when you have one, else the repo's GitHub copy; or a
+ * folder, when it's a git checkout outside the folders macOS guards. Null when it's none of those.
+ */
+export async function resolveCheckout(ask: string): Promise<CodeSource | null> {
+  const want = ask
+    .trim()
+    .replace(/^[`"']+|[`"'.]+$/g, "")
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "");
+  if (!want) return null;
+  if (/^(\/|~\/)/.test(want)) {
+    const { homeDir } = await import("@tauri-apps/api/path");
+    const home = (await homeDir()).replace(/\/$/, "");
+    const full = want.startsWith("~/") ? `${home}/${want.slice(2)}` : want;
+    const inside = full.startsWith(`${home}/`) ? full.slice(home.length + 1).split("/")[0] : null;
+    if (inside && GUARDED.includes(inside)) return null;
+    const [dir] = await invoke<string[]>("existing_dirs", { paths: [full] }).catch(() => []);
+    const [git] = dir ? await invoke<string[]>("existing_dirs", { paths: [`${dir}/.git`] }).catch(() => []) : [];
+    return dir && git ? { label: `local checkout ${dir.split("/").filter(Boolean).pop()}`, dir } : null;
+  }
+  if (!/^[\w.-]+(\/[\w.-]+)?$/.test(want)) return null;
+  const [found] = await invoke<[string, string][]>("find_checkouts", { repos: [want] }).catch(() => []);
+  if (found) return { label: `your local checkout of ${want} (on whatever branch you have out)`, dir: found[1] };
+  if (!want.includes("/")) return null;
+  const dir = await invoke<string>("mirror_repo", { repo: want }).catch(() => null);
+  return dir ? { label: `GitHub ${want} (default branch)`, dir } : null;
+}
+
 /** Repos being cloned or refreshed now, so a run doesn't start a second copy of the same one. */
 const fetching = new Set<string>();
 
@@ -82,7 +116,10 @@ async function mirrorsRoot(): Promise<string> {
 
 /** The project a task belongs to, from any source: its own list (filed under one), or a project's tasks. */
 export async function projectOfTask(taskId: string): Promise<Project | null> {
-  const [projects, manual] = await Promise.all([db.listProjects(), db.listManualTasks()]);
+  const [projects, manual, moved] = await Promise.all([db.listProjects(), db.listManualTasks(), db.getProjectOverrides()]);
+  // Moved to another project (see setTaskProject): that one's.
+  const to = moved[taskId] ? projects.find((p) => p.channel_id === moved[taskId]) : undefined;
+  if (to) return to;
   const filed = manual.find((t) => t.id === taskId)?.project_id;
   if (filed) return projects.find((p) => p.channel_id === filed) ?? null;
   return projects.find((p) => (p.snapshot?.my_tasks ?? []).some((t) => t.id === taskId)) ?? null;
@@ -96,5 +133,6 @@ export function codeNote(sources: CodeSource[], projects: Project[] = []): strin
     `You can read code${forWhat}, read-only, with the Read, Grep and Glob tools:`,
     ...sources.map((s) => `- ${s.label}: ${s.dir}`),
     "When a question depends on how something is built or behaves (an API, a config value, whether a change is in, what a function does), look in the code rather than guessing, and say which file you found it in. GitHub copies are the default branch as of the last few hours; a local checkout can be on another branch or have uncommitted work.",
+    "These folders are the only code you can read: don't search my home folder or anywhere else for other checkouts. If you need code that isn't here, ask my planner for it with an `[orb] code` line (see above).",
   ].join("\n");
 }

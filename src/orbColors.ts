@@ -79,6 +79,32 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [1.0, 0.88, 0.86],
     ],
   },
+  // Moss's mist is the crystal's film colors: cyan and yellow when calm, through pink to red-orange.
+  prism: {
+    deep: [
+      [0.36, 0.8, 0.92],
+      [0.91, 0.43, 0.62],
+      [0.93, 0.35, 0.18],
+    ],
+    wisp: [
+      [0.9, 0.98, 1.0],
+      [1.0, 0.92, 0.96],
+      [1.0, 0.9, 0.86],
+    ],
+  },
+  // Artemis's mist is her inner orb's pastels: sky blue and pink when calm, through lavender to magenta.
+  frost: {
+    deep: [
+      [0.45, 0.72, 1.0],
+      [0.72, 0.64, 1.0],
+      [0.9, 0.4, 0.82],
+    ],
+    wisp: [
+      [0.92, 0.96, 1.0],
+      [0.95, 0.92, 1.0],
+      [1.0, 0.9, 0.97],
+    ],
+  },
   // Edith's mist is her opal fire: sea green and blue when calm, through violet to warm coral.
   opal: {
     deep: [

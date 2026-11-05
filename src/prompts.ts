@@ -666,7 +666,7 @@ export function recheckStepsPrompt(input: RecheckStepsInput): string {
     if (budget < 0) break;
     turns.unshift(`${m.role === "user" ? "Me" : "Claude"}: ${text}`);
   }
-  return `A Claude session is working through a task for me, and my planner shows its steps with their progress. The list has drifted from what actually happened in our conversation. Bring it back in line.
+  return `A Claude session is working through a task with me in a chat, and my planner shows its steps with their progress. The list may have fallen behind what has happened in our conversation. Bring it in line; if it already matches, return it as it is.
 
 Task: ${input.task}
 
@@ -677,7 +677,7 @@ Our conversation, oldest first:
 ${turns.join("\n\n")}
 
 Work out where each step really stands from the conversation:
-- done: finished, including when a message or decision in the conversation took care of it, or it was done out of order.
+- done: finished, as the conversation shows, including when a message or decision in it took care of the step, or it was done out of order. A later step being done doesn't finish an earlier one. A step whose result is a message, doc or invite for me to review stays waiting until the conversation says it was sent or created: Claude drafting it, or changing the draft, isn't finishing it.
 - skipped: no longer needed, because a decision changed the approach or someone else took it on. Say why in note.
 - started: being worked on now.
 - waiting: Claude has stopped and needs something from me right now to go on (an answer, a decision, a message to send). Say what in note.
@@ -685,6 +685,8 @@ Work out where each step really stands from the conversation:
 - todo: not started yet. A step that can't begin until a blocked step clears is todo, not waiting, even if it's mine.
 
 If the plan itself changed in the conversation (a step reassigned, reworded, dropped or added), return the steps as they now stand: keep finished and skipped steps, reword or add steps to match, mark mine with by "you" and Claude's with by "claude". Otherwise keep the titles exactly as listed. Keep the order the work happens in.
+When I asked for work the steps don't cover (another analysis, a further check, a change to a draft) and Claude did it or said it would, that's a step: add it where it happens in the work, with its state. A question Claude answered from what it already had isn't a step, and neither is something Claude only offered to do that I haven't taken up.
+Until I've told Claude to go ahead, we're only talking the plan through: no step has started unless the conversation says Claude did the work anyway.
 
 Reply with ONLY a JSON object: {"steps": [{"title": string, "by": "claude" | "you", "state": "todo" | "started" | "done" | "waiting" | "blocked" | "skipped", "note": string | null}]}`;
 }
@@ -765,6 +767,20 @@ ${text}
 INVITE>>>
 
 After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null, "moved": string|null}. sent is true once the event exists; link is its htmlLink from the tool's result, if any; moved is the new time in words (e.g. "Wed Nov 4, 3:00–3:30pm") when you had to move it, else null.`;
+}
+
+/** Files a Jira ticket the user reviewed: its summary, then its project/type/epic/… lines and description, as written. */
+export function createTicketPrompt(summary: string, text: string): string {
+  return `File one Jira ticket by calling jira_create_issue exactly once, from the ticket below, which the user has reviewed. Summary: "${summary.replace(/"/g, "'")}". Take the project key from its "project:" line and the issue type from "type:" (Task if there's none). Put the components from "component:" (comma separated) in components. In additional_fields, set the priority from "priority:" ({"priority": {"name": "…"}}) and labels from "labels:", and only when the line is there and isn't empty, TBD or none. Put the ticket in the epic from "epic:" with {"epicKey": "<key>"} in additional_fields. If the epic didn't take (the created ticket shows no parent or epic), call jira_link_to_epic once. Use everything after the first blank line as the description, exactly as written: do not reword, shorten, add to, or reformat it, and leave it out if it's empty. Don't set an assignee.
+
+If there's a "links:" line, link the new ticket to each key on it with jira_create_issue_link (the relation in brackets, "Relates" if none); a link that fails doesn't undo the ticket. Don't create, change or comment on anything else.
+
+Ticket (between the markers):
+<<<TICKET
+${text}
+TICKET>>>
+
+After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. sent is true once the ticket exists; link is its browse URL: the scheme and host of the "url" the tool returned, then /browse/<its key>. If a field Jira rejected (a component or priority that doesn't exist) made the create fail, create it again without that field once, and say which you left out in error, keeping sent true.`;
 }
 
 /** An epic's child issues, each with its status and assignee. */

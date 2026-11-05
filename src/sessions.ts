@@ -29,7 +29,7 @@ export interface SessionLink {
    * What Orb sent or created for the session (a message, a doc, an event), with its link and the
    * step it finished when there was one, shown as chips beside that step.
    */
-  artifacts?: { step?: number; title: string; url: string }[];
+  artifacts?: { step?: number; stepTitle?: string; title: string; url: string }[];
   /** Proposed changes the user applied, by key (see PendingAction): what each was and what came of it. */
   applied?: Record<string, { summary: string; result: string }>;
   /** Keys of proposed changes the user turned down. */
@@ -44,6 +44,8 @@ export interface SessionLink {
    * after it apply on top of it.
    */
   recheck?: StepRecheckResult;
+  /** The re-checked list Orb last asked the session to restate, so it asks once per list. */
+  alignAsked?: string;
   /** The transcript state ("reports:messages") last re-checked, so the same drift isn't re-checked twice. */
   recheckedKey?: string;
   /**
@@ -52,8 +54,10 @@ export interface SessionLink {
    * item that's also a task) gives it them with your next message there.
    */
   topic?: boolean;
-  /** The session is talking the plan through with the user (Discuss plan) and hasn't started the work. */
-  discussing?: boolean;
+  /** Code the session asked to read ("[orb] code …") beyond its project's, found and added (see resolveCheckout). */
+  code?: { label: string; dir: string }[];
+  /** Its "[orb] code" requests already handled, found or not. */
+  codeAsked?: string[];
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */
   lastError?: string | null;
 }
@@ -61,11 +65,11 @@ export interface SessionLink {
 /** A Slack message (or a Google Doc) the session handed to Orb to send or create, for the user to review first. */
 export interface PendingSend {
   /**
-   * A Slack message (the default), a Google Doc to create, or a calendar event to create; for a doc
-   * or event, `to` is its title and `text` its content (for an event, its when/who/where lines and
-   * description).
+   * A Slack message (the default), a Google Doc, a calendar event or a Jira ticket to create; for
+   * those, `to` is its title and `text` its content (for an event, its when/who lines and description;
+   * for a ticket, its project/type/epic lines and description).
    */
-  kind?: "message" | "doc" | "event";
+  kind?: "message" | "doc" | "event" | "ticket";
   /** Identifies this exact message, to remember it was sent. */
   key: string;
   /** The step it finishes, when the session said. */
@@ -107,6 +111,8 @@ export interface ChatMessage {
  */
 export const ORB_NOTE = "(From Orb:";
 export function withoutOrbNotes(text: string): string {
+  // A message that's only a note from Orb (one Orb sent itself) isn't shown at all.
+  if (text.trimStart().startsWith(ORB_NOTE)) return "";
   const at = text.indexOf(`\n\n${ORB_NOTE}`);
   return (at >= 0 ? text.slice(0, at) : text).trim();
 }
@@ -129,6 +135,8 @@ export interface StepRecheckResult {
   states: Record<number, StepProgress>;
   /** Report lines in the transcript when it was made. */
   reports: number;
+  /** Your messages in the conversation when it was made: one sent after it is one it hasn't heard. */
+  userMessages?: number;
 }
 
 /** A step of the plan as the session last revised it. */
@@ -140,6 +148,8 @@ export interface PlanStep {
 export interface SessionProgress {
   /** The plan as the session last revised it ("[orb] plan" … "[orb] end"), or null if it hasn't. Step numbers refer to it. */
   plan?: PlanStep[] | null;
+  /** The plan the session itself last wrote, leaving Orb's re-checks out: the list its own step numbers follow. Null if it never restated one. */
+  ownPlan?: PlanStep[] | null;
   /** Progress by step number (1-based), latest report per step. */
   steps: Record<number, StepProgress>;
   /** Messages the session handed to Orb, oldest first. */
@@ -154,6 +164,10 @@ export interface SessionProgress {
   lastReply?: string | null;
   /** How many "[orb]" report lines the transcript has; with the message count, it says whether anything changed. */
   reports?: number;
+  /** Your messages since the opening prompt (Orb's own, after a send, count too). */
+  userMessages?: number;
+  /** You've said something since the session last restated the plan, or it never has: the steps may not reflect it. */
+  userSincePlan?: boolean;
   /** When the transcript last changed (ms). */
   updatedAt: number | null;
   found: boolean;
@@ -161,6 +175,8 @@ export interface SessionProgress {
 
 const LINE = /^\[orb\]\s*step\s+(\d+)\s+(started|done|waiting|skipped|blocked)\b\s*:?\s*(.*)$/i;
 const PLAN = /^\[orb\]\s*plan\b/i;
+/** A restated plan anywhere in a message. */
+const PLAN_LINE = /^[\s`\-]*\[orb\]\s*plan\b/im;
 
 /** The steps of an "[orb] plan" block: one per numbered (or bulleted) line, "[Me]" marking the user's. */
 export function parsePlan(body: string): PlanStep[] {
@@ -186,26 +202,127 @@ export function currentPlan(lines: string[], blocks: { header: string; body: str
   return { plan, lines: lines.slice(lines.findLastIndex((l) => PLAN.test(l)) + 1) };
 }
 
+/** A step's title for matching across restatements: case, punctuation and a [Me] marker don't count. */
+const stepKey = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/^\[me\]\s*/, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
 /**
- * Turns the session's "[orb] step N …" lines into each step's latest state. Sessions work through
- * the steps in order and sometimes skip a "done" report, so once a later step is reported, any
- * earlier step still marked started counts as done. (A step waiting on the user stays waiting.)
+ * Where each step of a restated plan stands: a step that was in the plan before (by its title)
+ * keeps the state it had there, wherever it moved; a new or reworded one starts fresh. Without the
+ * earlier plan's titles nothing can be matched, so nothing carries over.
  */
+export function carryStates(before: PlanStep[] | null, states: Record<number, StepProgress>, after: PlanStep[]): Record<number, StepProgress> {
+  if (!before?.length) return {};
+  const used = new Set<number>();
+  const out: Record<number, StepProgress> = {};
+  after.forEach((st, j) => {
+    const i = before.findIndex((old, k) => !used.has(k) && stepKey(old.title) === stepKey(st.title));
+    if (i < 0) return;
+    used.add(i);
+    if (states[i + 1]) out[j + 1] = states[i + 1];
+  });
+  return out;
+}
+
+/** The plan a task's chat opened with, from its opening prompt's numbered list ("The plan, in order"); null if it has none. */
+export function openingPlan(raw: ChatMessage[]): PlanStep[] | null {
+  const first = raw[0];
+  if (first?.role !== "user" || !first.text.startsWith("Orb task:")) return null;
+  const at = first.text.indexOf("The plan, in order");
+  if (at < 0) return null;
+  const steps: PlanStep[] = [];
+  for (const line of first.text.slice(at).split("\n").slice(1)) {
+    const m = line.match(/^\d+\.\s+(.*)$/);
+    if (!m) {
+      if (steps.length) break;
+      continue;
+    }
+    const mine = /^\[me\]\s*/i.test(m[1]);
+    steps.push({ title: m[1].replace(/^\[me\]\s*/i, "").trim(), by: mine ? "you" : "claude" });
+  }
+  return steps.length ? steps : null;
+}
+
 /**
- * The plan and each step's state now: from Orb's latest re-check when there is one, with the
- * session's reports since then on top, unless the session has restated the plan since.
+ * The plan and each step's state now. It starts from the plan the chat opened with (`opening`), or
+ * from Orb's latest re-check when there is one, and follows the session's reports in order. When the
+ * session restates the plan, each step it keeps (by title) keeps its state, so restating a plan
+ * doesn't undo the steps already done. Plan is null while the session still has the plan it opened with.
  */
 export function stepsNow(
   lines: string[],
   blocks: { header: string; body: string }[],
   recheck?: StepRecheckResult,
+  opening?: PlanStep[] | null,
 ): { plan: PlanStep[] | null; steps: Record<number, StepProgress> } {
+  const restatements = blocks.filter((b) => PLAN.test(b.header)).map((b) => parsePlan(b.body));
+  let plan: PlanStep[] | null = opening?.length ? opening : null;
+  let steps: Record<number, StepProgress> = {};
+  let revised = false;
+  let from = 0;
+  let next = 0;
   if (recheck && lines.length >= recheck.reports) {
-    const newer = lines.slice(recheck.reports);
-    if (!newer.some((l) => PLAN.test(l))) return { plan: recheck.plan, steps: { ...recheck.states, ...parseProgress(newer) } };
+    from = recheck.reports;
+    plan = recheck.plan;
+    steps = { ...recheck.states };
+    revised = true;
+    next = lines.slice(0, from).filter((l) => PLAN.test(l)).length;
   }
-  const revised = currentPlan(lines, blocks);
-  return { plan: revised.plan, steps: parseProgress(revised.lines) };
+  for (const line of lines.slice(from)) {
+    if (PLAN.test(line)) {
+      const restated = restatements[next++];
+      if (!restated?.length) continue;
+      steps = carryStates(plan, steps, restated);
+      plan = restated;
+      revised = true;
+      continue;
+    }
+    report(steps, line);
+  }
+  return { plan: revised ? plan : null, steps };
+}
+
+/**
+ * Whether the steps have caught up with what you said: the session restates the plan when a message
+ * changes the work, so a message of yours after its last restatement (or with none yet) may not be
+ * reflected. Counts your messages since the opening prompt, from the raw transcript.
+ */
+export function heardSincePlan(raw: ChatMessage[]): { userMessages: number; userSincePlan: boolean } {
+  // Orb's own notes to the session (code it asked for, now there) aren't you speaking.
+  const said = (raw[0]?.role === "user" && raw[0].text.startsWith("Orb task:") ? raw.slice(1) : raw).filter((m) => !(m.role === "user" && m.text.trimStart().startsWith(ORB_NOTE)));
+  const lastSaid = said.map((m) => m.role).lastIndexOf("user");
+  const restated = said.findLastIndex((m) => m.role === "assistant" && PLAN_LINE.test(m.text));
+  return { userMessages: said.filter((m) => m.role === "user").length, userSincePlan: lastSaid > restated };
+}
+
+/**
+ * Whether a task chat's steps should be re-checked against its conversation, once a turn is over and
+ * the transcript has changed since the last check: you said something the session didn't restate the
+ * plan for and the last re-check hasn't seen (`heard` is how many of your messages it had), the
+ * session reported a step the list doesn't have, or the steps look out of order.
+ */
+export function stepsNeedRecheck(progress: Pick<SessionProgress, "steps" | "userMessages" | "userSincePlan">, shown: (StepProgress | undefined)[], heard: number): boolean {
+  const unheard = !!progress.userSincePlan && (progress.userMessages ?? 0) > heard;
+  const pastTheEnd = Object.keys(progress.steps).some((n) => Number(n) > shown.length);
+  return unheard || pastTheEnd || looksOutOfSync(shown);
+}
+
+/**
+ * The plan as the card shows it now, with each step's state, for the session's next turn: Orb's
+ * re-check or the session's own restatement, whichever is newer. Null while the session still has
+ * the plan it started with (its opening prompt lists it).
+ */
+export async function currentSessionSteps(link: SessionLink): Promise<{ plan: PlanStep[]; steps: Record<number, StepProgress>; rechecked: boolean } | null> {
+  if (!link.path) return link.recheck ? { plan: link.recheck.plan, steps: link.recheck.states, rechecked: true } : null;
+  const { lines, sends, messages } = await invoke<{ lines: string[]; sends: { header: string; body: string }[]; messages: ChatMessage[] }>("read_session_progress", { path: link.path });
+  const now = stepsNow(lines, sends, link.recheck, openingPlan(messages));
+  // The list is Orb's re-check, not one the session wrote, while it hasn't restated the plan since.
+  const rechecked = !!link.recheck && lines.length >= link.recheck.reports && !lines.slice(link.recheck.reports).some((l) => PLAN.test(l));
+  return now.plan?.length ? { plan: now.plan, steps: now.steps, rechecked } : null;
 }
 
 /**
@@ -218,18 +335,38 @@ export function looksOutOfSync(states: (StepProgress | undefined)[]): boolean {
   return states.some((s, j) => (s?.state === "started" || s?.state === "done") && states.slice(0, j).some((earlier) => !settled(earlier)));
 }
 
+/**
+ * Turns the session's "[orb] step N …" lines into each step's latest state. A step is done only when
+ * it's reported done: one left started while a later step moves stays started (the steps then look
+ * out of order, so Orb re-checks them against the conversation), since a later step moving doesn't
+ * finish an earlier one.
+ */
 export function parseProgress(lines: string[]): Record<number, StepProgress> {
   const steps: Record<number, StepProgress> = {};
-  for (const line of lines) {
-    const m = line.match(LINE);
-    if (!m) continue;
-    const n = Number(m[1]);
-    const state = m[2].toLowerCase() as StepState;
-    steps[n] = state !== "started" && state !== "done" && m[3] ? { state, note: m[3].trim() } : { state };
-    for (const [earlier, progress] of Object.entries(steps))
-      if (Number(earlier) < n && progress.state === "started") steps[Number(earlier)] = { state: "done" };
-  }
+  for (const line of lines) report(steps, line);
   return steps;
+}
+
+/** Applies one "[orb] step N …" report to the steps' states; other lines are ignored. */
+function report(steps: Record<number, StepProgress>, line: string) {
+  const m = line.match(LINE);
+  if (!m) return;
+  const state = m[2].toLowerCase() as StepState;
+  steps[Number(m[1])] = state !== "started" && state !== "done" && m[3] ? { state, note: m[3].trim() } : { state };
+}
+
+/**
+ * Whether a task's plan is finished, so the task is done: every step done (or skipped as no longer
+ * needed, with at least one done), and nothing the session handed over still waiting for you to
+ * review and send or create. A draft isn't a finished step.
+ */
+export function planFinished(states: (StepProgress | undefined)[], unsent: number): boolean {
+  return (
+    states.length > 0 &&
+    states.every((s) => s?.state === "done" || s?.state === "skipped") &&
+    states.some((s) => s?.state === "done") &&
+    unsent === 0
+  );
 }
 
 const SEND = /^\[orb\]\s*send(?:\s+step\s+(\d+))?\s+to\s+(.+?)\s*:?\s*$/i;
@@ -244,14 +381,16 @@ function messageKey(to: string, text: string): string {
 /** Turns the session's "[orb] send … / [orb] end" blocks into messages, unwrapping a code fence around the text. */
 const DOC = /^\[orb\]\s*doc(?:\s+step\s+(\d+))?\s*:?\s*(.+?)\s*$/i;
 const EVENT = /^\[orb\]\s*event(?:\s+step\s+(\d+))?\s*:?\s*(.+?)\s*$/i;
+const TICKET = /^\[orb\]\s*ticket(?:\s+step\s+(\d+))?\s*:?\s*(.+?)\s*$/i;
 
 export function parseSends(blocks: { header: string; body: string }[]): PendingSend[] {
   return blocks.flatMap(({ header, body }): PendingSend[] => {
     const doc = header.match(DOC);
     const event = doc ? null : header.match(EVENT);
-    if (doc || event) {
-      const kind = doc ? ("doc" as const) : ("event" as const);
-      const m = (doc ?? event)!;
+    const ticket = doc || event ? null : header.match(TICKET);
+    if (doc || event || ticket) {
+      const kind = doc ? ("doc" as const) : event ? ("event" as const) : ("ticket" as const);
+      const m = (doc ?? event ?? ticket)!;
       const text = body.trim().replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
       const title = m[2].trim();
       return text ? [{ kind, key: messageKey(`${kind}:${title}`, text), ...(m[1] ? { step: Number(m[1]) } : {}), to: title, text }] : [];
@@ -316,6 +455,14 @@ export function unsentMessages(sends: PendingSend[], link: SessionLink | undefin
   return [...latest.values()].filter((send) => !done.has(send.key));
 }
 
+const CODE = /^\[orb\]\s*code\b\s*:?\s*(.+)$/i;
+
+/** The code a session asked to read ("[orb] code <repo or folder>"), each once, oldest first. */
+export function codeRequests(lines: string[]): string[] {
+  const asked = lines.map((l) => l.match(CODE)?.[1]?.trim()).filter((a): a is string => !!a);
+  return [...new Set(asked)];
+}
+
 /** Claude's message as the user should read it: "[orb]" report lines and hand-off blocks taken out. */
 const REMEMBER = /^\[orb\]\s*remember(?:\s+(plans|writing|tasks|priority|projects|global))?\s*:\s*(.+)$/i;
 
@@ -329,9 +476,9 @@ export function rememberedLessons(lines: string[]): { scope: string; text: strin
 
 export function readableReply(text: string): string {
   return text
-    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event|ticket)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
     // A block still being written (a reply streaming in) is hidden until it's complete.
-    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event)[^\n]*(?:\n[\s\S]*)?$/im, "")
+    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event|ticket)[^\n]*(?:\n[\s\S]*)?$/im, "")
     .split("\n")
     .filter((line) => !/^\s*[-`]*\s*\[orb\]/i.test(line))
     .join("\n")
@@ -417,8 +564,9 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
           if (fresh.length) await db.updateSessionLink(taskId, { remembered: [...done, ...fresh.map((l) => `${l.scope}:${l.text}`)] });
         }
         const lastUserAt = messages.map((m) => m.role).lastIndexOf("user");
+        const heard = heardSincePlan(raw);
         const after = messages.slice(lastUserAt + 1).filter((m) => m.role === "assistant");
-        const now = stepsNow(lines, sends, recheck.current);
+        const now = stepsNow(lines, sends, recheck.current, openingPlan(raw));
         // A plan the chat revised is a correction: what it was, what it became, and what was said.
         // (A watched topic's chat restates its conditional actions this way; those aren't task plans.)
         if (now.plan?.length && !taskId.startsWith(WATCH_CHAT)) {
@@ -441,8 +589,10 @@ export function useSessionProgress(taskId: string, link: SessionLink | undefined
         if (!cancelled)
           setProgress({
             plan: now.plan,
+            ownPlan: currentPlan(lines, sends).plan,
             steps: now.steps,
             reports: lines.length,
+            ...heard,
             sends: currentSends(sends),
             actions: parseActions(sends),
             messages,

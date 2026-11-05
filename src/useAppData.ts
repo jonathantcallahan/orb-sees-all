@@ -24,6 +24,8 @@ export interface AppData {
   taskChecks: Record<string, db.StoredTaskCheck>;
   sessionLinks: Record<string, SessionLink>;
   priorityOverrides: Record<string, Priority>;
+  /** Projects you moved tasks to, by task id (see setTaskProject). */
+  projectOverrides: Record<string, string>;
   /** Other ids for the same tasks, mapped to their canonical ids. */
   taskAliases: Map<string, string>;
   /** Descriptions refreshes updated with new information, by canonical task id. */
@@ -39,7 +41,7 @@ export interface AppData {
 }
 
 async function loadAll(): Promise<AppData> {
-  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom] = await Promise.all([
+  const [projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom, projectOverrides] = await Promise.all([
     db.listProjects(),
     db.getAdhoc(),
     db.listManualTasks(),
@@ -61,8 +63,9 @@ async function loadAll(): Promise<AppData> {
     db.getTaskBriefs(),
     db.listWatchedTopics(),
     db.getMergedFrom(),
+    db.getProjectOverrides(),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom };
+  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, projectOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

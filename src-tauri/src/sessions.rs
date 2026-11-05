@@ -28,8 +28,14 @@ pub struct SessionProgress {
     /// The conversation as typed: the user's messages and Claude's text, each turn of Claude's text
     /// blocks joined into one message. Tool calls and results are left out.
     pub messages: Vec<ChatMessage>,
+    /// Paths Claude's file tools were refused because they're outside the session's folders
+    /// (Claude Code's blockReadsOutsideWorkingDirectories), oldest first.
+    pub blocked: Vec<String>,
     pub modified_ms: u64,
 }
+
+/// The setting Claude Code names when it refuses a read outside the session's folders.
+const BLOCKED_READ: &str = "blockReadsOutsideWorkingDirectories";
 
 #[derive(Serialize)]
 pub struct ChatMessage {
@@ -112,6 +118,7 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
     let mut lines = Vec::new();
     let mut sends = Vec::new();
     let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut blocked: Vec<String> = Vec::new();
     for line in reader.lines().map_while(Result::ok) {
         let is_user = line.contains("\"type\":\"user\"");
         if !is_user && !line.contains("\"type\":\"assistant\"") {
@@ -122,6 +129,24 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
         if is_user {
             if let Some(text) = entry.pointer("/message/content").and_then(|c| c.as_str()) {
                 messages.push(ChatMessage { role: "user", text: text.to_string() });
+            }
+            // A file tool refused outside the session's folders: "<path> is outside …".
+            if line.contains(BLOCKED_READ) {
+                for block in entry.pointer("/message/content").and_then(|c| c.as_array()).into_iter().flatten() {
+                    let refused = block.get("type").and_then(|t| t.as_str()) == Some("tool_result") && block.get("is_error").and_then(|e| e.as_bool()) == Some(true);
+                    let text = match block.get("content") {
+                        Some(serde_json::Value::String(s)) => s.clone(),
+                        Some(serde_json::Value::Array(parts)) => parts.iter().filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("\n"),
+                        _ => String::new(),
+                    };
+                    if refused && text.contains(BLOCKED_READ) {
+                        if let Some((path, _)) = text.trim_start_matches("Error: ").split_once(" is outside ") {
+                            if !blocked.iter().any(|b| b == path) {
+                                blocked.push(path.to_string());
+                            }
+                        }
+                    }
+                }
             }
             continue;
         }
@@ -161,14 +186,14 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                     // Hand-offs ("[orb] send …"), plan updates ("[orb] plan") and proposed changes ("[orb] action")
                     // carry a block of text up to "[orb] end".
                     let lower = trimmed.to_ascii_lowercase();
-                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") || lower.starts_with("[orb] doc") || lower.starts_with("[orb] event") {
+                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") || lower.starts_with("[orb] doc") || lower.starts_with("[orb] event") || lower.starts_with("[orb] ticket") {
                         open = Some((trimmed.to_string(), Vec::new()));
                     }
                 }
             }
         }
     }
-    Ok(SessionProgress { lines, sends, messages, modified_ms: modified_ms(&file_path) })
+    Ok(SessionProgress { lines, sends, messages, blocked, modified_ms: modified_ms(&file_path) })
 }
 
 #[cfg(test)]
@@ -184,7 +209,8 @@ mod tests {
         let reply = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading it now.\n[orb] step 1 started\n`[orb] step 1 done`"}]}}"#;
         let waiting = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[orb] step 2 waiting: need the export"}]}}"#;
         let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end\n[orb] action\n{\"type\": \"add_note\", \"text\": \"Refunds is paused\"}\n[orb] end"}]}}"#;
-        std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{waiting}\n{send}\n")).unwrap();
+        let refused = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"/Users/me/storefront-ui/src is outside /Users/me/work; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories."}]}}"#;
+        std::fs::write(project.join("abc.jsonl"), format!("{user}\n{reply}\n{refused}\n{waiting}\n{send}\n")).unwrap();
         std::fs::write(project.join("other.jsonl"), r#"{"type":"user","message":{"content":"Orb task: t-7"}}"#).unwrap();
         // Where home_dir() looks first on this platform.
         std::env::set_var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }, &home);
@@ -200,6 +226,7 @@ mod tests {
             assert_eq!(progress.messages[0].role, "user");
             assert_eq!(progress.messages[0].text, "Orb task: t-42\n\nWrite `[orb] step N done` when finished.");
             assert_eq!(progress.messages.len(), 2);
+            assert_eq!(progress.blocked, vec!["/Users/me/storefront-ui/src"]);
             assert!(progress.messages[1].text.starts_with("Reading it now."));
             assert_eq!(
                 progress.sends,

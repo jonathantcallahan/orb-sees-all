@@ -18,10 +18,22 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The listening orb's analysis of what's playing: one small FFT per few milliseconds.
+realfft = "3"
+# Hands the captured audio from Core Audio's thread to the analysis thread without locking.
+rtrb = "0.3"
 
 # Hides macOS's own close/minimize/zoom buttons; the app draws its own (see WindowButtons).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+# The listening orb hears what's playing through a Core Audio tap (macOS 14.2 and later).
+objc2 = "0.6"
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware", "objc2", "block2", "dispatch2", "objc2-core-audio-types", "objc2-foundation"] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSDictionary", "NSValue", "NSUUID", "NSObject"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary"] }
+block2 = "0.6"
+dispatch2 = "0.3"
 
 # A notice that the app keeps running in the tray, the first time its window is closed.
 [target.'cfg(windows)'.dependencies]

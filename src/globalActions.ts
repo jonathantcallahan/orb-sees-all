@@ -6,7 +6,7 @@
  */
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, checkBlocker, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
+import { assessPendingTasks, checkBlocker, continueTaskSession, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
 import { projectContext, projectName } from "./projects";
 import { blockerKey } from "./tasks";
 import { setUserProfile } from "./prompts";
@@ -36,6 +36,78 @@ export function actionNames(projects: db.Project[]): { project: Names; channel: 
 }
 
 const channelList = (names: string[]) => names.map((n) => `#${n.replace(/^#/, "")}`).join(", ");
+
+/** A task a change can name: its id, its title, and whether it's still open. */
+export interface KnownTask {
+  id: string;
+  title: string;
+  open: boolean;
+}
+
+const sameTitle = (s: string | null | undefined) =>
+  (s ?? "")
+    .toLowerCase()
+    .replace(/["'“”‘’`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * The task a change means: the one its id names (or the task that id was merged into), else the one
+ * open task with that title, since the chat sometimes loses an id it was given. Null when neither
+ * finds exactly one, so the change fails rather than landing on a task that isn't there.
+ */
+export function findTask(tasks: KnownTask[], aliases: Map<string, string>, id: string | null | undefined, title: string | null | undefined): string | null {
+  if (id?.trim()) {
+    const canonical = aliases.get(id.trim()) ?? id.trim();
+    if (tasks.some((t) => t.id === canonical)) return canonical;
+  }
+  const want = sameTitle(title);
+  if (!want) return null;
+  const matches = tasks.filter((t) => t.open && sameTitle(t.title) === want);
+  return matches.length === 1 ? (aliases.get(matches[0].id) ?? matches[0].id) : null;
+}
+
+/** Every task on the board now (the user's own, Slack and email, projects', meeting prep), for findTask. */
+async function knownTasks(): Promise<KnownTask[]> {
+  const [projects, adhoc, manual, states, calendar] = await Promise.all([
+    db.listProjects(),
+    db.getAdhoc(),
+    db.listManualTasks(),
+    db.getTaskStates(),
+    db.getCalendarDay(localDate(new Date())),
+  ]);
+  const aliases = await db.getTaskAliases();
+  // A task merged into another is open only if that one is.
+  const open = (id: string) => {
+    const st = states.get(aliases.get(id) ?? id);
+    return st?.status !== "done" && !st?.dismissed;
+  };
+  return [
+    ...manual,
+    ...adhoc.tasks,
+    ...projects.flatMap((p) => p.snapshot?.my_tasks ?? []),
+    ...(calendar?.day.events ?? []).flatMap((ev) => ev.prep),
+  ].map((t) => ({ id: t.id, title: t.title, open: open(t.id) }));
+}
+
+/** The id of the task a change means (see findTask), or an error the card shows. */
+async function taskFor(a: { task_id?: string | null; title?: string | null }): Promise<string> {
+  const [tasks, aliases] = await Promise.all([knownTasks(), db.getTaskAliases()]);
+  const id = findTask(tasks, aliases, a.task_id, a.title);
+  if (!id) throw new Error(`Couldn't find ${a.title ? `"${a.title}"` : "that task"} on your list`);
+  return id;
+}
+
+/**
+ * The changes a task's chat proposed that it may make: moving its own task to another project, and
+ * nothing else. Each is made about this task, whatever task the chat named.
+ */
+export function taskChatMoves<T extends { action: GlobalAction | null }>(actions: T[], taskId: string, title: string): T[] {
+  return actions.flatMap((item) => (item.action?.type === "set_task_project" ? [{ ...item, action: { ...item.action, task_id: taskId, title } }] : []));
+}
+
+/** A plan's steps in a line, for its card and for the task's chat. */
+const stepList = (steps: { title: string; by: "claude" | "you" }[]) => steps.map((st, i) => `${i + 1}. ${st.by === "you" ? "[Me] " : ""}${st.title}`);
 
 /** What a change will do, in a line, for its card. */
 export function describeAction(a: GlobalAction, project: Names, channel: Names, item: Items): string {
@@ -77,19 +149,30 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
       return [
         `Add the task "${a.title}"${a.project_id ? ` to "${project(a.project_id)}"` : ""}`,
         a.today ? "in Today's tasks" : "",
-        a.status && a.status !== "todo" ? { in_progress: "in progress", waiting: "waiting" }[a.status] : "",
+        a.status && a.status !== "todo" ? { in_progress: "in progress", waiting: "waiting", blocked: "blocked" }[a.status] : "",
         a.priority ? `${a.priority} priority` : "",
       ]
         .filter(Boolean)
         .join(", ");
     case "add_task_context":
       return `Add to "${a.title ?? "this task"}": ${a.text}`;
+    case "update_task":
+      return [
+        a.new_title ? `Rename "${a.title ?? "this task"}" to "${a.new_title}"` : `Change "${a.title ?? "this task"}"`,
+        a.description != null ? `with the description: ${a.description}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+    case "set_task_plan":
+      return `New plan for "${a.title ?? "this task"}": ${stepList(a.steps).join(" · ")}`;
+    case "set_task_project":
+      return a.project_id ? `Move "${a.title ?? "this task"}" to "${project(a.project_id)}"` : `Take "${a.title ?? "this task"}" out of its project`;
     case "watch_topic":
       return `Watch: ${a.text}`;
     case "plan_today":
       return a.today ? `Move "${a.title ?? "this task"}" into Today's tasks` : `Take "${a.title ?? "this task"}" off Today's tasks`;
     case "set_task_status":
-      return `Mark "${a.title ?? "this task"}" ${{ todo: "to do", in_progress: "in progress", waiting: "waiting", done: "done" }[a.status]}`;
+      return `Mark "${a.title ?? "this task"}" ${{ todo: "to do", in_progress: "in progress", waiting: "waiting", blocked: "blocked", done: "done" }[a.status]}`;
     case "set_task_priority":
       return `Set "${a.title ?? "this task"}" to ${a.priority} priority`;
     case "refresh":
@@ -250,9 +333,10 @@ async function apply(a: GlobalAction): Promise<string> {
       return `Added "${a.title}" to your tasks${a.today ? ", in Today's tasks" : ""} (id ${id}).`;
     }
     case "add_task_context": {
+      const id = await taskFor(a);
       const text = a.text.trim();
       const add = (current: string | null | undefined) => (current?.trim() ? `${current.trim()}\n\n${text}` : text);
-      const mine = (await db.listManualTasks()).find((t) => t.id === a.task_id);
+      const mine = (await db.listManualTasks()).find((t) => t.id === id);
       if (mine) {
         // As the card's description edit does: the old assessment was of the old text, so it's done again.
         await db.updateManualTask(mine.id, { title: mine.title, description: add(mine.description) });
@@ -262,11 +346,54 @@ async function apply(a: GlobalAction): Promise<string> {
       }
       // Other tasks are rewritten by each refresh, so the description goes in as the user's edit of
       // the one the card shows (their earlier edit, else the refreshed one, else the original).
-      const original = await taskDescription(a.task_id);
+      const original = await taskDescription(id);
       if (original === undefined) throw new Error("That task isn't on your list any more");
       const [overrides, refined] = await Promise.all([db.getDescriptionOverrides(), db.getRefinedDescriptions()]);
-      await db.saveDescriptionOverride(a.task_id, add(overrides[a.task_id] ?? refined[a.task_id] ?? original));
+      await db.saveDescriptionOverride(id, add(overrides[id] ?? refined[id] ?? original));
       return "Added to its description.";
+    }
+    case "update_task": {
+      const id = await taskFor(a);
+      const mine = (await db.listManualTasks()).find((t) => t.id === id);
+      // Tasks from Slack, email and projects get their titles from each refresh.
+      if (!mine) throw new Error("Only a task you added yourself can be renamed; add to its description instead");
+      const title = a.new_title?.trim() || mine.title;
+      const description = a.description != null ? a.description.trim() || null : mine.description;
+      await db.updateManualTask(id, { title, description });
+      // As the card's own edit does: before work starts, Claude looks at it again; once a chat has it, its plan stays.
+      if (!(await db.getSessionLinks())[id]?.sessionId) {
+        await db.clearAssessment(id);
+        quiet(assessPendingTasks());
+      }
+      return a.new_title ? `Renamed it to "${title}".` : "Updated it.";
+    }
+    case "set_task_project": {
+      const id = await taskFor(a);
+      const to = a.project_id ? await db.getProject(a.project_id) : null;
+      if (a.project_id && !to) throw new Error("That project isn't on your board");
+      // Moved back to where it was found: nothing to remember.
+      const aliases = await db.getTaskAliases();
+      const foundIn = (await db.listProjects()).find((p) => (p.snapshot?.my_tasks ?? []).some((t) => (aliases.get(t.id) ?? t.id) === id));
+      await db.setTaskProject(id, foundIn && foundIn.channel_id === a.project_id ? null : a.project_id);
+      return to ? `It's under "${projectName(to)}" now.` : "It's out of its project now.";
+    }
+    case "set_task_plan": {
+      const id = await taskFor(a);
+      const steps = a.steps.map((st) => ({ title: st.title.trim(), by: st.by })).filter((st) => st.title);
+      // A task with a chat shows the chat's steps: the chat takes the new plan and restates it, so its
+      // step numbers and reports follow it.
+      if ((await db.getSessionLinks())[id]?.sessionId) {
+        quiet(
+          continueTaskSession(
+            id,
+            ["From my planner's chat: I've changed this task's plan. Restate it exactly as below as an [orb] plan block, keeping each step's state where it's the same work, then carry on as before (if we were still talking the plan through, keep talking it through).", ...stepList(steps)].join("\n"),
+          ),
+        );
+        return "Sent to the task's chat; its steps update as Claude restates the plan.";
+      }
+      const current = (await db.getTaskPlans()).get(id)?.plan;
+      await db.saveTaskPlan(id, { approach: current?.approach ?? "", steps, open_questions: current?.open_questions ?? [], sources: current?.sources ?? [] }, 0);
+      return "The task's plan is updated.";
     }
     case "watch_topic": {
       // As the Watched topics box does: added at once, then filled in (title, project, conditional actions) and checked.
@@ -274,13 +401,13 @@ async function apply(a: GlobalAction): Promise<string> {
       return "Watching it; it's in Watched topics, being filled in and checked.";
     }
     case "plan_today":
-      await db.setTaskState(a.task_id, { todayOn: a.today ? localDate(new Date()) : null });
+      await db.setTaskState(await taskFor(a), { todayOn: a.today ? localDate(new Date()) : null });
       return a.today ? "It's in Today's tasks." : "It's off Today's tasks.";
     case "set_task_status":
-      await db.setTaskState(a.task_id, { status: a.status });
+      await db.setTaskState(await taskFor(a), { status: a.status });
       return "Done.";
     case "set_task_priority":
-      await db.setPriorityOverride(a.task_id, a.priority);
+      await db.setPriorityOverride(await taskFor(a), a.priority);
       return "Priority set.";
     case "refresh": {
       const run = {

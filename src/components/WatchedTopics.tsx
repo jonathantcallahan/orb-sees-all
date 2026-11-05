@@ -149,8 +149,8 @@ function TopicCard({
     role: busy ?? (steps.length ? `${steps.length} ${steps.length === 1 ? "action" : "actions"}` : "None"),
     empty: <p className="muted small watched-none">None: Demian just keeps track of where it stands. Discuss it to add one.</p>,
     // Checks run on their own (every refresh, and after a change); the ↻ at the top checks them all now, a card's own ↻ just that one.
-    actions: ({ discuss }) => (
-      <button className="cta-ghost" onClick={discuss}>
+    actions: ({ discuss, chatOpen }) => (
+      <button className="cta-ghost" disabled={chatOpen} onClick={discuss}>
         Discuss
       </button>
     ),

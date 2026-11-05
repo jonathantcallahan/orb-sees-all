@@ -82,6 +82,20 @@ describe("runClaude", () => {
     expect(JSON.parse(args[args.indexOf("--settings") + 1]).env).toEqual({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" });
   });
 
+  it("tells sessions how to ask for code they weren't given, instead of searching for it", async () => {
+    const { SESSION_DISPLAY } = await import("./claude");
+    expect(SESSION_DISPLAY).toMatch(/\[orb\] code </);
+    expect(SESSION_DISPLAY).toMatch(/no \/add-dir here/);
+  });
+
+  it("keeps file tools to the run's own folders, so nothing searches the home folder", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [], dirs: ["/code/repo"] }, run);
+    const args = run.mock.calls[0][1];
+    expect(JSON.parse(args[args.indexOf("--settings") + 1]).permissions).toEqual({ blockReadsOutsideWorkingDirectories: true });
+    expect(args.slice(args.indexOf("--add-dir"), args.indexOf("--add-dir") + 2)).toEqual(["--add-dir", "/code/repo"]);
+  });
+
   it("leaves out --allowedTools when a job needs no tools", async () => {
     const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
     await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
@@ -201,5 +215,15 @@ describe("code access", () => {
     await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
     expect(run.mock.calls[0][1]).not.toContain("--add-dir");
     expect(run.mock.calls[0][1]).not.toContain("Read");
+  });
+});
+
+describe("Amplitude experiments and flags in chats", () => {
+  it("gives chats the experiment and flag tools, and says to change one only when asked", async () => {
+    const { SESSION_DISPLAY, TOOLS } = await import("./claude");
+    expect(TOOLS.amplitudeExperiments).toEqual(["mcp__claude_ai_Amplitude__use_amp_experiments", "mcp__claude_ai_Amplitude__use_amp_flags"]);
+    // Background jobs keep the read-only list.
+    expect(TOOLS.amplitudeRead).not.toContain("mcp__claude_ai_Amplitude__use_amp_flags");
+    expect(SESSION_DISPLAY).toContain("only do that when I've asked for that exact change in this chat");
   });
 });

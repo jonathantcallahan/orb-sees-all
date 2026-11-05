@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dayRange, layoutDay, nowOffset } from "./calendar";
 import { JobQueue } from "./jobs/queue";
-import { claudeSessionUrl, sessionPrompt, startPrompt } from "./openInClaude";
+import { claudeSessionUrl, sessionPrompt, taskChatPrompt } from "./openInClaude";
 import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
@@ -521,22 +521,26 @@ describe("open in Claude", () => {
     expect(sessionPrompt({ title: "x", description: "y".repeat(20000) }, plan).length).toBeLessThanOrEqual(13500);
   });
 
-  it("asks Claude to work through its own steps unattended, stopping only for the user", () => {
-    const p = startPrompt({ ...task, id: "t-1" }, "Claude can draft the ticket.", [
+  it("talks the plan through, then has Claude work through its own steps, stopping only for the user", () => {
+    const p = taskChatPrompt({ ...task, id: "t-1" }, "Claude can draft the ticket.", [
       { title: "Get the export from Eric", by: "you" },
       { title: "Draft the ticket text", by: "claude" },
       { title: "Check the numbers", by: null },
       { title: "File the ticket", by: "you" },
     ]);
-    expect(p).toMatch(/^Orb task: t-1\n\nI've approved your suggested approach/);
+    expect(p).toMatch(/^Orb task: t-1\n\nI'd like to work through this task from my day planner with you/);
     expect(p).toContain("Your suggestion: Claude can draft the ticket.");
     expect(p).toContain("1. [Me] Get the export from Eric\n2. Draft the ticket text\n3. Check the numbers\n4. [Me] File the ticket");
     expect(p).toMatch(/Don't do the steps marked \[Me\]/);
     expect(p).toMatch(/ask me for that step's result \(as a waiting report\) and stop/);
-    expect(p).toMatch(/running in the background/);
+    expect(p).toMatch(/Talk the plan through with me first/);
+    expect(p).toMatch(/don't start the steps/);
+    expect(p).toMatch(/When I tell you to go ahead, carry out the plan as we last stated it/);
+    expect(p).toMatch(/keep going on your own through your steps in order/);
     expect(p).toMatch(/Don't post to Slack yourself/);
     expect(p).toContain("[orb] send step N to");
-    expect(p).toMatch(/Don't send email, file tickets/);
+    expect(p).toMatch(/Don't send email or change anything outside this session yourself/);
+    expect(p).toMatch(/Jira tickets go to my planner/);
   });
 
 
@@ -716,17 +720,16 @@ describe("project status", () => {
 });
 
 describe("a task's status as its plan's steps get blocked", () => {
-  it("blocks the task when a step is blocked, while the plan is still being discussed too", () => {
-    expect(statusForBlockedSteps(true, false, "todo", true)).toBe("blocked");
-    expect(statusForBlockedSteps(true, false, "in_progress", false)).toBe("blocked");
-    expect(statusForBlockedSteps(true, true, "blocked", false)).toBeNull();
+  it("blocks the task when a step is blocked, before the work has started too", () => {
+    expect(statusForBlockedSteps(true, false, "todo")).toBe("blocked");
+    expect(statusForBlockedSteps(true, false, "in_progress")).toBe("blocked");
+    expect(statusForBlockedSteps(true, true, "blocked")).toBeNull();
   });
 
   it("moves it on once nothing is blocked, and leaves a done task alone", () => {
-    expect(statusForBlockedSteps(false, true, "blocked", false)).toBe("in_progress");
-    expect(statusForBlockedSteps(false, true, "blocked", true)).toBe("todo");
+    expect(statusForBlockedSteps(false, true, "blocked")).toBe("in_progress");
     // Blocked by hand, with no step blocked before: left as the user set it.
-    expect(statusForBlockedSteps(false, false, "blocked", false)).toBeNull();
-    expect(statusForBlockedSteps(true, false, "done", false)).toBeNull();
+    expect(statusForBlockedSteps(false, false, "blocked")).toBeNull();
+    expect(statusForBlockedSteps(true, false, "done")).toBeNull();
   });
 });

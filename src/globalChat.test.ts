@@ -94,6 +94,22 @@ describe("one list of changes for the chat and #demian messages", () => {
     expect(globalChatPrompt("global:x", "hi")).toContain(GLOBAL_ACTION_DOCS);
   });
 
+  it("changes existing tasks rather than adding more, and finds them by title when it has to", async () => {
+    const { GLOBAL_TASK_RULES } = await import("./openInClaude");
+    const { GlobalAction } = await import("./schema");
+    expect(globalChatPrompt("global:x", "hi")).toContain(GLOBAL_TASK_RULES);
+    expect(GLOBAL_TASK_RULES).toMatch(/Never ask me whether I applied a card/);
+    expect(GLOBAL_TASK_RULES).toMatch(/don't write \[orb\] plan or \[orb\] step lines here/);
+    expect(GlobalAction.safeParse({ type: "set_task_status", title: "Get the URL", status: "blocked" }).success).toBe(true);
+    expect(GlobalAction.safeParse({ type: "update_task", task_id: "manual:1", title: "Get the URL", new_title: "Check the account settings" }).success).toBe(true);
+    expect(GlobalAction.safeParse({ type: "set_task_plan", task_id: "manual:1", steps: [{ title: "Ask Sam", by: "claude" }] }).success).toBe(true);
+    expect(GlobalAction.safeParse({ type: "set_task_plan", task_id: "manual:1", steps: [] }).success).toBe(false);
+    expect(GlobalAction.safeParse({ type: "set_task_project", task_id: "slack:3", title: "Review the spec", project_id: "C1" }).success).toBe(true);
+    // Moving a task means changing it, never copying it or pointing at another one.
+    expect(GLOBAL_TASK_RULES).toMatch(/trust what I say about it/);
+    expect(GLOBAL_TASK_RULES).toMatch(/Only mark a task done when I've said it's done/);
+  });
+
   it("reads the new changes", async () => {
     const { GlobalAction } = await import("./schema");
     expect(GlobalAction.safeParse({ type: "watch_topic", text: "Legal sign-off by Friday" }).success).toBe(true);

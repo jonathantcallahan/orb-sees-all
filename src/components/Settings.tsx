@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import * as db from "../db";
 import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
+import { useListeningStatus, type ListeningState } from "../orbMusic";
 import { activeChannels, channelLabel, projectName } from "../projects";
 import { ago } from "../tasks";
 import { localDate } from "../scheduler";
@@ -167,6 +168,18 @@ function ReleaseNotes() {
   );
 }
 
+/** About Artemis, the listening orb: what she hears, the permission, and how listening is going. */
+function listeningHint(listening: ListeningState): ReactNode {
+  if (listening.state === "unavailable") return "Artemis moves with the music playing on your Mac, which needs macOS 14.2 or later.";
+  if (listening.state === "error") return `Artemis moves with the music playing on your Mac, but can't hear it right now (${listening.detail ?? "unknown error"}). She keeps trying.`;
+  return (
+    <>
+      Artemis moves with whatever is playing on your Mac. macOS asks once to let Demian hear it; it only measures the sound as it plays, and nothing is recorded or
+      sent anywhere. If she stays still while music plays, allow Demian under System Settings › Privacy &amp; Security › System Audio Recording.
+    </>
+  );
+}
+
 function SettingRow({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <div className="setting-row">
@@ -312,6 +325,7 @@ export function Settings({
   /** Opened from the Demian chat's View learnings: scrolled to what Demian knows and has learned, unfolded. */
   showLearnings?: boolean;
 }) {
+  const listening = useListeningStatus();
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
@@ -408,7 +422,7 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <SettingRow label="Orb">
+              <SettingRow label="Orb" hint={orbLook === "frost" ? listeningHint(listening) : undefined}>
                 <Segmented
                   label="Orb"
                   value={orbLook}
