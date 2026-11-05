@@ -1,4 +1,3 @@
-import { useOrbName } from "../orbLook";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { TASK_SORTS, type TaskSort } from "../taskDates";
 import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
@@ -28,10 +27,10 @@ const PRIORITIES: [PriorityFilter, string][] = [
   ["unrated", "Unrated"],
 ];
 
-/** Labelled as on the task cards, with the current orb's name. */
-const assistance = (orb: string): [AssistanceFilter, string][] => [
-  ["claude", `${orb} can do it`],
-  ["assisted", `${orb} can help`],
+/** Labelled as on the task cards. */
+const ASSISTANCE: [AssistanceFilter, string][] = [
+  ["claude", "Demian can do it"],
+  ["assisted", "Demian can help"],
   ["human", "You do it"],
   ["unassessed", "Not assessed"],
 ];
@@ -334,9 +333,8 @@ export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; on
   );
 }
 
-/** Source, status, priority, due date, Orb assistance and Recommended filters for All tasks. */
+/** Source, status, priority, due date, Demian assistance and Recommended filters for All tasks. */
 export function TaskFilters({ filter, onChange, showSource = true }: { filter: TaskFilter; onChange: (f: TaskFilter) => void; showSource?: boolean }) {
-  const orbName = useOrbName();
   // Most important first: these stay on the row longest when space runs short.
   const items = [
     {
@@ -366,7 +364,7 @@ export function TaskFilters({ filter, onChange, showSource = true }: { filter: T
     {
       key: "orb",
       active: filter.assistance.length > 0,
-      node: <MultiFilter label="Filter by what Orb can do" anyLabel="Orb" values={filter.assistance} options={assistance(orbName)} onChange={(assistance) => onChange({ ...filter, assistance })} />,
+      node: <MultiFilter label="Filter by what Demian can do" anyLabel="Demian" values={filter.assistance} options={ASSISTANCE} onChange={(assistance) => onChange({ ...filter, assistance })} />,
     },
     { key: "recommended", active: filter.recommendedOnly, node: <RecommendedToggle on={filter.recommendedOnly} onChange={(recommendedOnly) => onChange({ ...filter, recommendedOnly })} /> },
   ];

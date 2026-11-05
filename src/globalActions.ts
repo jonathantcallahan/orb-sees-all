@@ -100,10 +100,13 @@ async function taskFor(a: { task_id?: string | null; title?: string | null }): P
 
 /**
  * The changes a task's chat proposed that it may make: moving its own task to another project, and
- * nothing else. Each is made about this task, whatever task the chat named.
+ * changing its title or description (update_task), and nothing else. Each is made about this task,
+ * whatever task the chat named.
  */
-export function taskChatMoves<T extends { action: GlobalAction | null }>(actions: T[], taskId: string, title: string): T[] {
-  return actions.flatMap((item) => (item.action?.type === "set_task_project" ? [{ ...item, action: { ...item.action, task_id: taskId, title } }] : []));
+export function taskChatChanges<T extends { action: GlobalAction | null }>(actions: T[], taskId: string, title: string): T[] {
+  return actions.flatMap((item) =>
+    item.action?.type === "set_task_project" || item.action?.type === "update_task" ? [{ ...item, action: { ...item.action, task_id: taskId, title } }] : [],
+  );
 }
 
 /** A plan's steps in a line, for its card and for the task's chat. */
@@ -355,8 +358,13 @@ async function apply(a: GlobalAction): Promise<string> {
     case "update_task": {
       const id = await taskFor(a);
       const mine = (await db.listManualTasks()).find((t) => t.id === id);
-      // Tasks from Slack, email and projects get their titles from each refresh.
-      if (!mine) throw new Error("Only a task you added yourself can be renamed; add to its description instead");
+      // Tasks from Slack, email and projects get their titles from each refresh, so only their
+      // description can change: it's kept over what the refresh found, as the card's own edit was.
+      if (!mine) {
+        if (a.description == null) throw new Error("Only a task you added yourself can be renamed; its description can be changed instead");
+        await db.saveDescriptionOverride(id, a.description.trim() || null);
+        return "Updated its description.";
+      }
       const title = a.new_title?.trim() || mine.title;
       const description = a.description != null ? a.description.trim() || null : mine.description;
       await db.updateManualTask(id, { title, description });

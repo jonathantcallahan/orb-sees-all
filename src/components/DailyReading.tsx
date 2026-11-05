@@ -214,7 +214,7 @@ export function DailyReading({
           {current ? (
             <p className="reading-text">{current.text}</p>
           ) : (
-            <p className="muted small">{busy ? "The Orb is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
+            <p className="muted small">{busy ? "Demian is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
           )}
         </Reveal>
       </section>

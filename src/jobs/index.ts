@@ -5,6 +5,7 @@ import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
 import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
+import { TITLE_RULE } from "../baseLessons";
 import { codeRequests, currentSessionSteps, linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
@@ -581,12 +582,16 @@ const WATCH_CHAT_CONTEXT = [
  * Given on every turn of a task's chat: the project it's filed under, the projects it could move
  * to, and how to propose the move (a card the user applies), plus what came of earlier ones.
  */
-async function taskProjectNote(own: db.Project | null, link: SessionLink | undefined): Promise<string> {
+async function taskChangesNote(taskId: string, own: db.Project | null, link: SessionLink | undefined): Promise<string> {
   const tracked = (await db.listProjects()).filter((p) => p.state === "tracked");
   const applied = Object.values(link?.applied ?? {});
+  // Only tasks I added myself can be renamed; the others take their titles from each refresh.
+  const mine = taskId.startsWith("manual:");
   return [
     own ? `My planner files this task under the project "${projectName(own)}" [id ${own.channel_id}].` : "My planner doesn't file this task under any project.",
-    `If I say it belongs to a different project, propose the move as its own block, which my planner shows me as a card to apply:\n[orb] action\n{"type": "set_task_project", "project_id": "<id from the list below>"}\n[orb] end\nThat's the only kind of change to propose here. Use an id from this list, and ask me if more than one could fit:\n${tracked.map((p) => `- ${projectName(p)} [id ${p.channel_id}]`).join("\n")}`,
+    "Two kinds of change to this task can be proposed here, each as its own block, which my planner shows me as a card to apply. Propose one only when I ask for it, and nothing else of this kind.",
+    `- If I want to change what this task says, its ${mine ? "title or " : ""}description:\n[orb] action\n{"type": "update_task", ${mine ? '"new_title": "..." or null, ' : ""}"description": "..." or null}\n[orb] end\nnull leaves it as it is.${mine ? ` A new title: ${TITLE_RULE}` : " Its title comes from where the task was found, so only its description can change."}`,
+    `- If I say it belongs to a different project:\n[orb] action\n{"type": "set_task_project", "project_id": "<id from the list below>"}\n[orb] end\nUse an id from this list, and ask me if more than one could fit:\n${tracked.map((p) => `- ${projectName(p)} [id ${p.channel_id}]`).join("\n")}`,
     applied.length ? `Changes you proposed that I applied: ${applied.map((a) => `${a.summary}. ${a.result}`).join(" ")}` : "",
   ]
     .filter(Boolean)
@@ -842,7 +847,7 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
             : watched
               ? WATCH_CHAT_CONTEXT
               : [
-                  taskChat ? await taskProjectNote(own, link) : "",
+                  taskChat ? await taskChangesNote(taskId, own, link) : "",
                   steps
                     ? shown?.rechecked
                       ? `I re-checked your steps against our conversation, so my planner's list, and its step numbers, may differ from the ones you've been using. From now on, number every [orb] report against this list, not your earlier one:\n${steps}`

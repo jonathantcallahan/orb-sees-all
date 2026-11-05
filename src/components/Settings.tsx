@@ -383,7 +383,7 @@ export function Settings({
           <section className="settings-section">
             <h4>Morning refresh</h4>
             <div className="settings-group">
-              <SettingRow label="Refresh at" hint="Orb reads your channels, inbox and calendar then, and on launch if it missed it.">
+              <SettingRow label="Refresh at" hint="Demian reads your channels, inbox and calendar then, and on launch if it missed it.">
                 <input
                   type="time"
                   className="time-input"

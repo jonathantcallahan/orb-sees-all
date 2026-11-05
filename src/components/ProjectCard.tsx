@@ -11,7 +11,6 @@ import { LinkChips } from "./LinkChips";
 import { TrackingFeed } from "./TrackingFeed";
 import { activeChannels, channelLabel, dedupeStatements, projectContext, projectName, projectStatus, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
-import { useOrbName } from "../orbLook";
 import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated, updatedText } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
@@ -134,7 +133,6 @@ function ContextEntry({ entry, onSave, onRemove }: { entry: { text: string; by: 
 
 /** "Project context": how Demian reads the project (its focus, what isn't part of it), to read and correct. */
 function UnderstandingModal({ project, onClose, onChange }: { project: Project; onClose: () => void; onChange: () => void }) {
-  const orb = useOrbName();
   const entries = projectContext(project);
   const [adding, setAdding] = useState(false);
   const mine = project.focus?.context ?? [];
@@ -187,7 +185,7 @@ function UnderstandingModal({ project, onClose, onChange }: { project: Project; 
           </button>
         </header>
         <p className="small muted understanding-intro">
-          {orb} writes this from the project's channels and keeps it current. Click an entry to reword it, remove what's wrong, or add your own; every refresh works from what's here.
+          Demian writes this from the project's channels and keeps it current. Click an entry to reword it, remove what's wrong, or add your own; every refresh works from what's here.
         </p>
         <ul className="notes-list context-list">
           {entries.map((entry, i) => (
@@ -228,7 +226,6 @@ function byDateNewestFirst<T extends { date?: string | null }>(items: T[]): T[] 
 export function ProjectDetail({ project, onChange }: { project: Project; onChange: () => void }) {
   const p = project.profile;
   const [contextOpen, setContextOpen] = useState(false);
-  const orbName = useOrbName();
   // Its context changes with each refresh (Demian's entries) and with your edits; the later one.
   const contextAt = [project.last_refreshed_at, project.focus?.updated_at].filter((t): t is string => !!t).sort().at(-1);
   const channels = activeChannels(project);
@@ -241,7 +238,7 @@ export function ProjectDetail({ project, onChange }: { project: Project; onChang
             Project context
           </button>
           <span className="timestamp">
-            How {orbName} understands this project.{contextAt && ` Updated ${updatedText(contextAt)}`}
+            How Demian understands this project.{contextAt && ` Updated ${updatedText(contextAt)}`}
           </span>
         </div>
         {contextOpen && <UnderstandingModal project={project} onClose={() => setContextOpen(false)} onChange={onChange} />}

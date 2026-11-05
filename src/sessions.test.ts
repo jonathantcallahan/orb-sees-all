@@ -46,6 +46,14 @@ describe("session progress", () => {
     expect(p).toContain("[orb] step N done");
   });
 
+  it("opens a chat on a task with no plan yet", () => {
+    const p = taskChatPrompt({ id: "t-7", title: "Book the venue" }, "", []);
+    expect(p).toContain("There's no plan for it yet");
+    expect(p).toContain("asking me whether I'd like you to plan the steps");
+    expect(p).not.toContain("Your suggestion:");
+    expect(p).not.toContain("The plan, in order");
+  });
+
   it("leaves the marker out without a task id", () => {
     const p = taskChatPrompt({ title: "Draft the ticket" }, "Claude drafts it.", [{ title: "Read ABC-1", by: "claude" }]);
     expect(p).not.toContain("Orb task:");

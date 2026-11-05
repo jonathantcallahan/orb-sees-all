@@ -146,8 +146,13 @@ export function taskChatPrompt(task: SessionTask, suggestion: string, steps: Sta
     "",
     ...taskLines(task),
   ];
-  lines.push("", `Your suggestion: ${suggestion}`, "", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
-  steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
+  if (suggestion.trim()) lines.push("", `Your suggestion: ${suggestion}`);
+  if (steps.length) {
+    lines.push("", "The plan, in order. Steps marked [Me] are mine; the rest are yours:");
+    steps.forEach((step, i) => lines.push(`${i + 1}. ${step.by === "you" ? "[Me] " : ""}${step.title}`));
+  } else {
+    lines.push("", "There's no plan for it yet. Start by asking me whether I'd like you to plan the steps. If I do, work them out with me: the steps, and which are mine and which are yours.");
+  }
   if (task.id) lines.push(...progressInstructions());
   lines.push(
     "",

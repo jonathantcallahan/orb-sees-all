@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as db from "../db";
-import { actionNames, applyAction, describeAction, taskChatMoves } from "../globalActions";
+import { actionNames, applyAction, describeAction, taskChatChanges } from "../globalActions";
 import type { PendingAction, SessionLink } from "../sessions";
 import { Spinner } from "./common";
 
@@ -73,20 +73,21 @@ export function ActionRow({
 }
 
 /**
- * A task chat's proposals to move its task to another project, the one change a task's chat makes:
- * each as a card to apply, always about this task whatever the chat named.
+ * A task chat's proposals to change its task (move it to another project, or change its title or
+ * description), the changes a task's chat makes: each as a card to apply, always about this task
+ * whatever the chat named.
  */
-export function TaskMoveCards({ taskId, title, actions, link, said, onChange }: { taskId: string; title: string; actions: PendingAction[]; link: SessionLink | undefined; said?: string; onChange: () => void }) {
+export function TaskChangeCards({ taskId, title, actions, link, said, onChange }: { taskId: string; title: string; actions: PendingAction[]; link: SessionLink | undefined; said?: string; onChange: () => void }) {
   const [projects, setProjects] = useState<db.Project[]>([]);
   useEffect(() => {
     db.listProjects().then(setProjects, () => {});
   }, []);
   const names = actionNames(projects);
-  const moves = taskChatMoves(actions, taskId, title);
-  if (!moves.length) return null;
+  const changes = taskChatChanges(actions, taskId, title);
+  if (!changes.length) return null;
   return (
     <>
-      {moves.map((item) => (
+      {changes.map((item) => (
         <ActionRow
           key={item.key}
           chatKey={taskId}

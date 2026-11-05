@@ -8,7 +8,6 @@ import { unsentMessages, useSessionProgress, type PendingAction, type SessionLin
 import { useJobStatus } from "../useAppData";
 import { ActionRow } from "./ActionRow";
 import { SessionChat } from "./TaskCard";
-import { useOrbName } from "../orbLook";
 
 /**
  * Example messages for the empty reply box, made from what's on the board: the kinds of things the
@@ -65,7 +64,6 @@ export function GlobalChat({
   useEffect(reload, [key]);
   const progress = useSessionProgress(key ?? "", key ? link : undefined, reload);
   const working = useJobStatus(`session:${key}`);
-  const orbName = useOrbName();
   // How many things Demian has learned (what it knows plus its lessons), beside View learnings.
   const [learnings, setLearnings] = useState(0);
   useEffect(() => {
@@ -83,7 +81,7 @@ export function GlobalChat({
     <SessionChat
       taskId={key}
       title="Demian"
-      subtitle={`Ask ${orbName} to adjust your workspace`}
+      subtitle="Ask Demian to adjust your workspace"
       ask={null}
       plain
       messages={progress?.messages ?? []}

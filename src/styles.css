@@ -304,6 +304,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .automation-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .automation-head .automation-kind { font-size: 12px; }
 .automation-head:hover .automation-kind { color: var(--text); }
+/* No plan yet: a plain heading, nothing to open. */
+.automation-head.fixed { cursor: default; }
+.automation-head.fixed:hover .automation-kind { color: var(--muted); }
 .disclosure { margin-left: auto; flex-shrink: 0; color: var(--muted); transition: transform 0.15s ease; }
 .disclosure.open { transform: rotate(90deg); }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
@@ -375,6 +378,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 /* The space under the header is a margin inside the clipped area (padding wouldn't shrink to zero). */
 .task-body-inner > :first-child { margin-top: 6px; }
+/* Text rows read farther apart than their 6px gap (their line height adds space); bordered blocks
+   don't. A little more above the Plan box and the row of actions under it keeps the gaps looking even. */
+.task-body-inner > .automation:not(:first-child) { margin-top: 4px; }
+.task-body-inner > .plan-actions:not(:first-child) { margin-top: 6px; }
 .task-card.collapsed .task-body-inner { opacity: 0; transform: translateY(-4px); transition: opacity 110ms ease-in, transform 190ms var(--close-ease); }
 /* Clip only while collapsed or moving, so focus rings and shadows inside an open card aren't cut off. */
 .task-card.collapsed .task-body-inner, .task-card.animating .task-body-inner { overflow: hidden; }
@@ -803,6 +810,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Plan panel actions: the Claude-style approve button, then text links */
 .plan-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+/* Nothing in it (no Plan steps, nothing running): no row, so no gap under the last step. */
+.plan-actions:empty { display: none; }
+.plan-outline:has(> .plan-actions:only-child:empty) { display: none; }
 .plan-actions > button { white-space: nowrap; }
 .session-status { flex-basis: 100%; }
 .cta-primary { padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border); background: #fff; color: #1c1c1a; font-size: 12px; }
@@ -810,13 +820,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .cta-ghost:hover:not(:disabled) { background: var(--grey-bg); }
 .cta-primary:hover:not(:disabled) { opacity: 0.88; }
 
-/* Description: cut to two lines with "…" and a gray More at the end */
-.description-actions { display: flex; gap: 10px; align-items: baseline; width: 100%; min-width: 0; overflow: hidden; }
-/* With nothing to show (no More, Edit or links), the row takes no space, so it adds no gap. */
-.description-actions:empty { display: none; }
-/* The links never wrap; a long status (a double check under way) truncates instead. */
-.description-actions > * { white-space: nowrap; flex-shrink: 0; }
-.description-actions > .checking { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .link-button.more-link { color: var(--muted); }
 
 /* Plan details modal, centered */
@@ -942,11 +945,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 
 /* Placeholder plan rows before a plan exists */
-.plan-outline-steps.skeleton li { align-items: center; }
-.plan-outline-steps.skeleton .step-circle { margin-top: 0; opacity: 0.5; }
-.skeleton-bar { display: block; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 22%, transparent); }
-.plan-outline-steps.skeleton.loading .skeleton-bar { animation: skeleton-pulse 1.4s ease-in-out infinite; }
-@keyframes skeleton-pulse { 50% { opacity: 0.45; } }
 /* Task body text matches the project cards' gray. */
 .automation .suggestion { color: var(--muted); }
 
@@ -979,6 +977,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* In the plan box's bottom-right corner, gray, words and mark; Claude's mark turns orange only while
    you hover the link itself, and the words stay gray. */
 .plan-actions > .claude-link { margin-left: auto; }
+/* Links sits at the right, just left of Open in Claude. */
+.plan-actions > .links-toggle { margin-left: auto; }
+.plan-actions > .links-toggle + .claude-link { margin-left: 4px; }
 .link-button.more-link.claude-link, .link-button.more-link.claude-link:hover { color: var(--muted); }
 .claude-link img { transition: filter 0.15s ease; filter: grayscale(1); }
 .claude-link:hover img { filter: none; }

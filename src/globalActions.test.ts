@@ -5,7 +5,7 @@ vi.mock("./db", () => ({}));
 vi.mock("./jobs", () => ({}));
 vi.mock("./claude", () => ({}));
 
-const { describeAction, findTask, taskChatMoves } = await import("./globalActions");
+const { describeAction, findTask, taskChatChanges } = await import("./globalActions");
 
 const project = (id: string) => (id === "C1" ? "Store" : id);
 const channel = (id: string) => id;
@@ -85,17 +85,21 @@ describe("changing an existing task from the chat", () => {
   });
 });
 
-describe("a task's chat moving its task", () => {
-  it("keeps only moves, made about the chat's own task", () => {
-    const moves = taskChatMoves(
+describe("a task's chat changing its task", () => {
+  it("keeps only moves and edits, made about the chat's own task", () => {
+    const changes = taskChatChanges(
       [
         { key: "a", action: { type: "set_task_project", task_id: "slack:other", title: "Something else", project_id: "C1" } as const },
         { key: "b", action: { type: "set_task_status", task_id: "slack:3", status: "done" } as const },
         { key: "c", action: null },
+        { key: "d", action: { type: "update_task", new_title: null, description: "Review the spec with design first." } as const },
       ],
       "slack:3",
       "Review the spec",
     );
-    expect(moves).toEqual([{ key: "a", action: { type: "set_task_project", task_id: "slack:3", title: "Review the spec", project_id: "C1" } }]);
+    expect(changes).toEqual([
+      { key: "a", action: { type: "set_task_project", task_id: "slack:3", title: "Review the spec", project_id: "C1" } },
+      { key: "d", action: { type: "update_task", task_id: "slack:3", title: "Review the spec", new_title: null, description: "Review the spec with design first." } },
+    ]);
   });
 });
