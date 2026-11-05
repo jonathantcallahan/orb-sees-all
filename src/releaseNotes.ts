@@ -11,6 +11,19 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.11",
+    date: "2026-11-05",
+    notes: [
+      "Every task has Open in chat, planned or not, all yours or not. The chat talks the plan through with you before it starts; on a task with no plan yet it asks whether you'd like one.",
+      "Plan steps follow the chat and keep their states when the plan is restated, and a task is done only when every step is.",
+      "A task's chat can rename the task, change its description or move it to another project, as cards you apply. Chats also hand Jira tickets to Demian to review and file, and ask for the code folders they need.",
+      "The Demian chat trusts the task you mean, and can rename, re-plan and move tasks.",
+      "Task cards are simpler: the full description, the Plan box with Open in chat, Links and Open in Claude under it, Double check as ↻ in the header, and the time estimate always first. The task whose chat is open is outlined.",
+      "Merged notes have Undo merge and a button to hide them. Project details stay gray until you hover them.",
+      "Fixes: the focus ring staying on priority and status badges after picking from them with the mouse.",
+    ],
+  },
+  {
     version: "0.6.10",
     date: "2026-11-04",
     notes: [
