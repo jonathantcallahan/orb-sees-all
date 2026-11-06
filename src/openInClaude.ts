@@ -1,5 +1,5 @@
 import { actionLine, WATCH_CHAT } from "./watched";
-import { SAME_WORK_RULE, TITLE_RULE } from "./baseLessons";
+import { SAME_WORK_RULE, STEP_RULE, TITLE_RULE } from "./baseLessons";
 import type { TaskPlan } from "./schema";
 
 /** Claude Desktop truncates prefilled prompts at about 14,000 characters. */
@@ -99,7 +99,7 @@ function progressInstructions(): string[] {
     "N is the step's number in the list above.",
     "",
     "Don't post to Slack yourself. When a Slack message is ready, hand it to my planner, which shows it to me to review and send. Write it as its own block:",
-    "[orb] send step N to <#channel-name, or the permalink of the thread to reply in>",
+    "[orb] send step N to <#channel-name, @person for a DM (their Slack user ID, like @U0123ABCD, when you know it, else their full name), or the permalink of the thread to reply in>",
     "<the message, exactly as it should be posted>",
     "[orb] end",
     "then `[orb] step N waiting: review and send the message` and stop. I'll tell you once it's sent, with its link.",
@@ -139,7 +139,12 @@ function workInstructions(): string[] {
  * first, then carries it out once they tell it to go ahead in the chat. Throughout, the steps on
  * the card follow the chat: the session restates the plan whenever what's agreed changes it.
  */
-export function taskChatPrompt(task: SessionTask, suggestion: string, steps: StartStep[]): string {
+/**
+ * The opening of a task's chat. With `firstMessage` (the chat starts when you send your first
+ * message, never just by opening it), Claude answers that first; it's quoted last, so the chat shows
+ * it as your message.
+ */
+export function taskChatPrompt(task: SessionTask, suggestion: string, steps: StartStep[], firstMessage?: string): string {
   const lines = [
     ...(task.id ? [sessionMarker(task.id), ""] : []),
     "I'd like to work through this task from my day planner with you, here in its chat.",
@@ -156,18 +161,23 @@ export function taskChatPrompt(task: SessionTask, suggestion: string, steps: Sta
   if (task.id) lines.push(...progressInstructions());
   lines.push(
     "",
-    "Talk the plan through with me first. Open with a short take on it, a few sentences, and ask what I'd like to change. Until I tell you to go ahead, look things up only as far as you need to answer my questions about the plan, and don't start the steps.",
+    firstMessage?.trim()
+      ? "Talk the plan through with me first: answer my message below. Until I tell you to go ahead, look things up only as far as you need to answer my questions about the plan, and don't start the steps."
+      : "Talk the plan through with me first. Open with a short take on it, a few sentences, and ask what I'd like to change. Until I tell you to go ahead, look things up only as far as you need to answer my questions about the plan, and don't start the steps.",
     // Without a task, there's no planner following along (and no [orb] reports).
     ...(task.id
       ? [
-          "The steps in my planner follow this chat, so keep them current. Whenever what we agree changes the work, restate the whole plan as an [orb] plan block, finished steps included, with [Me] in front of my steps. That's any step added, dropped, reworded, reordered or moved between you and me, and anything I ask for that the steps don't cover yet (another analysis, a further check, a change to a draft), which is a new step. It holds after you've started too, and when I tell you to go ahead and add something in the same message: restate the plan first, then carry on and number your reports against it.",
+          "The steps in my planner follow this chat, so keep them current. Whenever what we agree changes the work, restate the whole plan as an [orb] plan block, finished steps included, with [Me] in front of my steps. " + STEP_RULE + " Shorten any longer steps when you restate them. That's any step added, dropped, reworded, reordered or moved between you and me, and anything I ask for that the steps don't cover yet (another analysis, a further check, a change to a draft), which is a new step. It holds after you've started too, and when I tell you to go ahead and add something in the same message: restate the plan first, then carry on and number your reports against it.",
         ]
       : []),
     "When I tell you to go ahead, carry out the plan as we last stated it.",
     ...workInstructions(),
   );
+  // Your message goes last, whole, however long the rest is.
+  const mine = firstMessage?.trim() ? `\nMy message: ${firstMessage.trim()}` : "";
+  const room = Math.max(1000, MAX_PROMPT - mine.length);
   const prompt = lines.join("\n");
-  return prompt.length > MAX_PROMPT ? `${prompt.slice(0, MAX_PROMPT - 1)}…` : prompt;
+  return (prompt.length > room ? `${prompt.slice(0, room - 1)}…` : prompt) + mine;
 }
 
 /** An update from the briefing, as the Explain this chat sees it. */
@@ -250,7 +260,7 @@ export const GLOBAL_ACTION_DOCS = [
   '- {"type": "plan_today", "task_id": "<id from my task list>", "title": "<its title>", "today": true}: put one of my existing tasks in Today\'s tasks (today false takes it off). When I ask whether I have a task about something, find it in my task list (match on meaning, not just words), tell me which, and propose this if I want it today.',
   '- {"type": "update_task", "task_id": "<id from my task list>", "title": "<its title now>", "new_title": "..." or null, "description": "..." or null}: renames or rewrites one of my own tasks (ids starting "manual:") when what it\'s about has changed. Use it rather than adding a second task for the same piece of work. Its new title: ' + TITLE_RULE + ' For tasks from Slack, email or a project, use add_task_context instead.',
   '- {"type": "set_task_project", "task_id": "<id from my task list>", "title": "<its title>", "project_id": "C111" or null}: files a task under another project, when it belongs to a different one than it shows; null takes one of my own out of its project. Use it whenever I say a task is for a different project: never make a copy and mark the original done.',
-  '- {"type": "set_task_plan", "task_id": "<id from my task list>", "title": "<its title>", "steps": [{"title": "...", "by": "claude" | "you"}]}: replaces the task\'s plan with these steps, in order, finished ones included, "you" for mine. Use it when I ask to change or adjust a task\'s plan. If the task has its own chat, my planner passes the plan to it.',
+  '- {"type": "set_task_plan", "task_id": "<id from my task list>", "title": "<its title>", "steps": [{"title": "...", "by": "claude" | "you"}]}: replaces the task\'s plan with these steps, in order, finished ones included, "you" for mine. ' + STEP_RULE + ' Use it when I ask to change or adjust a task\'s plan. If the task has its own chat, my planner passes the plan to it.',
   '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "blocked" | "done"}: "blocked" when it can\'t move until someone else acts (an answer, an approval); "waiting" when it\'s waiting on me.',
   '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',
   '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',

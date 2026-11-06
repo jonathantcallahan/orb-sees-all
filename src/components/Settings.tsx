@@ -422,9 +422,9 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <SettingRow label="Orb" hint={orbLook === "frost" ? listeningHint(listening) : undefined}>
+              <SettingRow label="Visualizer" hint={orbLook === "frost" ? listeningHint(listening) : undefined}>
                 <Segmented
-                  label="Orb"
+                  label="Visualizer"
                   value={orbLook}
                   onChange={onOrbLookChange}
                   options={ORB_LOOKS.map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}

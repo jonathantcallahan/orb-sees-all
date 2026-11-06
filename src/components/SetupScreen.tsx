@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import * as db from "../db";
 import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
-import { INSTALL_CLAUDE, isWindows, LOGIN_CLAUDE, TERMINAL } from "../platform";
+import { INSTALL_CLAUDE, isWindows, TERMINAL, useLoginCommand } from "../platform";
 
 /** claude.ai's own list of your connectors, under Customize. */
 export const CONNECTORS_URL = "https://claude.ai/new#customize/connectors/yours";
@@ -96,6 +96,7 @@ function ConnectorRow({ c }: { c: ConnectorCheck }) {
 export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [report, setReport] = useState<SetupReport | null>(null);
   const [checking, setChecking] = useState(false);
+  const loginCommand = useLoginCommand();
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -164,7 +165,7 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
               <>
                 Being signed in at claude.ai in your browser isn't enough; Claude Code signs in on its own. In {TERMINAL}, run this and approve it in your
                 browser with your Claude account (Pro, Max, Team or Enterprise), then check again:
-                <Command text={LOGIN_CLAUDE} />
+                <Command text={loginCommand} />
               </>
             )}
           </Step>
@@ -175,7 +176,7 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
               <span className="error">
                 Claude Code is signed in with an API key or a company token, so it can't reach the claude.ai connectors. Sign it in with your Claude
                 account in {TERMINAL}, then check again:
-                <Command text={LOGIN_CLAUDE} />
+                <Command text={loginCommand} />
               </span>
             )}
             {r?.connectors && (

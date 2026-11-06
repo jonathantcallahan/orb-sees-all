@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
@@ -36,6 +37,8 @@ export function UpdateButton() {
         }
         if (e.event === "Finished") setProgress("Restarting…");
       });
+      // Runs in progress end with the old app rather than outliving it.
+      await invoke("cancel_all_runs").catch(() => {});
       await relaunch();
     } catch (e) {
       setProgress(null);

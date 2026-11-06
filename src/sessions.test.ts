@@ -103,6 +103,17 @@ describe("handed-off messages", () => {
     expect(parseSends([{ header: "[orb] sending soon", body: "x" }])).toEqual([]);
   });
 
+  it("reads a DM to a person, whose name has spaces, apart from its description", async () => {
+    const { parseSends, sendDestination } = await import("./sessions");
+    const [byName] = parseSends([{ header: "[orb] send step 2 to Ana Lee (DM with Ana Lee)", body: "Here's the sheet" }]);
+    expect(byName).toMatchObject({ step: 2, to: "Ana Lee", label: "DM with Ana Lee" });
+    expect(sendDestination(byName)).toBe("DM with Ana Lee");
+    const [byId] = parseSends([{ header: "[orb] send to @U0123ABCD (DM with Ana)", body: "Hi" }]);
+    expect(byId).toMatchObject({ to: "@U0123ABCD", label: "DM with Ana" });
+    expect(sendDestination({ to: "@U0123ABCD" })).toBe("a DM");
+    expect(sendDestination({ to: "@Ana Lee" })).toBe("DM with Ana Lee");
+  });
+
   it("keeps only the latest unsent message for each step", async () => {
     const { parseSends, unsentMessages } = await import("./sessions");
     const sends = parseSends([
@@ -112,6 +123,24 @@ describe("handed-off messages", () => {
     ]);
     expect(unsentMessages(sends, { startedAt: 0 }).map((s) => s.text)).toEqual(["second draft", "other"]);
     expect(unsentMessages(sends, { startedAt: 0, sentKeys: [sends[1].key] }).map((s) => s.text)).toEqual(["other"]);
+  });
+});
+
+describe("starting a task chat", () => {
+  it("starts from your first message, quoted last and shown as yours", async () => {
+    const { readableMessages } = await import("./sessions");
+    const p = taskChatPrompt({ id: "t-9", title: "Book the venue" }, "", [{ title: "Call the venue", by: "claude" }], "Can we do Thursday instead?");
+    expect(p.endsWith("\nMy message: Can we do Thursday instead?")).toBe(true);
+    expect(p).toContain("answer my message below");
+    expect(p).not.toContain("Open with a short take");
+    expect(readableMessages([{ role: "user", text: p }])).toEqual([{ role: "user", text: "Can we do Thursday instead?" }]);
+  });
+
+  it("keeps your whole message when the rest of the prompt is long", async () => {
+    const long = "x".repeat(20_000);
+    const p = taskChatPrompt({ id: "t-9", title: "Book the venue", description: long }, "", [], "Thursday?");
+    expect(p.endsWith("\nMy message: Thursday?")).toBe(true);
+    expect(p.length).toBeLessThan(14_000);
   });
 });
 
@@ -392,5 +421,16 @@ describe("a chat adopted as a task's", () => {
     expect(note).toContain("1. Read the thread");
     expect(note).toContain("[orb] step N done");
     expect(withoutOrbNotes(`Carry on\n\n${note}`)).toBe("Carry on");
+  });
+});
+
+describe("draft edits", () => {
+  it("keeps your edit by draft, and forgets it once it's back to Claude's text or cleared", async () => {
+    const { withEdit } = await import("./sessions");
+    const edits = withEdit(undefined, "a", "Hi Ana, here's the sheet", "Hi, here's the sheet");
+    expect(edits).toEqual({ a: "Hi Ana, here's the sheet" });
+    expect(withEdit(edits, "b", "Other", "Orig")).toEqual({ a: "Hi Ana, here's the sheet", b: "Other" });
+    expect(withEdit(edits, "a", "Hi, here's the sheet", "Hi, here's the sheet")).toEqual({});
+    expect(withEdit(edits, "a", null, "Hi, here's the sheet")).toEqual({});
   });
 });

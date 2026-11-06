@@ -17,7 +17,8 @@ import { buildPrismOrb } from "./prismOrb";
 import { listenToMusic, MusicResponse } from "../orbMusic";
 
 /** Rotation speed in radians per second at stress 0 and 1. */
-const SPIN = { calm: 0.1, stressed: 2.2 };
+// Halved on 2026-11-05 for every look alike, so each still turns at its pace relative to the others.
+const SPIN = { calm: 0.05, stressed: 1.1 };
 /** How far the orb turns toward the cursor, in radians (about 35 degrees). */
 const FACE_ANGLE = 0.6;
 
@@ -169,7 +170,9 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // Edith, a stone, barely turns: about a tenth of their pace.
     // Artemis turns slowly too, about a sixth of their pace, so the music, not the spin, moves her.
     // Moss, a standing crystal, turns at about a fifth of their pace.
-    const spinScale = look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : 0.6;
+    // Demian and Oren turn at half the molten pace, so they drift rather than spin.
+    const spinScale =
+      look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : look === "crystal" || look === "film" ? 0.3 : 0.6;
     const upright = look === "opal" || look === "prism";
 
     const resize = () => {

@@ -31,10 +31,14 @@ interface Problem {
   apiKey?: boolean;
   /** Only optional connectors are missing: shown once, with Continue. */
   optionalOnly?: boolean;
+  /** Check again just looked and found it still not done, so the guide says so. */
+  stillNot?: boolean;
 }
 
 /** How often install and sign-in are looked at again while onboarding waits on them. */
 const POLL_MS = 4000;
+/** The longest the tools check may take before onboarding stops waiting and offers to check again. */
+const TOOLS_LIMIT_MS = 120_000;
 
 /**
  * First run (and the menu bar's Replay onboarding): a black screen with Demian at its center. Its
@@ -107,8 +111,10 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
   const [problem, setProblem] = useState<Problem | null>(null);
   const [ready, setReady] = useState(false);
   const [details, setDetails] = useState(false);
-  /** Where to (re)start: the whole sequence the first time, a single step after a re-check. */
-  const [run, setRun] = useState<{ from: Stage; n: number }>({ from: "claude", n: 0 });
+  /** Where to (re)start: the whole sequence the first time, a single step after a re-check (manual when you pressed Check again). */
+  const [run, setRun] = useState<{ from: Stage; n: number; manual?: boolean }>({ from: "claude", n: 0 });
+  /** A Check again you pressed is running. */
+  const [checking, setChecking] = useState(false);
   const report = useRef<SetupReport | null>(null);
   /** The optional connectors have been shown once; after Continue (or a re-check) they don't stop setup again. */
   const optionalShown = useRef(false);
@@ -130,9 +136,16 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
         await wait(100);
       }
     };
+    /** Shows what's stopping setup (or nothing), which also ends a Check again you pressed. */
+    const show = (p: Problem | null) => {
+      setChecking(false);
+      setProblem(p);
+    };
+    /** Whether this is a Check again you pressed on this stage, so a step still not done can say so. */
+    const stillNot = (stage: Stage) => !!run.manual && run.from === stage;
     (async () => {
-      // A guided step stays up while the next check runs, so "Get started" doesn't blink away and
-      // scramble back between steps; it's replaced by the next step, or cleared once all pass.
+      // A guided step stays up while its own check runs again, so "Get started" doesn't blink away
+      // and scramble back; it's replaced by the next step, or cleared once its step passes.
       setProblem((p) => (p?.guide ? p : null));
       setReady(false);
       setGreeting(false);
@@ -140,44 +153,56 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
       // The name spells itself out of noise, slowly, the first time.
       if (run.n === 0) await wait(3600);
       if (!live()) return;
-      let finished = false;
-      const fake = simulate ? simulatedChecks(simRef.current) : null;
-      runSetupChecks((r) => (report.current = r), fake?.run, fake?.stream).then((r) => {
-        report.current = r;
-        finished = true;
-      });
+      // Continue past the optional connectors: everything needed was just checked, so go straight on.
+      if (run.from === "role") show(null);
+      else {
+        let finished = false;
+        const fake = simulate ? simulatedChecks(simRef.current) : null;
+        // Only this run's results count: a check left running from before mustn't overwrite them.
+        runSetupChecks((r) => live() && (report.current = r), fake?.run, fake?.stream).then((r) => {
+          if (!live()) return;
+          report.current = r;
+          finished = true;
+        });
 
-      // Installed and signed in are quick to check and say nothing when they pass: the guide opens on
-      // the first step that needs you, with the ones before it ticked off.
-      const claude = await until((r) => r.claude);
-      if (!live()) return;
-      if (!claude?.ok) return setProblem({ text: "Get started", stage: "claude", recheck: "Check again", guide: "install" });
+        // Installed and signed in are quick to check and say nothing when they pass: the guide opens on
+        // the first step that needs you, with the ones before it ticked off.
+        const claude = await until((r) => r.claude);
+        if (!live()) return;
+        if (!claude?.ok) return show({ text: "Get started", stage: "claude", recheck: "Check again", guide: "install", stillNot: stillNot("claude") });
 
-      const login = await until((r) => r.login);
-      if (!live()) return;
-      if (!login?.ok) return setProblem({ text: "Get started", stage: "login", recheck: "Check sign-in again", guide: "login" });
-      spinOrb();
+        const login = await until((r) => r.login);
+        if (!live()) return;
+        if (!login?.ok) return show({ text: "Get started", stage: "login", recheck: "Check sign-in again", guide: "login", stillNot: stillNot("login") });
+        spinOrb();
+        // Signed in: off the install and sign-in guide, so the tools check shows as what it is rather
+        // than the sign-in looking stuck while it runs.
+        setChecking(false);
+        setProblem((p) => (p?.guide === "install" || p?.guide === "login" ? null : p));
 
-      setLine(run.from === "tools" ? "Checking your tools again" : "Connecting your tools");
-      const start = Date.now();
-      while (!finished && live()) await wait(100);
-      await wait(Math.max(0, STEP_MS - (Date.now() - start)));
-      if (!live()) return;
-      const r = report.current!;
-      if (r.probeError) return setProblem({ text: "Claude Code couldn't start to check your tools.", stage: "tools", recheck: "Check tools again" });
-      if (r.noClaudeAi)
-        return setProblem({ text: "Get started", stage: "login", recheck: "Check sign-in again", guide: "login", apiKey: true });
-      const missing = (r.connectors ?? []).filter((c) => c.required && c.state !== "connected");
-      if (missing.length) return setProblem({ text: "Get started", stage: "tools", guide: "connectors", connectors: r.connectors });
-      // Everything needed is there. Once, say what else Demian can use, so it isn't a secret.
-      const extra = (r.connectors ?? []).filter((c) => !c.required && c.state !== "connected");
-      if (extra.length && !optionalShown.current) {
-        optionalShown.current = true;
-        return setProblem({ text: "Get started", stage: "tools", guide: "connectors", connectors: r.connectors, optionalOnly: true });
+        setLine(run.from === "tools" ? "Checking your tools again" : "Connecting your tools");
+        const start = Date.now();
+        while (!finished && live() && Date.now() - start < TOOLS_LIMIT_MS) await wait(100);
+        if (!live()) return;
+        if (!finished) return show({ text: "Checking your tools is taking too long.", stage: "tools", recheck: "Check tools again" });
+        await wait(Math.max(0, STEP_MS - (Date.now() - start)));
+        if (!live()) return;
+        const r = report.current!;
+        if (r.probeError) return show({ text: "Claude Code couldn't start to check your tools.", stage: "tools", recheck: "Check tools again" });
+        if (r.noClaudeAi)
+          return show({ text: "Get started", stage: "login", recheck: "Check sign-in again", guide: "login", apiKey: true, stillNot: stillNot("login") });
+        const missing = (r.connectors ?? []).filter((c) => c.required && c.state !== "connected");
+        if (missing.length) return show({ text: "Get started", stage: "tools", guide: "connectors", connectors: r.connectors });
+        // Everything needed is there. Once, say what else Demian can use, so it isn't a secret.
+        const extra = (r.connectors ?? []).filter((c) => !c.required && c.state !== "connected");
+        if (extra.length && !optionalShown.current) {
+          optionalShown.current = true;
+          return show({ text: "Get started", stage: "tools", guide: "connectors", connectors: r.connectors, optionalOnly: true });
+        }
+        spinOrb();
       }
-      spinOrb();
 
-      setProblem(null);
+      show(null);
       setLine("Getting to know your role");
       // Learn it unless both the role and the name are already known.
       const known = simulate || ((await db.getSetting("user_profile"))?.trim() && (await db.getSetting("user_name"))?.trim());
@@ -201,7 +226,7 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
 
   // While it waits on an install or a sign-in, it looks again every few seconds and carries on by
   // itself once it's done (both checks are cheap; connectors aren't, so those wait for Check again,
-  // which every step also has, for when this is slow to notice).
+  // which every step has, for when this is slow to notice or doesn't).
   useEffect(() => {
     const kind = problem?.guide;
     if ((kind !== "install" && kind !== "login") || simulate) return;
@@ -226,12 +251,15 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
     };
   }, [problem, simulate]);
 
-  const recheck = () => {
+  /** Continue on the optional connectors: on to learning the role, without checking the tools again. */
+  const carryOn = () => setRun((r) => ({ from: "role", n: r.n + 1 }));
+  const recheck = (pretend = false) => {
     if (!problem) return;
-    // In a simulation, the step's own button (Install, Sign in) pretends it worked.
-    if (simulate && problem.guide === "install") setSim((s) => ({ ...s, installed: true }));
-    if (simulate && problem.guide === "login") setSim((s) => ({ ...s, signedIn: true, claudeAccount: true }));
-    setRun((r) => ({ from: problem.stage, n: r.n + 1 }));
+    // In a simulation, the step's own button (Install, Sign in) pretends it worked; Check again just looks.
+    if (simulate && pretend && problem.guide === "install") setSim((s) => ({ ...s, installed: true }));
+    if (simulate && pretend && problem.guide === "login") setSim((s) => ({ ...s, signedIn: true, claudeAccount: true }));
+    setChecking(true);
+    setRun((r) => ({ from: problem.stage, n: r.n + 1, manual: true }));
   };
   /** A toggle changed: start over from the top with it, the optional connectors shown again too. */
   const changeSim = (next: Simulated) => {
@@ -257,14 +285,16 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
           connectors={problem.connectors}
           apiKey={problem.apiKey}
           optionalOnly={problem.optionalOnly}
+          stillNot={problem.stillNot}
+          checking={checking}
           onCheck={recheck}
-          onContinue={problem.optionalOnly ? recheck : undefined}
+          onContinue={problem.optionalOnly ? carryOn : undefined}
           simulate={simulate}
         />
       )}
       <div className="onboarding-actions">
         {problem && !problem.guide && (
-          <button className="cta-primary" onClick={recheck}>
+          <button className="cta-primary" onClick={() => recheck()}>
             {problem.recheck ?? "Try again"}
           </button>
         )}

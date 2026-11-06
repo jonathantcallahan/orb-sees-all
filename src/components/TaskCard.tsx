@@ -4,14 +4,14 @@ import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { adoptAsTaskNote, claudeSessionUrl, resumeSessionUrl, sessionPrompt, taskChatPrompt } from "../openInClaude";
 import { clearAssessment, clearTaskCheck, hideMergedNote, markCorrectionApplied, markNotDuplicate, mergeTasks, separateTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type MergedTask, type StoredPlan, type StoredTaskCheck } from "../db";
-import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskChat } from "../jobs";
+import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskChat, stopTaskSession, STOPPED_BY_YOU } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { TaskChangeCards } from "./ActionRow";
 import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, useScrambled } from "./common";
-import { chatView, readableReply, sendDestination, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { chatView, readableReply, saveDraftEdit, sendDestination, withEdit, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { InDock, useInDock, useTaskChatDock } from "./chatDock";
@@ -133,7 +133,7 @@ function RecommendedBadge() {
       className="badge recommended icon-only"
       role="img"
       aria-label="Recommended"
-      title="Recommended: Demian suggests doing this today to move a P0 project forward"
+      title="In today's briefing: one of the few things only you can move"
     >
       <svg className="sparkle" width="9" height="9" viewBox="0 0 8 8" aria-hidden>
         <path d="M4 0Q4.6 3.4 8 4Q4.6 4.6 4 8Q3.4 4.6 0 4Q3.4 3.4 4 0Z" fill="currentColor" />
@@ -189,7 +189,7 @@ function PriorityBadge({
   const focus = usePointerFocus();
   if (priority === "blocking") {
     return (
-      <span className="badge priority blocking" title="This task is holding its project up, so it's always top priority">
+      <span className="badge priority blocking">
         {PRIORITY_LABEL.blocking}
       </span>
     );
@@ -257,21 +257,21 @@ function recordDismiss(task: CardTask) {
 
 /**
  * A badge showing the status, with the native menu laid invisibly over it so it sizes to its text.
- * While the task's Claude session is waiting on you, it reads "Human" instead (yellow); that isn't
- * saved, and goes once you've answered.
+ * While the task's Claude session is waiting on you, it reads "Human" instead (yellow); while the
+ * session is working, "Working", shimmering. Neither is saved: they go once it's answered or done.
  */
-function StatusSelect({ task, human = false, onChange }: { task: CardTask; human?: boolean; onChange: () => void }) {
+function StatusSelect({ task, human = false, working = false, onChange }: { task: CardTask; human?: boolean; working?: boolean; onChange: () => void }) {
   const watched = task.source === "watched";
   const options = watched ? WATCH_STATUS : (Object.keys(STATUS_LABEL) as TaskStatus[]).map((value) => ({ value, label: STATUS_LABEL[value] }));
   // A watched topic set to Human shows it like one whose action is ready.
-  const showHuman = human || (watched && task.status === "waiting");
+  const showHuman = !working && (human || (watched && task.status === "waiting"));
   const focus = usePointerFocus();
   return (
     <span
-      className={`badge status-badge ${showHuman ? "human" : watched && task.status !== "done" ? "todo" : task.status}${focus.pointer ? " pointer-focus" : ""}`}
-      title={human ? (watched ? "A conditional action is ready" : "Claude needs your input: open the chat") : undefined}
+      className={`badge status-badge ${working ? "working" : showHuman ? "human" : watched && task.status !== "done" ? "todo" : task.status}${focus.pointer ? " pointer-focus" : ""}`}
+      title={showHuman && human ? (watched ? "A conditional action is ready" : "Claude needs your input: open the chat") : undefined}
     >
-      {showHuman ? "Human" : watched ? watchStatusLabel(task.status) : STATUS_LABEL[task.status]}
+      {working ? <span className="shimmer">Working</span> : showHuman ? "Human" : watched ? watchStatusLabel(task.status) : STATUS_LABEL[task.status]}
       <select
         value={watched && task.status !== "done" && task.status !== "waiting" ? "todo" : task.status}
         aria-label="Status"
@@ -465,7 +465,13 @@ function AssessmentView({
   role,
   openWhen = false,
   empty,
+  alwaysOpen = false,
+  busy = false,
 }: {
+  /** A task's plan: always open, with no arrow. */
+  alwaysOpen?: boolean;
+  /** The plan is being written or re-checked: a spinner at the right of the heading. */
+  busy?: boolean;
   /** The box's heading, and the note beside it, when it holds something other than a plan. */
   heading?: string;
   role?: string;
@@ -505,6 +511,14 @@ function AssessmentView({
         openWhen={openWhen}
         // No plan yet: nothing to open, so no arrow; just the heading.
         fixed={steps.length === 0 && !empty}
+        alwaysOpen={alwaysOpen}
+        aside={
+          busy ? (
+            <span role="status" aria-label="Working on the plan">
+              <Spinner />
+            </span>
+          ) : undefined
+        }
         note={
           role !== undefined ? (
             <span className="automation-role timestamp">{role}</span>
@@ -536,8 +550,14 @@ export function CardBox({
   note,
   openWhen = false,
   fixed = false,
+  alwaysOpen = false,
+  aside,
   children,
 }: {
+  /** Always open, with no arrow (a task's plan). */
+  alwaysOpen?: boolean;
+  /** At the right end of the heading row, centered on it (a spinner while the plan is written). */
+  aside?: ReactNode;
   /** Who does the work, for a plan (its color); "unplanned" otherwise. */
   kind?: string;
   heading: string;
@@ -558,12 +578,27 @@ export function CardBox({
     if (wasFixed.current && !fixed) setOpen(true);
     wasFixed.current = fixed;
   }, [fixed]);
+  if (alwaysOpen) {
+    return (
+      <div className={`automation ${kind}`}>
+        <div className="automation-head fixed">
+          <span className="automation-kind">{heading}</span>
+          {note}
+          {aside && <span className="automation-aside">{aside}</span>}
+        </div>
+        <Reveal open className="automation-body">
+          {children}
+        </Reveal>
+      </div>
+    );
+  }
   if (fixed) {
     return (
       <div className={`automation ${kind}`}>
         <div className="automation-head fixed">
           <span className="automation-kind">{heading}</span>
           {note}
+          {aside && <span className="automation-aside">{aside}</span>}
         </div>
         {children}
       </div>
@@ -574,6 +609,7 @@ export function CardBox({
       <button className="automation-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="automation-kind">{heading}</span>
         {note}
+        {aside && <span className="automation-aside">{aside}</span>}
         <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -589,6 +625,36 @@ export function CardBox({
 function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingSend; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(send.text);
+  // Your edits are saved as you type (see SessionLink.edits), and picked up again when the row is
+  // drawn anew: after the chat closes, Claude takes a turn, or the app restarts.
+  const typed = useRef(false);
+  useEffect(() => {
+    db.getSessionLinks()
+      .then((links) => {
+        const saved = links[taskId]?.edits?.[send.key];
+        if (saved !== undefined && !typed.current) setText(saved);
+      })
+      .catch(() => {});
+  }, [taskId, send.key]);
+  const pending = useRef<string | null>(null);
+  const flush = () => {
+    if (pending.current === null) return;
+    const next = pending.current;
+    pending.current = null;
+    saveDraftEdit(taskId, send.key, next, send.text).catch(() => {});
+  };
+  useEffect(() => {
+    if (!typed.current) return;
+    pending.current = text;
+    const t = setTimeout(flush, 400);
+    return () => clearTimeout(t);
+  }, [text]);
+  // Anything typed in the last moment before the row goes is saved too.
+  useEffect(() => () => flush(), []);
+  const edit = (next: string) => {
+    typed.current = true;
+    setText(next);
+  };
   const [error, setError] = useState<string | null>(null);
   const sending = useJobStatus(`handoff:${taskId}`);
   const doc = send.kind === "doc";
@@ -598,10 +664,10 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   const creates = doc || event || ticket;
   const where = sendDestination(send);
   // An event's "when:" line, shown on the card; and whether it invites anyone.
-  const when = event ? send.text.match(/^when:\s*(.+)$/im)?.[1] : undefined;
-  const invites = event && /^who:\s*\S/im.test(send.text);
+  const when = event ? text.match(/^when:\s*(.+)$/im)?.[1] : undefined;
+  const invites = event && /^who:\s*\S/im.test(text);
   // A ticket's project, type and epic, shown on the card.
-  const field = (name: string) => send.text.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim();
+  const field = (name: string) => text.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim();
   const ticketWhere = ticket ? [field("project"), field("type"), field("epic") && `in ${field("epic")}`].filter(Boolean).join(" · ") || undefined : undefined;
   return (
     <div className="handoff small">
@@ -616,7 +682,7 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
               title={creates ? "Don't create this one" : "Don't send this one"}
               onClick={async () => {
                 const link = (await db.getSessionLinks())[taskId];
-                await db.updateSessionLink(taskId, { dismissedKeys: [...(link?.dismissedKeys ?? []), send.key] });
+                await db.updateSessionLink(taskId, { dismissedKeys: [...(link?.dismissedKeys ?? []), send.key], edits: withEdit(link?.edits, send.key, null, send.text) });
                 onChange();
               }}
             >
@@ -628,7 +694,7 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
           </button>
         </span>
       </div>
-      <div className="muted handoff-preview">{when ?? ticketWhere ?? send.text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
+      <div className="muted handoff-preview">{when ?? ticketWhere ?? text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
       {open && (
         <ComposeModal
           heading={creates ? `Create "${send.to}"` : send.to.startsWith("http") ? `Reply in ${where}` : `Send to ${where}`}
@@ -647,8 +713,12 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
           status={sending ? `${sending}…` : error ? `Couldn't ${creates ? "create it" : "send"}: ${error}` : null}
           failed={!!error && !sending}
           busy={!!sending}
-          onChange={setText}
-          onCancel={() => !sending && setOpen(false)}
+          onChange={edit}
+          onCancel={() => {
+            if (sending) return;
+            flush();
+            setOpen(false);
+          }}
           onSend={async () => {
             if (!text.trim()) return;
             try {
@@ -831,11 +901,17 @@ function Composer({
   autoFocus = false,
   disabled = false,
   placeholder = "Reply to Claude…",
+  status,
+  onStop,
 }: {
   onSend: (text: string) => void;
   autoFocus?: boolean;
   disabled?: boolean;
   placeholder?: string | string[];
+  /** While it's disabled: what Claude is doing, shown in the box where the placeholder goes, on one line. */
+  status?: string;
+  /** While it's disabled: the send button becomes Stop, which calls this. */
+  onStop?: () => void;
 }) {
   const [text, setText] = useState("");
   const hints = typeof placeholder === "string" ? [placeholder] : placeholder;
@@ -848,6 +924,9 @@ function Composer({
   const cycling = hints.length > 1;
   const shownHint = hints[hint % hints.length] ?? "";
   const scrambledHint = useScrambled(shownHint);
+  const showStatus = disabled && !!status;
+  const scrambledStatus = useScrambled(status ?? "");
+  const stopping = disabled && !!onStop;
   const ref = useRef<HTMLTextAreaElement>(null);
   const { mirror, caret } = useThinCaret(ref, text, disabled);
   const fit = () => {
@@ -878,6 +957,12 @@ function Composer({
         <div className="composer-field">
           <div ref={mirror} className="composer-mirror" aria-hidden />
           {caret && <span key={`${caret.x}:${caret.y}`} className="composer-caret" style={{ left: caret.x, top: caret.y, height: caret.h }} aria-hidden />}
+          {/* What Claude is doing, in the placeholder's place: drawn over the box so it stays on one line. */}
+          {showStatus && (
+            <span className="composer-status" role="status">
+              {scrambledStatus}
+            </span>
+          )}
           <textarea
             ref={ref}
             rows={1}
@@ -886,7 +971,7 @@ function Composer({
             value={text}
             // The textarea's own placeholder, scrambling from one example to the next, so it sits exactly
             // where typed text does.
-            placeholder={scrambledHint}
+            placeholder={showStatus ? "" : scrambledHint}
             aria-label={cycling ? "Message" : shownHint.replace(/…$/, "")}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -897,11 +982,20 @@ function Composer({
             }}
           />
         </div>
-        <button className="composer-send" type="submit" disabled={disabled || !text.trim()} aria-label="Send reply">
-          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-            <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {stopping ? (
+          // As in Claude: while it works, the send button is Stop. It ends the turn and everything it started.
+          <button className="composer-send composer-stop" type="button" onClick={onStop} aria-label="Stop">
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+              <rect x="3" y="3" width="6" height="6" rx="1.2" fill="currentColor" />
+            </svg>
+          </button>
+        ) : (
+          <button className="composer-send" type="submit" disabled={disabled || !text.trim()} aria-label="Send reply">
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+              <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
       </form>
     </div>
   );
@@ -955,7 +1049,7 @@ export function ClaudeSpark() {
     return () => clearInterval(t);
   }, []);
   return (
-    <span className="claude-spark" aria-hidden>
+    <span className={`claude-spark${CLAUDE_FRAMES[frame] === "·" ? " dot" : ""}`} aria-hidden>
       {CLAUDE_FRAMES[frame]}
     </span>
   );
@@ -1061,7 +1155,7 @@ export function SessionChat({
     setTurnStarted(false);
     setHeld(null);
     if (onSend) onSend(message);
-    else continueTaskSession(taskId, message).then(onChange, onChange);
+    else continueTaskSession(taskId, message, true).then(onChange, onChange);
     onChange();
   };
   const view = chatView(messages, turn, { working: !!working, live: live ?? null, held });
@@ -1137,11 +1231,11 @@ export function SessionChat({
             <ClaudeText text={liveText} />
           </div>
         )}
-        {/* Under Claude's reply as it forms, as in a Claude session: its working glyph and what it's doing. */}
+        {/* Under Claude's reply as it forms, as in a Claude session: its working glyph. What it's
+            doing shows in the reply box, and the box's Stop ends the turn. */}
         {busy && (
-          <div className="chat-working" role="status">
+          <div className="chat-working" aria-hidden>
             <ClaudeSpark />
-            <ScrambleText text={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"} />
           </div>
         )}
         {!busy && toSend.map((st) => <HandoffRow key={st.key} taskId={taskId} send={st} onChange={onChange} />)}
@@ -1149,7 +1243,15 @@ export function SessionChat({
       </div>
       {canReply && (
         <footer className="chat-modal-foot">
-          <Composer onSend={send} autoFocus disabled={busy} placeholder={placeholder} />
+          <Composer
+            onSend={send}
+            autoFocus
+            disabled={busy}
+            placeholder={placeholder}
+            status={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"}
+            // Ends this turn, and everything it started; Carry on picks it up again.
+            onStop={() => stopTaskSession(taskId)}
+          />
         </footer>
       )}
     </>
@@ -1242,15 +1344,16 @@ function SessionPanel({
       )}
       {link.lastError && !working && (
         <div className="small session-error">
-          <span className="error">Claude stopped: {link.lastError}</span>
+          {/* Stopping it yourself isn't an error; a timeout says why it stopped. */}
+          {link.lastError === STOPPED_BY_YOU ? <span className="muted">You stopped Claude.</span> : <span className="error">Claude stopped: {link.lastError}</span>}
           <button
             className="link-button small"
             onClick={() => {
-              continueTaskSession(taskId, "Please carry on where you left off.").then(onChange, onChange);
+              continueTaskSession(taskId, "Please carry on where you left off.", true).then(onChange, onChange);
               onChange();
             }}
           >
-            Try again
+            {link.lastError === STOPPED_BY_YOU ? "Carry on" : "Try again"}
           </button>
         </div>
       )}
@@ -1289,10 +1392,7 @@ function TaskCheckResult({
   onDismiss,
   onMerge,
   correction,
-  taskId,
 }: {
-  /** For remembering whether it's folded away. */
-  taskId: string;
   check: StoredTaskCheck;
   /** Title of the open task the check says this duplicates, when it's still open. */
   duplicateTitle?: string;
@@ -1304,13 +1404,9 @@ function TaskCheckResult({
   correction: CorrectionState | null;
 }) {
   const corrected = check.corrected_description?.trim();
-  // Folded away or open, remembered per task.
-  const key = `check-open:${taskId}`;
-  const [open, setOpen] = useState(() => localStorage.getItem(key) !== "0");
-  const toggle = () => {
-    localStorage.setItem(key, open ? "0" : "1");
-    setOpen(!open);
-  };
+  // Starts folded away; its title row opens it.
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen(!open);
   return (
     <div className={`check-result task-check ${check.verdict}${open ? "" : " folded"}`}>
       {/* The whole title row folds and unfolds it. */}
@@ -1318,7 +1414,7 @@ function TaskCheckResult({
         <span className="check-title">Task investigation</span>
         {/* One status: a correction being applied (spinner, no time yet), or the outcome and when. */}
         {correction && "working" in correction ? (
-          <span className="timestamp check-status" title={`${correction.working}…`} aria-label={correction.working}>
+          <span className="timestamp check-status" aria-label={correction.working}>
             <Spinner />
           </span>
         ) : correction ? (
@@ -1432,7 +1528,6 @@ export function TaskCard({
   compact?: boolean;
   onChange: () => void;
 }) {
-  const planStatus = useJobStatus(`plan:${task.id}`);
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
   const progress = useSessionProgress(task.id, sessionLink, onChange);
   /** A Claude session has picked this task up; the card follows it from now on. */
@@ -1649,35 +1744,41 @@ export function TaskCard({
             artifacts: chips.loose,
           };
         })();
-  // Open in chat starts the task's session, which talks the plan through and carries it out once
-  // you tell it to go ahead there, and opens its chat. Also when an earlier start never got going
-  // (the app quit before Claude answered): there's a link, but no session to talk to.
-  const openTaskChat = async () => {
-    if (!sessionLink?.sessionId && !sessionWorking) {
-      const prompt = taskChatPrompt(
-        { id: task.id, title: task.title, description, brief: task.brief, link: task.link, requester: task.requester, projectName: task.project?.name },
-        assessment?.suggestion ?? "",
-        outlineSteps,
-      );
-      await startTaskChat(task.id, prompt, onChange);
-      onChange();
-    }
-    openChat();
+  // Open in chat only opens the chat: nothing runs until you send a message. Your first message
+  // starts the task's session, which talks the plan through and carries it out once you tell it to
+  // go ahead there. Also when an earlier start never got going (the app quit before Claude answered):
+  // there's a link, but no session to talk to.
+  const fresh = !sessionLink?.sessionId && !sessionWorking;
+  const startWith = async (message: string) => {
+    const prompt = taskChatPrompt(
+      { id: task.id, title: task.title, description, brief: task.brief, link: task.link, requester: task.requester, projectName: task.project?.name },
+      assessment?.suggestion ?? "",
+      outlineSteps,
+      message,
+    );
+    await startTaskChat(task.id, prompt, onChange);
+    onChange();
   };
+  const openTaskChat = () => openChat();
   // The task's chat. In the Detail view it sits in the dock beside the list, drawn whatever state
   // the card is in (collapsed, or done and shrunk to a row), so it stays until you close it.
   const chatView = watch ? (
     chatFor !== null ? watch.chat(() => setChatFor(null)) : null
-  ) : chatFor !== null && sessionLink ? (
+  ) : chatFor !== null ? (
       <SessionChat
         taskId={task.id}
         title={task.title}
-        // A chat that began as something else (its Draft response) learns the task's steps with your next message.
+        // A chat not started yet starts with your first message. One that began as something else
+        // (its Draft response) learns the task's steps with your next message.
         onSend={
-          sessionLink.topic
+          fresh
+            ? (message) => {
+                startWith(message).catch(() => {});
+              }
+            : sessionLink?.topic
             ? (message) => {
                 db.updateSessionLink(task.id, { topic: false })
-                  .then(() => continueTaskSession(task.id, `${message}\n\n${adoptAsTaskNote(task.title, outlineSteps.map((st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`))}`))
+                  .then(() => continueTaskSession(task.id, `${message}\n\n${adoptAsTaskNote(task.title, outlineSteps.map((st) => `${st.by === "you" ? "[Me] " : ""}${st.title}`))}`, true))
                   .then(onChange, onChange);
               }
             : undefined
@@ -1698,15 +1799,11 @@ export function TaskCard({
         messages={progress?.messages ?? []}
         working={sessionWorking}
         toSend={toSend}
-        canReply={!!sessionLink.sessionId}
+        canReply={!!sessionLink?.sessionId || fresh}
+        placeholder={fresh ? "Ask about this task, change its plan, or tell Claude to go ahead…" : undefined}
         empty={
-          !sessionLink.sessionId && !sessionWorking ? (
-            <div className="chat-empty small muted">
-              {sessionLink.lastError ? `Claude couldn't start: ${sessionLink.lastError}` : "Claude hasn't started on this yet."}{" "}
-              <button className="link-button small" onClick={openTaskChat}>
-                Start it
-              </button>
-            </div>
+          fresh && sessionLink?.lastError ? (
+            <div className="chat-empty small muted">Claude couldn't start: {sessionLink.lastError}. Send a message to try again.</div>
           ) : undefined
         }
         onClose={() => setChatFor(null)}
@@ -1731,17 +1828,7 @@ export function TaskCard({
   // view of it). There's no Plan steps button: a task gets its plan in its chat.
   const planActions = watch ? undefined : (
       <div className="plan-actions">
-        {planning && (
-          <span className="muted small" title={`${planStatus ?? "Researching a plan"}…`} aria-label={planStatus ?? "Researching a plan"}>
-            <Spinner />
-          </span>
-        )}
         {sessionLink && !sessionWorking && !needsInput && !recheckStatus && <SessionStatus progress={progress} steps={outlineSteps} />}
-        {recheckStatus && (
-          <span className="muted small session-working" title="Re-checking the steps against the conversation…" aria-label="Re-checking the steps">
-            <Spinner />
-          </span>
-        )}
         {/* Inline where there's no dock; in the Detail view it's drawn into the dock (below), open or not. */}
         {!chatDock && chatView}
       </div>
@@ -1835,8 +1922,9 @@ export function TaskCard({
     [description],
   );
   // Double check: the reload button at the right of the card's header (where a watched topic's
-  // Check now is), shown on hover and while it runs.
-  const checkAction = linked || watch ? null : (
+  // Check now is), shown on hover and while it runs. Every task has it, a task with a chat too: the
+  // check reads the task's sources, not the chat.
+  const checkAction = watch ? null : (
     <span className={`card-refresh${checkStatus ? " busy" : ""}`} onClick={(e) => e.stopPropagation()}>
       <RefreshButton
         busy={!!checkStatus}
@@ -1935,10 +2023,10 @@ export function TaskCard({
               }
         }
       >
-        <span className="task-title" title={task.title}>
+        <span className="task-title">
           {watch?.titlePending ? <span className="muted">{watch.titlePending}</span> : task.title}
         </span>
-        {watch?.stamp && <span className="timestamp card-stamp">{watch.stamp}</span>}
+        {watch?.stamp && <span className="timestamp small card-stamp">{watch.stamp}</span>}
       </span>
       {estimate && <span className="task-extras">{estimate}</span>}
       {/* Folded, the card shows only the badge its list is sorted by (the date when sorted by one,
@@ -1953,7 +2041,7 @@ export function TaskCard({
       <span className="task-extras">
         {task.recommended && <RecommendedBadge />}
         {dateBadge && <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />}
-        <StatusSelect task={task} human={needsInput && !task.done} onChange={onChange} />
+        <StatusSelect task={task} human={needsInput && !task.done} working={!!sessionWorking && !task.done} onChange={onChange} />
       </span>
       {watch?.refresh ? (
         <span className={`card-refresh${watch.refresh.busy ? " busy" : ""}`} onClick={(e) => e.stopPropagation()}>
@@ -2126,21 +2214,24 @@ export function TaskCard({
                   planning={planning}
                   onMarkDone={markDone}
                   onRemind={remind}
+                  alwaysOpen
+                  busy={planning || !!recheckStatus}
                 />
               ) : (
-                <>
-                  {manual && assessing && (
-                    <div className="muted small" title="Claude is reviewing this task…" aria-label="Claude is reviewing this task">
-                      <Spinner />
-                    </div>
-                  )}
-                  {/* No assessment yet: the same collapsed Plan box, saying there's no plan yet. */}
-                  <AssessmentView assessment={null} steps={outlineSteps} actions={planActions} planning={planning} onMarkDone={markDone} onRemind={remind} planCreated={plan?.created_at} />
-                </>
+                // No assessment yet: the same Plan box, saying there's no plan yet (a spinner while Claude reviews the task).
+                <AssessmentView
+                  assessment={null}
+                  steps={outlineSteps}
+                  actions={planActions}
+                  planning={planning}
+                  onMarkDone={markDone}
+                  onRemind={remind}
+                  planCreated={plan?.created_at}
+                  alwaysOpen
+                  busy={planning || !!recheckStatus || (manual && assessing)}
+                />
               )}
-              {chatActions}
-              {linksOpen && <LinkChips links={links} />}
-
+              {/* The investigation, under the plan and above the row of actions. */}
               {check && !checkStatus && (
                 <TaskCheckResult
                   check={check}
@@ -2161,8 +2252,14 @@ export function TaskCard({
                   onDone={() => setStateAndRefresh({ status: "done" })}
                   onDismiss={() => setStateAndRefresh({ dismissed: true }).then(() => recordDismiss(task))}
                   correction={correctionState}
-                  taskId={task.id}
                 />
+              )}
+              {chatActions}
+              {/* Last, under a line across the card. */}
+              {linksOpen && links.length > 0 && (
+                <div className="task-links">
+                  <LinkChips links={links} />
+                </div>
               )}
             </>
           )}

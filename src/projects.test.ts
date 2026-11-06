@@ -128,3 +128,35 @@ describe("project prompts", () => {
     expect(text).toContain('["random-chat"]');
   });
 });
+
+describe("send targets", () => {
+  it("tells threads, IDs, channels and people apart", async () => {
+    const { slackTarget } = await import("./projects");
+    expect(slackTarget("https://x.slack.com/archives/C1/p1700000000000100")).toEqual({ kind: "thread", channelId: "C1", threadTs: "1700000000.000100" });
+    expect(slackTarget("C0123ABCD")).toEqual({ kind: "conversation", id: "C0123ABCD" });
+    expect(slackTarget("D0123ABCD")).toEqual({ kind: "conversation", id: "D0123ABCD" });
+    expect(slackTarget("@U0123ABCD")).toEqual({ kind: "user", id: "U0123ABCD" });
+    expect(slackTarget("<@U0123ABCD>")).toEqual({ kind: "user", id: "U0123ABCD" });
+    expect(slackTarget("U0123ABCD")).toEqual({ kind: "user", id: "U0123ABCD" });
+    expect(slackTarget("#refunds")).toEqual({ kind: "channel", name: "refunds" });
+    expect(slackTarget("tmp-asset-library-plugin")).toEqual({ kind: "channel", name: "tmp-asset-library-plugin" });
+    expect(slackTarget("Ana Lee")).toEqual({ kind: "person", name: "Ana Lee" });
+    expect(slackTarget("@Ana Lee")).toEqual({ kind: "person", name: "Ana Lee" });
+    expect(slackTarget("@ezhao")).toEqual({ kind: "person", name: "ezhao" });
+    // The whole string the chat once wrote, if it ever arrives unsplit.
+    expect(slackTarget("Ana Lee (DM with Ana Lee)")).toEqual({ kind: "person", name: "Ana Lee (DM with Ana Lee)" });
+    expect(slackTarget("DM with Ana Lee")).toEqual({ kind: "person", name: "Ana Lee" });
+  });
+
+  it("looks a person up before sending them a DM, and never passes a name as a channel ID", async () => {
+    const { sendToChannelPrompt } = await import("./prompts");
+    const person = sendToChannelPrompt("Ana Lee", "Here's the sheet");
+    expect(person).toContain('slack_search_users for "Ana Lee"');
+    expect(person).toContain("don't post");
+    expect(person).not.toContain('channel_id "Ana Lee"');
+    expect(sendToChannelPrompt("@U0123ABCD", "Hi")).toContain('"U0123ABCD" as the channel_id');
+    expect(sendToChannelPrompt("C0123ABCD", "Hi")).toContain('channel_id "C0123ABCD"');
+    expect(sendToChannelPrompt("#refunds", "Hi")).toContain("slack_search_channels");
+    expect(sendToChannelPrompt("#refunds", "Hi")).toContain("<<<MESSAGE\nHi\nMESSAGE>>>");
+  });
+});

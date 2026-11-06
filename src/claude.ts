@@ -1,4 +1,4 @@
-import { PLAN_RULES, WRITING_RULES } from "./baseLessons";
+import { PLAN_RULES, STEP_RULE, WRITING_RULES } from "./baseLessons";
 import { z } from "zod";
 import { runCliStreaming, type StreamingCliRunner } from "./cli";
 
@@ -7,6 +7,7 @@ const SLACK = "mcp__claude_ai_Slack__";
 const GMAIL = "mcp__claude_ai_Gmail__";
 const GCAL = "mcp__claude_ai_Google_Calendar__";
 const ZOOM = "mcp__claude_ai_Zoom_for_Claude__";
+const GRANOLA = "mcp__claude_ai_Granola__";
 const AMPLITUDE = "mcp__claude_ai_Amplitude__";
 
 export const TOOLS = {
@@ -81,6 +82,16 @@ export const TOOLS = {
     "search_describe_capabilities",
     "ask",
   ].map((t) => `${ZOOM}${t}`),
+  /** Granola: the user's meetings, their notes and transcripts, reading only. */
+  granolaRead: [
+    "get_meetings",
+    "search_meetings",
+    "query_granola_meetings",
+    "get_meeting_transcript",
+    "search_transcripts",
+    "get_meeting_attachment",
+    "list_meeting_folders",
+  ].map((t) => `${GRANOLA}${t}`),
   /** Reading the user's own DM, for #demian messages. */
   selfDmRead: [`${SLACK}slack_read_channel`],
   /**
@@ -131,11 +142,13 @@ const DISALLOWED = [
 ];
 
 /**
- * Tools a working session must not even see: everything that posts, drafts or changes something in
- * Slack, Gmail, Calendar, Drive or Jira. Orb does the sending once the user approves, so with these gone a
- * session's only way to send is to hand the message to Orb.
+ * Every connector tool that posts, drafts, sends or changes something. Each run is denied all of them
+ * except the ones it's given (see deniedTools): a send run gets the one tool it sends with, and no
+ * other run gets any. Deny rules win over allow rules, so the user's own Claude Code settings (an
+ * allow rule for Slack, say) can't hand a background run the power to post. In a chat, with these
+ * gone, the only way to send is to hand the message to Orb, which sends once the user approves.
  */
-const SESSION_DISALLOWED = [
+export const WRITE_TOOLS = [
   ...[
     "slack_send_message",
     "slack_send_message_draft",
@@ -191,10 +204,21 @@ const SESSION_DISALLOWED = [
     "jira_create_issue_link",
     "jira_remove_issue_link",
     "jira_create_remote_issue_link",
+    "jira_add_worklog",
+    "jira_add_watcher",
+    "jira_remove_watcher",
+    "jira_add_issues_to_sprint",
+    "jira_create_sprint",
+    "jira_update_sprint",
+    "jira_create_version",
+    "jira_batch_create_versions",
+    "jira_update_proforma_form_answers",
   ].map((t) => `mcp__mcp-jira__${t}`),
   // Editing Google Docs, Sheets and Slides, and Claude Docs.
   "mcp__claude_ai_Google_Docs__update_doc",
-  ...["update_spreadsheet", "update_values", "update_formulas", "insert_dimension"].map((t) => `mcp__claude_ai_Google_Sheets__${t}`),
+  ...["update_spreadsheet", "update_values", "update_formulas", "insert_dimension", "append_values", "batch_clear_values", "copy_sheet_to_another_spreadsheet"].map(
+    (t) => `mcp__claude_ai_Google_Sheets__${t}`,
+  ),
   "mcp__claude_ai_Google_Slides__update_presentation",
   ...["create", "update", "delete", "batch", "export"].map((t) => `mcp__claude_ai_Claude_Docs__${t}`),
   // Zoom: scheduling, changing or controlling meetings, and its file and collaborator writes.
@@ -213,7 +237,54 @@ const SESSION_DISALLOWED = [
   // With these visible, a session asked for a doc tries to make it itself and stalls on the
   // permission instead of handing it to Orb.
   ...["create_file", "copy_file", "update_file", "share_file", "trash_file"].map((t) => `mcp__claude_ai_Google_Drive__${t}`),
+  // Amplitude: everything that creates, changes, shares or rolls out (taxonomy, dashboards, notebooks,
+  // cohorts, metrics, comments, sharing, and run_amp, which can write). Its experiment and flag tools
+  // also change what real users see, so they're here too; a chat gets them only on a turn you started.
+  ...[
+    "run_amp",
+    "manage_amp_entities",
+    "manage_amp_events",
+    "manage_amp_properties",
+    "manage_amp_branches",
+    "create_group_types",
+    "share_amp_entities",
+    "use_amp_comments",
+    "use_amp_dashboards",
+    "use_amp_notebooks",
+    "use_amp_experiments",
+    "use_amp_flags",
+    "use_amplitude_cohorts",
+    "use_amplitude_metrics",
+    "use_amp_ai_visibility",
+  ].map((t) => `${AMPLITUDE}${t}`),
+  // Granola is for reading meetings: nothing changes its notes or folders, writes summaries into it, or signs out of it.
+  ...["add_note_to_folder", "create_folder", "remove_note_from_folder", "update_folder", "update_private_notes", "generate_summary", "sign_out"].map((t) => `${GRANOLA}${t}`),
 ];
+
+/**
+ * What a run is denied: the built-in tools that could touch the machine, and every write tool it
+ * wasn't given.
+ */
+export function deniedTools(granted: string[]): string[] {
+  const given = new Set(granted);
+  return [...DISALLOWED, ...WRITE_TOOLS.filter((t) => !given.has(t))];
+}
+
+/**
+ * Every run asks for nothing: a tool it wasn't given is refused outright, never offered for approval
+ * (there's no one to approve it in a background run). Pinned here so the user's own default mode
+ * (bypassPermissions, say) never applies to the app's runs.
+ */
+export const PERMISSION_MODE = "dontAsk";
+
+/**
+ * How long a run may go before it's stopped, with everything it started (see runs.rs): ten minutes
+ * without a line of output means it's stuck (a connector call that never returns, say; a slow one
+ * fails sooner, after five, inside the run). A refresh or plan has 45 minutes in all, a chat turn,
+ * which can work through many steps, an hour.
+ */
+export const ONE_SHOT_LIMITS = { idleSecs: 600, totalSecs: 45 * 60 };
+export const SESSION_LIMITS = { idleSecs: 600, totalSecs: 60 * 60 };
 
 /** Corrections the user has given in the global chat; every run is told them. */
 let notes: string[] = [];
@@ -403,6 +474,8 @@ export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTur
     "--verbose",
     "--settings",
     RUN_SETTINGS,
+    "--permission-mode",
+    PERMISSION_MODE,
     "--model",
     opts.model ?? "opus",
     "--max-turns",
@@ -410,7 +483,7 @@ export function oneShotArgs(opts: Pick<ClaudeOptions<unknown>, "model" | "maxTur
     // A job with no tools (like the daily reading) must not pass a bare --allowedTools.
     ...(tools.length ? ["--allowedTools", ...tools] : []),
     "--disallowedTools",
-    ...DISALLOWED,
+    ...deniedTools(tools),
   ];
 }
 
@@ -422,10 +495,13 @@ async function callOnce(
 ): Promise<Envelope> {
   const onStatus = opts.onStatus;
   const notes = notesPrompt();
-  const out = await run("claude", oneShotArgs(opts, resumeSession), onStatus ? (line) => reportLine(line, onStatus) : undefined, {
-    stdin: prompt,
-    ...(notes ? { appendSystemPrompt: notes } : {}),
-  });
+  const out = await run(
+    "claude",
+    oneShotArgs(opts, resumeSession),
+    onStatus ? (line) => reportLine(line, onStatus) : undefined,
+    { stdin: prompt, ...(notes ? { appendSystemPrompt: notes } : {}) },
+    { limits: ONE_SHOT_LIMITS },
+  );
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   if (envelope.is_error) throw new Error(`claude: ${envelope.result}`);
@@ -485,7 +561,7 @@ export const SESSION_DISPLAY = [
   "So write to me conversationally, the way you'd message a colleague: short plain sentences and paragraphs. Don't open with a title or heading line; start straight in with what you have to say. Don't use markdown: no headings, bold or italics, bullet or numbered lists, tables, code formatting or horizontal rules. If you need to give me options, say them in a sentence (\"0.92, or 0.85?\").",
   "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
   "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
-  "You can't post to Slack or send anything yourself: this session's send tools are turned off, and Orb does the sending once I approve. When a Slack message is ready, even one I've told you to send, hand it to Orb as a block: a line `[orb] send step N to <#channel-name, or the permalink of the thread to reply in> (<where that is, in words: '#channel-name', 'DM with Ana' or 'group DM with Ana, Ben'>)`, then the message exactly as it should be posted, then a line `[orb] end`. Then write `[orb] step N waiting: review and send the message` and stop. Orb tells you once it's sent, with its link.",
+  "You can't post to Slack or send anything yourself: this session's send tools are turned off, and Orb does the sending once I approve. When a Slack message is ready, even one I've told you to send, hand it to Orb as a block: a line `[orb] send step N to <#channel-name, @person for a DM (their Slack user ID, like @U0123ABCD, when you know it, else their full name), or the permalink of the thread to reply in> (<where that is, in words: '#channel-name', 'DM with Ana' or 'group DM with Ana, Ben'>)`, then the message exactly as it should be posted, then a line `[orb] end`. Then write `[orb] step N waiting: review and send the message` and stop. Orb tells you once it's sent, with its link.",
   "Don't try to save memories, notes or files (you can't write files here). When I state a lasting preference about how I work or how you should plan, write or prioritize (\"don't make tasks for hypothetical future work\"), hand it to Orb on its own line: `[orb] remember <scope>: <the preference, as an instruction>`, where scope is plans, writing, tasks, priority, projects or global. Orb keeps it and applies it to every later plan, refresh and session; tell me it's saved.",
   "You can read only the folders this session was given: you can't add one (no /add-dir here), and don't suggest changing settings to get at others. When you need code you weren't given, write `[orb] code <owner/name on GitHub, the repo's name, or the checkout's folder>` on its own line, say in a sentence what you're getting, and stop. Orb adds it if it's a code checkout on this computer or a GitHub repo it can copy, then tells you to carry on.",
   "To find a conversation with someone in Slack, look up their user id first (slack_search_users), then search with `with:<@USERID>` (a name there doesn't match) and include DMs and group DMs (channel_types \"public_channel,private_channel,mpim,im\"). Try a few searches (by person, by channel, by a distinctive word) before saying you can't find something, and say what you searched.",
@@ -499,7 +575,7 @@ export const SESSION_DISPLAY = [
   "Orb also shows the plan's steps with their progress, so keep that list true to what's actually happening.",
   "When something in our conversation finishes a step, even out of order or one of mine, report it done straight away. When a step is no longer needed, write `[orb] step N skipped: <why>` on its own line.",
   "When a step can't move until someone else acts (an answer, an approval, a fix from another team), write `[orb] step N blocked: <who or what, in a few words>`. That's different from waiting, which is for things I need to do. Report the step started or done again once it moves.",
-  "When the plan itself changes (steps added, dropped, reordered, reworded, or handed to someone else, and anything I ask for that the steps don't cover, which is a new step), write the whole updated plan as a block, before you start on the change: a line `[orb] plan`, then one numbered line per step, finished ones included, with [Me] in front of mine, then a line `[orb] end`. From then on, step numbers refer to that list, so report each step's state again against it.",
+  "When the plan itself changes (steps added, dropped, reordered, reworded, or handed to someone else, and anything I ask for that the steps don't cover, which is a new step), write the whole updated plan as a block, before you start on the change: a line `[orb] plan`, then one numbered line per step, finished ones included, with [Me] in front of mine, then a line `[orb] end`. " + STEP_RULE + " From then on, step numbers refer to that list, so report each step's state again against it.",
 ].join(" ");
 
 export async function runSessionTurn(
@@ -517,10 +593,13 @@ export async function runSessionTurn(
     onStatus?: (s: string) => void;
     /** Claude's text so far this turn, as it's written (streamed), each time it grows. */
     onText?: (text: string) => void;
+    /** Stops the turn when aborted (Stop in the chat); the turn then rejects with "Stopped". */
+    signal?: AbortSignal;
   },
   run: StreamingCliRunner = runCliStreaming,
 ): Promise<SessionTurn> {
   const code = codeArgs(opts.dirs);
+  const tools = [...opts.tools, ...code.tools];
   const args = [
     ...code.args,
     ...(opts.resume ? ["--resume", opts.resume] : []),
@@ -531,15 +610,16 @@ export async function runSessionTurn(
     "--verbose",
     "--settings",
     RUN_SETTINGS,
+    "--permission-mode",
+    PERMISSION_MODE,
     "--model",
     opts.model ?? "opus",
     ...(opts.effort ? ["--effort", opts.effort] : []),
     "--max-turns",
     String(opts.maxTurns ?? 80),
-    ...([...opts.tools, ...code.tools].length ? ["--allowedTools", ...opts.tools, ...code.tools] : []),
+    ...(tools.length ? ["--allowedTools", ...tools] : []),
     "--disallowedTools",
-    ...DISALLOWED,
-    ...SESSION_DISALLOWED,
+    ...deniedTools(tools),
     // Text arrives as it's written, so the chat can show the reply forming.
     ...(opts.onText ? ["--include-partial-messages"] : []),
   ];
@@ -560,7 +640,7 @@ export async function runSessionTurn(
     } catch {
       // Not a JSON line.
     }
-  }, { stdin: opts.prompt, appendSystemPrompt: system });
+  }, { stdin: opts.prompt, appendSystemPrompt: system }, { limits: SESSION_LIMITS, signal: opts.signal });
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   return {

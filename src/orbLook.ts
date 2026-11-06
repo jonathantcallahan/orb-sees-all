@@ -12,8 +12,8 @@ export const ORB_LOOK_NAMES: Record<OrbLook, string> = { crystal: "Demian", glas
  */
 export const ORB_LOOKS: OrbLook[] = ["crystal", "film", "resin", "opal", "aura", "prism", "frost"];
 
-/** The orb until you pick another in Settings: Ephedra. (Onboarding always shows Demian.) */
-export const DEFAULT_ORB_LOOK: OrbLook = "aura";
+/** The orb until you pick another in Settings: Moss, as on the app icon. (Onboarding always shows Demian.) */
+export const DEFAULT_ORB_LOOK: OrbLook = "prism";
 
 /**
  * Kept in localStorage like the theme, so the chosen orb shows from the first frame. No choice yet,

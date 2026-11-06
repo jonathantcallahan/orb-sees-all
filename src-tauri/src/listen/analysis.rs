@@ -34,6 +34,13 @@ const SESSION_SECS: f32 = 120.0;
 const HIT_COOLDOWN: f32 = 0.09;
 /// The adaptive threshold for hits looks back this far, in seconds.
 const FLUX_MEMORY: f32 = 0.45;
+/// Bass hits (a kick drum, a bass drop): the rise of the lowest two bands alone, about 30 to 145 Hz,
+/// against a longer look back and a higher bar than hits anywhere, so hi-hats, snares, vocals and a
+/// bass line moving between notes don't count; only a real thump does.
+const BASS_HIT_COOLDOWN: f32 = 0.15;
+const BASS_FLUX_MEMORY: f32 = 1.0;
+const BASS_HIT_BAR: f32 = 2.0;
+const BASS_HIT_FLOOR: f32 = 0.6;
 
 /// One frame of what's playing, ready for the orb. Every value is 0..1 unless noted.
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
@@ -51,6 +58,10 @@ pub struct Features {
     pub hit: f32,
     /// How many hits since the last frame sent.
     pub hits: u32,
+    /// The strongest bass hit since the last frame sent (0 when there was none): see BASS_HIT_BAR.
+    pub bass_hit: f32,
+    /// How many bass hits since the last frame sent.
+    pub bass_hits: u32,
     /// How bright the sound is: where its spectral centroid sits between 100 Hz (0) and 8 kHz (1).
     pub brightness: f32,
     /// How noisy rather than tonal: 0 for a pure tone, toward 1 for noise.
@@ -79,6 +90,12 @@ pub struct Analyzer {
     previous: Vec<f32>,
     flux_history: VecDeque<f32>,
     since_hit: f32,
+    /// The FFT bins bass hits listen to: the lowest two bands.
+    bass_bins: (usize, usize),
+    bass_flux_history: VecDeque<f32>,
+    since_bass_hit: f32,
+    /// The bass's total level last hop (log-compressed), for its jump.
+    bass_level: f32,
     brightness: f32,
     section_db: f32,
     session_db: f32,
@@ -122,6 +139,10 @@ impl Analyzer {
             previous: vec![0.0; nyquist_bin + 1],
             flux_history: VecDeque::new(),
             since_hit: 1.0,
+            bass_bins: (band_bins[0].0, band_bins[1].1),
+            bass_flux_history: VecDeque::new(),
+            since_bass_hit: 1.0,
+            bass_level: 0.0,
             brightness: 0.5,
             section_db: SILENCE_DB,
             session_db: SILENCE_DB,
@@ -199,6 +220,14 @@ impl Analyzer {
             self.previous[k] = m;
         }
         flux /= power.len() as f32;
+        // For bass hits, the jump in the bass's total energy rather than bin by bin: a kick's pitch
+        // drops as it sounds, and a bass line moves between notes, sliding energy from one bin to the
+        // next without any more of it; only a thump makes the whole low end jump.
+        let (bass_lo, bass_hi) = self.bass_bins;
+        let bass_energy = power[bass_lo..bass_hi].iter().sum::<f32>() / (bass_hi - bass_lo).max(1) as f32;
+        let bass_level = (1.0 + 1000.0 * bass_energy.sqrt()).ln();
+        let bass_flux = (bass_level - self.bass_level).max(0.0);
+        self.bass_level = bass_level;
         let memory = (FLUX_MEMORY / dt).round() as usize;
         let mut sorted: Vec<f32> = self.flux_history.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -212,6 +241,24 @@ impl Analyzer {
         let hit = if sounding && self.since_hit >= HIT_COOLDOWN && flux > threshold && self.flux_history.len() > 4 {
             self.since_hit = 0.0;
             ((flux - threshold) / threshold.max(1e-6)).clamp(0.05, 1.0)
+        } else {
+            0.0
+        };
+
+        // Bass hits, the same way over the lowest bands only, with a higher bar.
+        let bass_memory = (BASS_FLUX_MEMORY / dt).round() as usize;
+        let mut bass_sorted: Vec<f32> = self.bass_flux_history.iter().copied().collect();
+        bass_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let bass_median = bass_sorted.get(bass_sorted.len() / 2).copied().unwrap_or(0.0);
+        self.bass_flux_history.push_back(bass_flux);
+        if self.bass_flux_history.len() > bass_memory {
+            self.bass_flux_history.pop_front();
+        }
+        let bass_threshold = bass_median * BASS_HIT_BAR + BASS_HIT_FLOOR;
+        self.since_bass_hit += dt;
+        let bass_hit = if sounding && self.since_bass_hit >= BASS_HIT_COOLDOWN && bass_flux > bass_threshold && self.bass_flux_history.len() > 4 {
+            self.since_bass_hit = 0.0;
+            ((bass_flux - bass_threshold) / bass_threshold).clamp(0.05, 1.0)
         } else {
             0.0
         };
@@ -250,6 +297,8 @@ impl Analyzer {
             high,
             hit,
             hits: u32::from(hit > 0.0),
+            bass_hit,
+            bass_hits: u32::from(bass_hit > 0.0),
             brightness,
             noisiness,
             section,
@@ -266,7 +315,9 @@ pub fn merge(into: &mut Option<Features>, next: Features) {
         Some(prev) => {
             let hit = prev.hit.max(next.hit);
             let hits = prev.hits + next.hits;
-            *prev = Features { hit, hits, ..next };
+            let bass_hit = prev.bass_hit.max(next.bass_hit);
+            let bass_hits = prev.bass_hits + next.bass_hits;
+            *prev = Features { hit, hits, bass_hit, bass_hits, ..next };
         }
     }
 }
@@ -339,6 +390,53 @@ mod tests {
 
         let steady: u32 = Analyzer::new(RATE).push(&sine(220.0, 0.3, 4.0)).iter().skip(20).map(|f| f.hits).sum();
         assert_eq!(steady, 0);
+    }
+
+    /// A kick drum: a low thump that drops in pitch and dies away in about a tenth of a second.
+    fn kick(samples: &mut [f32], at: usize, amp: f32) {
+        for j in 0..(RATE * 0.15) as usize {
+            let t = j as f32 / RATE;
+            let hz = 55.0 + 60.0 * (-t / 0.02).exp();
+            samples[at + j] += amp * (-t / 0.06).exp() * (2.0 * std::f32::consts::PI * hz * t).sin();
+        }
+    }
+
+    #[test]
+    fn kicks_are_bass_hits() {
+        let mut samples = sine(220.0, 0.05, 4.0);
+        for k in 0..8 {
+            kick(&mut samples, (RATE * (0.25 + 0.5 * k as f32)) as usize, 0.8);
+        }
+        let bass_hits: u32 = Analyzer::new(RATE).push(&samples).iter().map(|f| f.bass_hits).sum();
+        assert!((7..=9).contains(&bass_hits), "bass hits {bass_hits}");
+
+        // The same kicks over a steady bass line, as in most music: still one each.
+        let mut over_bass = sine(70.0, 0.2, 4.0);
+        for k in 0..8 {
+            kick(&mut over_bass, (RATE * (0.25 + 0.5 * k as f32)) as usize, 0.8);
+        }
+        let bass_hits: u32 = Analyzer::new(RATE).push(&over_bass).iter().map(|f| f.bass_hits).sum();
+        assert!((7..=9).contains(&bass_hits), "bass hits over a bass line {bass_hits}");
+    }
+
+    #[test]
+    fn clicks_and_a_moving_bass_line_are_not_bass_hits() {
+        // Hi-hat-like clicks: hits, but not in the bass.
+        let mut clicks = sine(220.0, 0.05, 4.0);
+        for k in 0..8 {
+            let at = (RATE * (0.25 + 0.5 * k as f32)) as usize;
+            for (j, s) in clicks[at..at + 200].iter_mut().enumerate() {
+                *s += 0.8 * (-(j as f32) / 40.0).exp() * if j % 2 == 0 { 1.0 } else { -1.0 };
+            }
+        }
+        let frames = Analyzer::new(RATE).push(&clicks);
+        assert!(frames.iter().map(|f| f.hits).sum::<u32>() >= 7);
+        assert_eq!(frames.iter().map(|f| f.bass_hits).sum::<u32>(), 0);
+
+        // A steady bass line stepping between notes, with no attack: no thumps.
+        let line: Vec<f32> = (0..8).flat_map(|k| sine(if k % 2 == 0 { 70.0 } else { 98.0 }, 0.3, 0.5)).collect();
+        let stepped: u32 = Analyzer::new(RATE).push(&line).iter().skip(40).map(|f| f.bass_hits).sum();
+        assert!(stepped <= 1, "bass line counted as {stepped} bass hits");
     }
 
     #[test]

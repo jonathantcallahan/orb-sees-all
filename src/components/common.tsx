@@ -60,13 +60,13 @@ export function RefreshButton({
   busy: boolean;
   onClick: () => void;
   title: string;
-  /** What the refresh is doing: the spinner's tooltip while it runs (the spinner alone is shown). */
+  /** What the refresh is doing, for screen readers while it runs (the spinner alone is shown, with no tooltip). */
   status?: string;
 }) {
   const label = busy && status ? `${status}…` : title;
   return (
     <span className="refresh-wrap">
-      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={label} aria-label={label}>
+      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={busy ? undefined : title} aria-label={label}>
         {busy ? <Spinner /> : "↻"}
       </button>
     </span>
@@ -143,7 +143,7 @@ export function Spinner() {
     return () => clearInterval(timer);
   }, []);
   return (
-    <span className="spinner" aria-hidden>
+    <span className={`spinner${SPINNER_FRAMES[frame] === "·" ? " dot" : ""}`} aria-hidden>
       {SPINNER_FRAMES[frame]}
     </span>
   );

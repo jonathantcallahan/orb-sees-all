@@ -32,6 +32,10 @@ export const WRITING_RULES = [
 export const TITLE_RULE =
   'A task title is a few words, at most about 8 (roughly 50 characters): the action and what it\'s on, like "Draft reply to the pricing feedback thread". Who asked, why, the context, names and links go in the description, never the title. When a task carried over from before has a longer title, rewrite it to this length.';
 
+/** How long a plan step is: short enough to read at a glance and fit on one line, like a task list's items. */
+export const STEP_RULE =
+  'A step is a few words, at most about 7, so it fits on one line and reads at a glance: what to do and what it\'s on, like "Ask Kim about the launch date" or "Draft the Jira ticket". Who, where, how and why go elsewhere (the step\'s detail, the task\'s description or the conversation), never in the step.';
+
 /** The longest a task title should be, in characters, matching TITLE_RULE. */
 export const TITLE_MAX = 55;
 

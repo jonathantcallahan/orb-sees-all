@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
 import { WATCH_CHAT } from "./watched";
-import { channelLabel } from "./projects";
+import { channelLabel, slackTarget } from "./projects";
 import { GlobalAction } from "./schema";
 
 /** A task's link to the Claude Code session Orb opened for it. */
@@ -60,6 +60,25 @@ export interface SessionLink {
   codeAsked?: string[];
   /** Why the session's last background turn failed, if it did. Cleared when the next one starts. */
   lastError?: string | null;
+  /**
+   * Your edits to drafts it handed over that you haven't sent yet, by the draft's key, so closing the
+   * review box, the chat or the app keeps them. Dropped once the draft is sent or turned down.
+   */
+  edits?: Record<string, string>;
+}
+
+/** The edits with one draft's text set, or dropped when it's back to what Claude wrote (or `text` is null). */
+export function withEdit(edits: Record<string, string> | undefined, key: string, text: string | null, original: string): Record<string, string> {
+  const { [key]: _old, ...rest } = edits ?? {};
+  return text === null || text === original ? rest : { ...rest, [key]: text };
+}
+
+/** Saves your edit to one of a session's drafts (see SessionLink.edits); null forgets it. */
+export async function saveDraftEdit(taskId: string, key: string, text: string | null, original: string) {
+  const link = (await db.getSessionLinks())[taskId];
+  if (!link) return;
+  const edits = withEdit(link.edits, key, text, original);
+  if (JSON.stringify(edits) !== JSON.stringify(link.edits ?? {})) await db.updateSessionLink(taskId, { edits });
 }
 
 /** A Slack message (or a Google Doc) the session handed to Orb to send or create, for the user to review first. */
@@ -404,7 +423,8 @@ export function parseSends(blocks: { header: string; body: string }[]): PendingS
       .trim();
     if (!text) return [];
     // "<target> (<where, in words>)": the words are for showing; the target is where it posts.
-    const named = m[2].trim().match(/^(\S+)\s+\((.+)\)$/);
+    // The target can have spaces ("Ana Lee (DM with Ana Lee)"): it ends at the first " (".
+    const named = m[2].trim().match(/^(.+?)\s+\((.+)\)$/);
     const to = named ? named[1] : m[2].trim();
     return [{ key: messageKey(to, text), ...(m[1] ? { step: Number(m[1]) } : {}), to, ...(named ? { label: named[2].trim() } : {}), text }];
   });
@@ -666,7 +686,10 @@ export function sendDestination(send: { to: string; label?: string }): string {
   // A group DM or DM by its people, never "#mpdm-…" or a pound sign (see channelLabel).
   const label = send.label && (/^#?mpdm-/.test(send.label) || /^[DG]/.test(id) ? channelLabel({ name: send.label, channel_id: id.startsWith("D") ? id : undefined }).replace(/^#/, "") : send.label);
   if (label) return thread ? `the thread in ${label}` : label;
-  if (!thread) return send.to;
+  if (!thread) {
+    const target = slackTarget(send.to);
+    return target.kind === "person" ? `DM with ${target.name}` : target.kind === "user" ? "a DM" : send.to;
+  }
   const kind = id.startsWith("D") ? "a DM" : id.startsWith("G") ? "a group DM" : id.startsWith("C") ? "a channel" : null;
   return kind ? `the thread in ${kind}` : "the thread";
 }

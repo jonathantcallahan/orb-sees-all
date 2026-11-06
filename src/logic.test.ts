@@ -335,49 +335,63 @@ describe("calendar layout", () => {
 });
 
 describe("readingContext", () => {
-  it("keeps open work, marks today's plan and splits blockers by owner", () => {
-    const snapshot = {
-      name: "Asset refunds", description: "", status: "at_risk" as const, status_reason: "late codes",
-      raci: { role: "accountable" as const, reason: "" }, priority: { level: "P1" as const, reason: "" },
-      blockers: [
-        { id: "b1", what: "Reason codes", owners: [{ name: "Alex", is_me: false }] },
-        { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },
-      ],
-      my_tasks: [{ id: "t1", title: "Confirm QA decisions", assessment: { automation: "human" as const, suggestion: "", needs_details: false, priority: "critical" as const, estimate_minutes: 20 } }],
-      active: [{ id: "a1", what: "Partial-refund tickets", owners: [{ name: "payments team", is_me: false }] }],
-      recent_updates: [{ summary: "Dev-complete moved to Nov 17" }],
-      summary: "",
-    };
+  const project = (over: object) => ({
+    channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [],
+    last_refreshed_at: "2026-10-29T07:00:00Z", snapshot: null, profile: null, repo_state: null, last_error: null, focus: null, status_override: null, ...over,
+  });
+  const snapshot = (level: "P0" | "P1" | "P2" | "P3", status: "on_track" | "at_risk" | "blocked" | "idle" = "on_track") => ({
+    name: "x", description: "", status, status_reason: "late codes",
+    raci: { role: "accountable" as const, reason: "" }, priority: { level, reason: "" },
+    blockers: [
+      { id: "b1", what: "Reason codes", owners: [{ name: "Alex", is_me: false }] },
+      { id: "t1", what: "QA decisions", owners: [{ name: "You", is_me: true }] },
+    ],
+    my_tasks: [{ id: "t1", title: "Confirm QA decisions", assessment: { automation: "human" as const, suggestion: "", needs_details: false, priority: "critical" as const, estimate_minutes: 20 } }],
+    active: [],
+    recent_updates: [{ summary: "Kickoff held", date: "2026-10-20" }, { summary: "Dev-complete moved to Nov 17", date: "2026-10-28", link: "https://slack.com/p" }],
+    summary: "",
+  });
+  const people = [{ name: "Sam Lead", role: "Director, sponsor" }, { name: "Alex", role: "Engineer" }];
+
+  it("briefs on the key projects, newest updates first, with the people behind them", () => {
     const ctx = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null, status_override: null }],
-      adhoc: { tasks: [], replies: [{ id: "r1", source: "slack", from: "Kim", summary: "OK to ship?" }], news: [{ id: "n1", headline: "Reorg announced" }], refreshed_at: null },
+      projects: [
+        project({ channel_id: "C1", name: "tmp-asset-refunds", snapshot: snapshot("P1"), profile: { goal: "", people } }),
+        project({ channel_id: "C2", name: "tmp-side", snapshot: snapshot("P3", "blocked"), profile: { goal: "", people: [{ name: "Pat", role: "PM" }] } }),
+        project({ channel_id: "C3", name: "tmp-launch", snapshot: snapshot("P0"), profile: { goal: "", people: [{ name: "sam lead", role: "Director" }] } }),
+      ],
+      adhoc: { tasks: [], replies: [{ id: "r1", source: "slack", from: "Kim", summary: "OK to ship?", where: "DM", received: "2026-10-29T08:00:00Z" }], news: [{ id: "n1", headline: "Reorg announced" }], refreshed_at: null },
       manual: [{ id: "m1", title: "Done thing", description: null, project_id: null, created_at: "" }],
       assessments: new Map(),
       states: new Map([["t1", { status: "todo", dismissed: false, todayOn: "2026-10-29", done: false }], ["m1", { status: "done", dismissed: false, todayOn: null, done: true }]]),
-      calendar: null,
       today: "2026-10-29",
     });
-    expect(ctx.projects[0]).toMatchObject({
-      name: "Asset refunds",
+    // P0 before P1; a P3 isn't key, even blocked.
+    expect(ctx.projects.map((p) => p.priority)).toEqual(["P0", "P1"]);
+    expect(ctx.projects[1]).toMatchObject({
+      as_of: "2026-10-29",
       blocked_on_me: ["QA decisions"],
       blocked_on_others: ["Reason codes (Alex)"],
-      active_work: ["Partial-refund tickets (payments team)"],
+      recent_updates: [{ what: "Dev-complete moved to Nov 17", date: "2026-10-28" }, { what: "Kickoff held", date: "2026-10-20" }],
     });
-    expect(ctx.tasks).toEqual([{ id: "t1", title: "Confirm QA decisions", project: "Asset refunds", priority: "blocking", estimate_minutes: 20, due: null, planned_today: true }]);
-    expect(ctx.replies_waiting).toEqual(["Kim: OK to ship?"]);
+    // Each person once, across the key projects only.
+    expect(ctx.people.map((p) => p.name)).toEqual(["sam lead", "Alex"]);
+    expect(ctx.tasks[0]).toEqual({ id: "t1", title: "Confirm QA decisions", project: expect.any(String), priority: "blocking", due: null });
+    expect(ctx.replies_waiting).toEqual([{ from: "Kim", about: "OK to ship?", where: "DM", received: "2026-10-29" }]);
+    expect(ctx.news).toEqual([{ what: "Reorg announced", date: null }]);
+  });
 
-    // A blocker marked resolved after a double check drops out.
-    const after = readingContext({
-      projects: [{ channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [], last_refreshed_at: null, snapshot, profile: null, repo_state: null, last_error: null, focus: null, status_override: null }],
+  it("drops a blocker marked resolved, and counts a P2 only when it's in trouble", () => {
+    const ctx = readingContext({
+      projects: [project({ snapshot: snapshot("P2", "at_risk") }), project({ channel_id: "C9", snapshot: snapshot("P2") })],
       adhoc: { tasks: [], replies: [], news: [], refreshed_at: null },
       manual: [],
       assessments: new Map(),
       states: new Map([["blocker:b1", { status: "todo", dismissed: true, todayOn: null, done: false }]]),
-      calendar: null,
       today: "2026-10-29",
     });
-    expect(after.projects[0].blocked_on_others).toEqual([]);
-    expect(ctx.news).toEqual(["Reorg announced"]);
+    expect(ctx.projects).toHaveLength(1);
+    expect(ctx.projects[0].blocked_on_others).toEqual([]);
   });
 });
 

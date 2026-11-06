@@ -71,7 +71,7 @@ describe("runClaude", () => {
     const [, args, , input] = run.mock.calls[0];
     expect(input?.stdin).toBe(long);
     // The whole command line stays well under Windows' ~32k limit.
-    expect(args.join(" ").length).toBeLessThan(4000);
+    expect(args.join(" ").length).toBeLessThan(16_000);
     expect(args).not.toContain("--append-system-prompt");
   });
 
@@ -218,6 +218,72 @@ describe("code access", () => {
   });
 });
 
+describe("locked-down runs", () => {
+  const SEND = "mcp__claude_ai_Slack__slack_send_message";
+  const denied = (args: string[]) => args.slice(args.indexOf("--disallowedTools") + 1);
+
+  it("never ask: every run pins its own permission mode, whatever the user's default is", async () => {
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
+    await runSessionTurn({ prompt: "p", tools: [] }, run);
+    for (const [, args] of run.mock.calls) expect(args.slice(args.indexOf("--permission-mode"), args.indexOf("--permission-mode") + 2)).toEqual(["--permission-mode", "dontAsk"]);
+  });
+
+  it("denies a background run every write tool, so no allow rule of the user's can let it post", async () => {
+    const { TOOLS, WRITE_TOOLS } = await import("./claude");
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.granolaRead] }, run);
+    const args = run.mock.calls[0][1];
+    expect(denied(args)).toEqual(expect.arrayContaining([SEND, ...WRITE_TOOLS]));
+    expect(denied(args)).toEqual(expect.arrayContaining(["mcp__claude_ai_Amplitude__run_amp", "mcp__claude_ai_Granola__update_private_notes", "mcp__mcp-jira__jira_add_worklog"]));
+  });
+
+  it("denies a send run every write tool but the one it sends with", async () => {
+    const { TOOLS, WRITE_TOOLS } = await import("./claude");
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: TOOLS.slackSend }, run);
+    const args = run.mock.calls[0][1];
+    expect(denied(args)).not.toContain(SEND);
+    expect(denied(args)).toEqual(expect.arrayContaining(WRITE_TOOLS.filter((t) => t !== SEND)));
+  });
+
+  it("denies a chat every write tool: it hands messages to Orb to send", async () => {
+    const { WRITE_TOOLS } = await import("./claude");
+    const run = vi.fn<CliRunner>(async () => reply("ok"));
+    await runSessionTurn({ prompt: "p", tools: ["mcp__x__read"] }, run);
+    expect(denied(run.mock.calls[0][1])).toEqual(expect.arrayContaining(WRITE_TOOLS));
+  });
+
+  it("keeps the longest command line, a chat turn with every tool and a dozen code folders, under half of Windows' ~32k limit", async () => {
+    const { sessionTools } = await import("./jobs");
+    const run = vi.fn<CliRunner>(async () => reply("ok"));
+    const dirs = Array.from({ length: 12 }, (_, i) => `/Users/someone.with.a.long.name/Library/Application Support/com.demian.app/work/repos/owner-${i}/repository-name-${i}`);
+    await runSessionTurn({ prompt: "p", tools: sessionTools(true), dirs, resume: "abcdefabcdefabcdefabcdef" }, run);
+    expect(run.mock.calls[0][1].join(" ").length).toBeLessThan(16_000);
+  });
+
+  it("lists only real writes as write tools: none of a run's reading tools is denied", async () => {
+    const { TOOLS, WRITE_TOOLS } = await import("./claude");
+    const reads = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead, ...TOOLS.granolaRead];
+    expect(reads.filter((t) => WRITE_TOOLS.includes(t))).toEqual([]);
+  });
+});
+
+describe("time limits", () => {
+  it("gives a one-shot run its limits, and a chat turn its own and its Stop", async () => {
+    const { ONE_SHOT_LIMITS, SESSION_LIMITS } = await import("./claude");
+    const run = vi.fn<CliRunner>(async () => reply(MIN_SNAPSHOT));
+    await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run);
+    expect(run.mock.calls[0][4]).toEqual({ limits: ONE_SHOT_LIMITS });
+    const stop = new AbortController();
+    await runSessionTurn({ prompt: "p", tools: [], signal: stop.signal }, run);
+    expect(run.mock.calls[1][4]).toEqual({ limits: SESSION_LIMITS, signal: stop.signal });
+    // Stuck is ten minutes with no output; a long refresh still has room.
+    expect(ONE_SHOT_LIMITS.idleSecs).toBe(600);
+    expect(ONE_SHOT_LIMITS.totalSecs).toBeGreaterThanOrEqual(30 * 60);
+  });
+});
+
 describe("Amplitude experiments and flags in chats", () => {
   it("gives chats the experiment and flag tools, and says to change one only when asked", async () => {
     const { SESSION_DISPLAY, TOOLS } = await import("./claude");
@@ -225,5 +291,12 @@ describe("Amplitude experiments and flags in chats", () => {
     // Background jobs keep the read-only list.
     expect(TOOLS.amplitudeRead).not.toContain("mcp__claude_ai_Amplitude__use_amp_flags");
     expect(SESSION_DISPLAY).toContain("only do that when I've asked for that exact change in this chat");
+  });
+
+  it("gives them only on a turn you started, never one Demian starts by itself", async () => {
+    const { TOOLS } = await import("./claude");
+    const { sessionTools } = await import("./jobs");
+    expect(sessionTools(true)).toEqual(expect.arrayContaining(TOOLS.amplitudeExperiments));
+    for (const t of TOOLS.amplitudeExperiments) expect(sessionTools(false)).not.toContain(t);
   });
 });

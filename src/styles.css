@@ -6,8 +6,12 @@
   --text: #1c1c1a;
   --muted: #6b6b66;
   --accent: #2f6fde;
+  /* The accent, fixed here: a gray-at-rest badge redefines --accent for itself, but keeps a blue focus ring. */
+  --focus-ring: var(--accent);
   --red: #c8352c;
   --blocking-bg: #c8352c;
+  /* Its gray at rest (badges are gray until you hover their card): the red's own lightness. */
+  --blocking-gray: #545454;
   --red-bg: #fbe9e7;
   --amber: #a86400;
   --amber-bg: #fdf1dc;
@@ -31,6 +35,7 @@
   --accent: #6b9cf0;
   --red: #f07b72;
   --blocking-bg: #a8322a;
+  --blocking-gray: #4a4a4a;
   --red-bg: #45231f;
   --amber: #f0b45a;
   --amber-bg: #42321a;
@@ -49,6 +54,7 @@
     --accent: #6b9cf0;
     --red: #f07b72;
   --blocking-bg: #a8322a;
+  --blocking-gray: #4a4a4a;
     --red-bg: #45231f;
     --amber: #f0b45a;
     --amber-bg: #42321a;
@@ -149,6 +155,10 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .icon-button:hover:not(:disabled) { color: var(--accent); }
 /* Claude's spinner: fixed width so the changing glyphs don't shift the text beside them. */
 .spinner { display: inline-block; width: 1em; text-align: center; color: #d97757; font-variant-emoji: text; }
+/* The frames' ink sits a little below the middle of the line, the dot (·) well below the stars. Each
+   is lifted onto the middle, so the spinner turns in place, centered on what's beside it. */
+.spinner, .claude-spark { position: relative; top: -0.02em; }
+.spinner.dot, .claude-spark.dot { top: -0.085em; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--grey-bg); }
@@ -270,7 +280,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Inset so the scrolling column can't clip the outline. A task whose chat is open in the dock
    beside the list is marked the same way. */
 .project.selected, .task-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.badge { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
+/* A whole-pixel line height keeps the badge a whole 18px tall: at 1.45 it's 17.94px, and on a
+   half-pixel top WebKit rounds its top up and its bottom down, dropping its last row. */
+.badge { font-size: 11px; line-height: 16px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
 .badge.priority.critical { color: var(--red); background: var(--red-bg); }
 .badge.priority.high { color: var(--amber); background: var(--amber-bg); }
 .badge.raci.accountable, .badge.raci.responsible { color: var(--accent); }
@@ -308,6 +320,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .automation-head.fixed { cursor: default; }
 .automation-head.fixed:hover .automation-kind { color: var(--muted); }
 .disclosure { margin-left: auto; flex-shrink: 0; color: var(--muted); transition: transform 0.15s ease; }
+/* The plan being written or re-checked: a spinner at the right end of the heading row, centered on the heading's text. */
+.automation-aside { margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; color: var(--muted); font-size: 12px; line-height: 1; }
+.automation-aside + .disclosure { margin-left: 0; }
 .disclosure.open { transform: rotate(90deg); }
 .needs-details { padding: 6px 8px; border-radius: 6px; color: var(--amber); background: var(--amber-bg); display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: baseline; }
 .needs-details .link-button { color: inherit; text-decoration: underline; }
@@ -319,12 +334,22 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-badge select, .menu-badge select { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
 /* A ring only when the menu was reached from the keyboard: picking with the mouse leaves it focused, and the ring would stay. */
 /* Keyboard focus only (see usePointerFocus), and drawn inside the badge: the row it sits in clips anything outside. */
-.status-badge:has(select:focus-visible):not(.pointer-focus), .menu-badge:has(select:focus-visible):not(.pointer-focus) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.status-badge:has(select:focus-visible):not(.pointer-focus), .menu-badge:has(select:focus-visible):not(.pointer-focus) { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .status-badge.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 /* To do in the muted gray the other badges show (it would otherwise take the text color). */
 .status-badge.todo { color: var(--muted); }
 .status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 .status-badge.human { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
+/* A task whose Claude session is working: "Working", with a light sweeping across it. The sweep is
+   drawn from the text's own color toward white, so it reads as a light sweep in both themes and still moves when the card is gray at rest. */
+.status-badge.working { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
+.status-badge .shimmer {
+  background: linear-gradient(100deg, currentColor 0%, currentColor 38%, color-mix(in srgb, currentColor 35%, #fff) 50%, currentColor 62%, currentColor 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: badge-shimmer 1.8s linear infinite;
+}
+@keyframes badge-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+@media (prefers-reduced-motion: reduce) { .status-badge .shimmer { animation: none; } }
 .status-badge.blocked { color: var(--red); background: var(--red-bg); border-color: transparent; }
 .status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
 .estimate { font-size: 11px; color: var(--muted); }
@@ -383,8 +408,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-body-inner > .automation:not(:first-child) { margin-top: 4px; }
 .task-body-inner > .plan-actions:not(:first-child) { margin-top: 6px; }
 .task-card.collapsed .task-body-inner { opacity: 0; transform: translateY(-4px); transition: opacity 110ms ease-in, transform 190ms var(--close-ease); }
-/* Clip only while collapsed or moving, so focus rings and shadows inside an open card aren't cut off. */
-.task-card.collapsed .task-body-inner, .task-card.animating .task-body-inner { overflow: hidden; }
+/* Clip only while collapsed or moving, so focus rings and shadows inside an open card aren't cut off,
+   and only top to bottom, so the line above the links keeps reaching the card's edges. */
+.task-card.collapsed .task-body-inner, .task-card.animating .task-body-inner { overflow-x: visible; overflow-y: clip; }
+/* A card's links, last, under a line across the whole card (out through the card's 14px padding). */
+.task-links { margin: 4px -14px 0; padding: 10px 14px 0; border-top: 1px solid var(--border); }
 .task-toggle .disclosure { transition: transform 280ms var(--open-ease); }
 .task-card.collapsed .task-toggle .disclosure { transition: transform 190ms var(--close-ease); }
 .task-toggle { transition: transform 90ms ease; }
@@ -437,10 +465,12 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
    filtered block's bottom border. */
 .event-block { transition: background-color 0.25s ease, border-color 0.25s ease; }
 .day-grid:not(:hover) .event-block { --ev-tint: var(--muted); }
+/* At rest their edges are faint too, so the gray blocks don't read as outlined boxes. */
+.day-grid:not(:hover) .event-block:not(.rsvp-needs_action) { border-color: color-mix(in srgb, var(--muted) 22%, var(--border)); }
 .event-block:hover { text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--ev-tint) 26%, var(--surface)); }
 .event-block.past { opacity: 0.5; }
 .event-block.current { border-color: var(--red); }
-.day-grid:not(:hover) .event-block.current { border-color: color-mix(in srgb, var(--muted) 70%, var(--border)); }
+.day-grid:not(:hover) .event-block.current { border-color: color-mix(in srgb, var(--muted) 45%, var(--border)); }
 /* Lines never squeeze each other; what doesn't fit is left out (see DayGrid). */
 .event-block > span { flex-shrink: 0; }
 .event-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -500,7 +530,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .reading-body .reading-inner, .reading-body > .reveal-inner { gap: 4px; }
 .reading-body .reveal-inner > :first-child { margin-top: 0; }
 .reading-header-actions { gap: 2px; }
-.reading-text { margin: 0; line-height: 1.55; color: var(--muted); }
+.reading-text { margin: 0; line-height: 1.55; color: var(--muted); display: flex; flex-direction: column; gap: 8px; }
+.reading-text > p { margin: 0; }
 .update-label { color: var(--muted); margin-right: 6px; }
 
 /* Project priority ahead of the name */
@@ -652,8 +683,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-result.resolved .check-verdict, .check-result.not_blocking .check-verdict { color: var(--green); }
 .check-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .check-buttons { margin-left: auto; display: flex; gap: 10px; }
-.check-result.looks_right .check-verdict { color: var(--green); }
-.check-result.captured_wrong .check-verdict, .check-result.already_done .check-verdict, .check-result.not_needed .check-verdict, .check-result.duplicate .check-verdict { color: var(--amber, #c98a1b); }
+/* A task investigation's outcome is uncolored, the gray of the Plan box's note beside its heading. */
+.task-check .check-verdict { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 .check-findings { list-style: none; margin: 2px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .check-findings li { display: flex; gap: 6px; align-items: baseline; }
 .finding-mark { width: 10px; flex: none; text-align: center; color: var(--muted); }
@@ -948,15 +979,23 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Task body text matches the project cards' gray. */
 .automation .suggestion { color: var(--muted); }
 
-/* Badges stay gray until you hover their card, so color draws the eye only where you're looking. */
-.card :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { transition: filter 0.15s ease; }
-.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .link-chip-icon, .p-badge) { filter: grayscale(1); }
+/* Badges stay gray until you hover their card, so color draws the eye only where you're looking. The
+   same in a project's details beside the list: its tags, link icons and Project context link stay gray
+   until you hover the details. They're grayed by swapping the colors they're drawn with for grays,
+   not with a grayscale filter: WebKit can cut the last row of pixels off a filtered element. Only
+   the link icons, whose colors are drawn into them, keep the filter. */
+.card :is(.badge, .pill, .chip, .owner, .source, .p-badge),
+.project-detail-pane :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .understanding-link) { transition: color 0.15s ease, background-color 0.15s ease; }
+.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .p-badge),
+.project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .understanding-link) {
+  --red: var(--muted); --amber: var(--muted); --green: var(--muted); --accent: var(--muted);
+  --red-bg: var(--grey-bg); --amber-bg: var(--grey-bg); --green-bg: var(--grey-bg); --blocking-bg: var(--blocking-gray);
+}
+.card:not(:hover) .source.slack { color: var(--muted); }
+.card .link-chip-icon, .project-detail-pane .link-chip-icon { transition: filter 0.15s ease; }
+.card:not(:hover) .link-chip-icon, .project-detail-pane:not(:hover) .link-chip-icon { filter: grayscale(1); }
 /* At rest every priority reads in the same grey, so none looks heavier than the others (brighter text renders bolder); hovering brings their colors back. */
 .card:not(:hover) .badge.priority:not(.blocking) { color: var(--muted); opacity: 1; }
-/* The same in a project's details beside the list: its tags, link icons and Project context link stay
-   gray until you hover the details. */
-.project-detail-pane :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .link-chip-icon, .understanding-link) { transition: filter 0.15s ease; }
-.project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .link-chip-icon, .understanding-link) { filter: grayscale(1); }
 
 /* Double check follows More / Edit / Show links on the left, and appears when you hover the card. */
 .card .hover-only { opacity: 0; transition: opacity 0.15s ease; }
@@ -1161,6 +1200,14 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .composer-send:not(:disabled):active { transform: scale(0.92); }
 .composer-wrap.disabled .composer { background: color-mix(in srgb, var(--grey-bg) 60%, var(--surface)); }
 .composer-wrap.disabled textarea { cursor: default; }
+/* What Claude is doing, where the placeholder goes while it works: laid over the empty box, set like
+   the placeholder, on one line that ends in an ellipsis when it's too long. */
+.composer-status {
+  position: absolute; inset: 0 0 auto 0; padding: 3px 0; text-indent: 3px; pointer-events: none;
+  font-size: 12px; line-height: 1.45; color: color-mix(in srgb, var(--muted) 60%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-stop { cursor: pointer; }
 .plan-actions > .handoff, .plan-actions > .composer-wrap, .plan-actions > .session-error, .plan-actions > .session-working { flex-basis: 100%; }
 
 /* The arrow at the end of a task's header row, after its badges, that opens and closes the card */
@@ -1261,6 +1308,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 }
 .chat-turn.claude { align-self: stretch; color: var(--text); display: flex; flex-direction: column; gap: 10px; }
 .chat-working { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.chat-working .chat-stop { margin-left: 4px; }
 .claude-spark { display: inline-block; width: 1em; text-align: center; color: #d97757; font-size: 14px; line-height: 1; }
 .chat-modal-foot { padding: 10px 20px 16px; }
 /* A plain conversation (Explain this): a neutral top box and a quiet, light-gray title. */
@@ -1787,6 +1835,8 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 /* The connectors step, split: what to do and a preview of the page on the left, the list on the right. */
 .onboarding-guide.onboarding-guide-wide { width: min(620px, calc(100% - 48px)); }
 .onboarding-connectors-split .onboarding-guide-actions { justify-content: flex-start; padding-left: 0; flex-wrap: wrap; }
+/* A one-click step's own button with Check again beside it. */
+.onboarding-two-ways .onboarding-guide-actions { justify-content: flex-start; padding-left: 0; flex-wrap: wrap; margin: 0; }
 .onboarding-connectors-split .onboarding-connectors { margin-left: 0; }
 .onboarding-connectors-split .onboarding-way-label + .onboarding-connectors { margin-bottom: 8px; }
 
@@ -1886,7 +1936,7 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
    Demian acts), amber while it's ready, and its state or Create and open task sits at the end. */
 /* The same size as the step's text and on its baseline, so it reads as part of the sentence; the
    vertical padding makes it taller without changing the line's height (inline padding doesn't). */
-.step-badge { padding: 1px 5px; border-radius: 3px; font-size: inherit; vertical-align: baseline; color: var(--text); }
+.step-badge { padding: 1px 5px; border-radius: 3px; font-size: inherit; line-height: inherit; vertical-align: baseline; color: var(--text); }
 .plan-outline-steps li.step-waiting .step-badge { color: var(--amber); background: var(--amber-bg); }
 .step-trailing { flex-shrink: 0; margin-left: auto; padding-left: 8px; }
 .task-meta .badge-select { font-size: 11px; }

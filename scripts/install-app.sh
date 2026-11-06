@@ -32,4 +32,14 @@ if [ -d "/Applications/Orb Sees All.app" ]; then
 fi
 sleep 1
 ditto "src-tauri/target/release/bundle/macos/Demian.app" "/Applications/Demian.app"
+# The build's own copies have the same app ID, so macOS could open one of them instead (from a
+# notification, a link or Spotlight) and run a second Demian. Once installed, forget and remove
+# them, leaving /Applications/Demian.app the only one. The update bundle beside them stays.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+for built in src-tauri/target/release/bundle/macos/*.app; do
+  [ -d "$built" ] || continue
+  "$LSREGISTER" -u "$built" 2>/dev/null || true
+  rm -rf "$built"
+done
+"$LSREGISTER" -f "/Applications/Demian.app" 2>/dev/null || true
 open "/Applications/Demian.app"

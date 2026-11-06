@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { envelope, MusicResponse, WAVE_LIFE, type Heard } from "./orbMusic";
+import { BIG_BASS_HIT, envelope, MusicResponse, WAVE_LIFE, type Heard } from "./orbMusic";
 
-const quiet: Heard = { level: 0, bands: new Array(8).fill(0), bass: 0, mid: 0, high: 0, hit: 0, hits: 0, brightness: 0.5, noisiness: 0.3, section: 0.5, active: false };
+const quiet: Heard = { level: 0, bands: new Array(8).fill(0), bass: 0, mid: 0, high: 0, hit: 0, hits: 0, bassHit: 0, bassHits: 0, brightness: 0.5, noisiness: 0.3, section: 0.5, active: false };
 const playing = (over: Partial<Heard> = {}): Heard => ({ ...quiet, level: 0.6, bands: new Array(8).fill(0.5), bass: 0.5, mid: 0.5, high: 0.5, active: true, ...over });
 
 /** Runs the response for `secs` at 60 frames a second, hearing `heard` each frame (or nothing). */
@@ -56,7 +56,7 @@ describe("MusicResponse", () => {
   it("lands each hit at once: a spring pushed out, a moment that fades fast, and a wave", () => {
     const m = new MusicResponse();
     run(m, 3, () => playing());
-    m.hear(playing({ hit: 0.8, hits: 1 }));
+    m.hear(playing({ hit: 0.8, hits: 1, bassHit: 1, bassHits: 1 }));
     expect(m.waves).toHaveLength(1);
     // On the hit itself, not a few frames later.
     expect(m.kick).toBeGreaterThan(0.3);
@@ -74,16 +74,29 @@ describe("MusicResponse", () => {
     expect(m.waves).toHaveLength(0);
   });
 
+  it("bounces and pulses only on a big bass hit: not a hi-hat or snare, not a light thump", () => {
+    const m = new MusicResponse();
+    run(m, 3, () => playing());
+    m.hear(playing({ hit: 1, hits: 1 }));
+    m.hear(playing({ hit: 0.8, hits: 1, bassHit: BIG_BASS_HIT - 0.1, bassHits: 1 }));
+    expect(m.waves).toHaveLength(0);
+    expect(m.kick).toBe(0);
+    expect(m.hit).toBe(0);
+    m.hear(playing({ bassHit: BIG_BASS_HIT + 0.1, bassHits: 1 }));
+    expect(m.waves).toHaveLength(1);
+    expect(m.hit).toBeGreaterThan(0.3);
+  });
+
   it("folds hits close together into one wave", () => {
     const m = new MusicResponse();
     run(m, 1, () => playing());
-    m.hear(playing({ hit: 0.3, hits: 1 }));
+    m.hear(playing({ hit: 0.3, hits: 1, bassHit: 0.5, bassHits: 1 }));
     m.step(1 / 60);
-    m.hear(playing({ hit: 0.9, hits: 1 }));
+    m.hear(playing({ hit: 0.9, hits: 1, bassHit: 1, bassHits: 1 }));
     expect(m.waves).toHaveLength(1);
     expect(m.waves[0].strength).toBeGreaterThan(0.9);
     run(m, 0.2, () => playing());
-    m.hear(playing({ hit: 0.5, hits: 1 }));
+    m.hear(playing({ hit: 0.5, hits: 1, bassHit: 0.6, bassHits: 1 }));
     expect(m.waves).toHaveLength(2);
     expect(WAVE_LIFE).toBeGreaterThan(0.5);
   });

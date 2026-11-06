@@ -212,7 +212,12 @@ export function DailyReading({
         </header>
         <Reveal open={alwaysOpen || open} className="reading-body">
           {current ? (
-            <p className="reading-text">{current.text}</p>
+            <div className="reading-text">
+              {/* Spoken in a few short paragraphs. */}
+              {current.text.split(/\n\s*\n/).map((para, i) => (
+                <p key={i}>{para.trim()}</p>
+              ))}
+            </div>
           ) : (
             <p className="muted small">{busy ? "Demian is preparing your briefing…" : "No briefing yet today. It's written after Refresh all."}</p>
           )}

@@ -1,4 +1,5 @@
 mod listen;
+mod runs;
 mod sessions;
 
 use std::collections::HashMap;
@@ -140,7 +141,16 @@ fn command(exe: &Program, args: &[String], dir: &PathBuf, path: &std::ffi::OsStr
         // Newer Claude Code doesn't wait for MCP servers to connect in a headless run, so a run can
         // start, and even finish, before the claude.ai connectors (Slack, Gmail, Calendar) arrive.
         .env("MCP_CONNECTION_NONBLOCKING", "false")
+        // A connector call that hangs fails after five minutes, as an error the run can work
+        // around, instead of holding the run until it's stopped (see runs.rs).
+        .env("MCP_TOOL_TIMEOUT", "300000")
         .stdin(if stdin { Stdio::piped() } else { Stdio::null() });
+    // Each run leads its own process group, so stopping it stops everything it started.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -239,6 +249,18 @@ fn feed_stdin(child: &mut std::process::Child, text: Option<String>) {
     }
 }
 
+/// How long a run may take when the caller doesn't say: a quick git, gh or claude check has five
+/// minutes; a Claude run streaming its work is stopped after ten minutes with no output, or an hour
+/// in all.
+const QUICK_LIMITS: runs::Limits = runs::Limits { idle_secs: None, total_secs: Some(300) };
+const STREAM_LIMITS: runs::Limits = runs::Limits { idle_secs: Some(600), total_secs: Some(3600) };
+
+fn finished(out: runs::Finished) -> CliOutput {
+    CliOutput { code: out.code, stdout: out.stdout, stderr: out.stderr }
+}
+
+/// Runs an allowed program and returns what it printed. `id` lets the app stop it (cancel_run);
+/// `limits` caps how long it may take (QUICK_LIMITS when not given).
 #[tauri::command]
 async fn run_cli(
     app: AppHandle,
@@ -246,6 +268,8 @@ async fn run_cli(
     mut args: Vec<String>,
     cwd: Option<String>,
     input: Option<CliInput>,
+    id: Option<String>,
+    limits: Option<runs::Limits>,
 ) -> Result<CliOutput, String> {
     if !ALLOWED_PROGRAMS.contains(&program.as_str()) {
         return Err(format!("{program} is not an allowed program"));
@@ -255,21 +279,18 @@ async fn run_cli(
     let dir = work_dir(&app, cwd)?;
 
     let input = input.unwrap_or_default();
-    let _prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
+    let prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
     let has_stdin = input.stdin.is_some();
+    let id = id.unwrap_or_else(|| format!("run-{}", nanos()));
     tauri::async_runtime::spawn_blocking(move || {
+        let _prompt_file = prompt_file;
         let mut child = command(&exe, &args, &dir, &path, has_stdin)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Couldn't start {program} in {}: {e}", dir.display()))?;
         feed_stdin(&mut child, input.stdin);
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
-        Ok(CliOutput {
-            code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+        runs::supervise(&app.state::<runs::Runs>(), &id, child, limits.unwrap_or(QUICK_LIMITS), |_| {}).map(finished)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -282,8 +303,9 @@ struct CliLine {
     line: String,
 }
 
-/// Like run_cli, but emits each stdout line as a `cli-line` event while the
-/// program runs, so the frontend can show progress.
+/// Like run_cli, but emits each stdout line as a `cli-line` event while the program runs, so the
+/// frontend can show progress. The stream id is also the run's id for cancel_run; `limits` defaults
+/// to STREAM_LIMITS.
 #[tauri::command]
 async fn run_cli_stream(
     app: AppHandle,
@@ -292,9 +314,8 @@ async fn run_cli_stream(
     mut args: Vec<String>,
     cwd: Option<String>,
     input: Option<CliInput>,
+    limits: Option<runs::Limits>,
 ) -> Result<CliOutput, String> {
-    use std::io::{BufRead, BufReader, Read};
-
     if !ALLOWED_PROGRAMS.contains(&program.as_str()) {
         return Err(format!("{program} is not an allowed program"));
     }
@@ -311,33 +332,28 @@ async fn run_cli_stream(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Couldn't start {program} in {}: {e}", dir.display()))?;
         feed_stdin(&mut child, input.stdin);
-
-        // Drain stderr on its own thread so a full pipe can't stall the program.
-        let mut stderr_pipe = child.stderr.take().expect("stderr is piped");
-        let stderr_reader = std::thread::spawn(move || {
-            let mut buf = String::new();
-            let _ = stderr_pipe.read_to_string(&mut buf);
-            buf
-        });
-
-        let mut stdout = String::new();
-        for line in BufReader::new(child.stdout.take().expect("stdout is piped")).lines() {
-            let line = line.map_err(|e| e.to_string())?;
-            let _ = app.emit("cli-line", CliLine { stream_id: stream_id.clone(), line: line.clone() });
-            stdout.push_str(&line);
-            stdout.push('\n');
-        }
-        let status = child.wait().map_err(|e| e.to_string())?;
-        Ok(CliOutput {
-            code: status.code().unwrap_or(-1),
-            stdout,
-            stderr: stderr_reader.join().unwrap_or_default(),
+        let emitter = app.clone();
+        runs::supervise(&app.state::<runs::Runs>(), &stream_id, child, limits.unwrap_or(STREAM_LIMITS), |line| {
+            let _ = emitter.emit("cli-line", CliLine { stream_id: stream_id.clone(), line: line.to_string() });
         })
+        .map(finished)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Stops one run (see run_cli). False when it isn't running.
+#[tauri::command]
+fn cancel_run(runs: tauri::State<'_, runs::Runs>, id: String) -> bool {
+    runs.cancel(&id)
+}
+
+/// Stops every run at once, before the app relaunches for an update.
+#[tauri::command]
+fn cancel_all_runs(runs: tauri::State<'_, runs::Runs>) {
+    runs.kill_all();
 }
 
 /// The first time the window is closed on Windows: a notice that Demian keeps running in the tray.
@@ -402,18 +418,26 @@ async fn mirror_repo(app: AppHandle, repo: String) -> Result<String, String> {
     let target = staging.to_string_lossy().into_owned();
     let dir2 = dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let out = command(&gh, &["repo".into(), "clone".into(), repo.clone(), target, "--".into(), "--depth".into(), "1".into(), "--single-branch".into()], &parent, &path, false)
+        let child = command(&gh, &["repo".into(), "clone".into(), repo.clone(), target, "--".into(), "--depth".into(), "1".into(), "--single-branch".into()], &parent, &path, false)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            .output()
+            .spawn()
             .map_err(|e| e.to_string())?;
-        if !out.status.success() {
+        // A shallow clone; a quarter of an hour means the network or GitHub is stuck.
+        let limits = runs::Limits { idle_secs: None, total_secs: Some(900) };
+        let out = runs::supervise(&app.state::<runs::Runs>(), &format!("mirror-{repo}-{}", nanos()), child, limits, |_| {});
+        let failed = match &out {
+            Ok(done) if done.code == 0 => None,
+            Ok(done) => Some(done.stderr.trim().to_string()),
+            Err(why) => Some(why.clone()),
+        };
+        if let Some(why) = failed {
             let _ = std::fs::remove_dir_all(&staging);
             // A stale copy still beats none.
             if dir2.exists() {
                 return Ok(dir2.to_string_lossy().into_owned());
             }
-            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+            return Err(why);
         }
         if dir2.exists() {
             std::fs::remove_dir_all(&dir2).map_err(|e| e.to_string())?;
@@ -645,17 +669,22 @@ fn existing_dirs(paths: Vec<String>) -> Vec<String> {
 /// frontend names one, it never supplies a command.
 #[tauri::command]
 fn open_setup_terminal(step: String) -> Result<(), String> {
-    let path = search_path();
-    let claude = resolve("claude", &path).map(|p| p.path.to_string_lossy().into_owned());
     let script = match step.as_str() {
-        // Claude's official installer.
-        "install" if cfg!(windows) => "irm https://claude.ai/install.ps1 | iex".to_string(),
+        // Claude's official installer. On Windows it puts claude.exe in .local\bin but leaves that
+        // folder off PATH (it says so, and asks the person to add it), so `claude` isn't found in a
+        // new PowerShell window. Do what it asks: add the folder to the user's PATH if it's missing,
+        // say so, and to this window's too.
+        "install" if cfg!(windows) => [
+            "irm https://claude.ai/install.ps1 | iex",
+            "$bin = Join-Path $env:USERPROFILE '.local\\bin'",
+            "$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')",
+            "if ((Test-Path (Join-Path $bin 'claude.exe')) -and (($userPath -split ';') -notcontains $bin)) { [Environment]::SetEnvironmentVariable('Path', (($userPath.TrimEnd(';') + ';' + $bin).TrimStart(';')), 'User'); Write-Host ('Added ' + $bin + ' to your PATH, so claude works in new PowerShell windows.') }",
+            "$env:Path += ';' + $bin",
+        ]
+        .join("; "),
         "install" => "curl -fsSL https://claude.ai/install.sh | bash".to_string(),
         // Signing in with a Claude subscription (not an API key); it opens the browser to approve.
-        "login" => {
-            let exe = claude.unwrap_or_else(|| "claude".into());
-            if cfg!(windows) { format!("& '{exe}' auth login --claudeai") } else { format!("'{exe}' auth login --claudeai") }
-        }
+        "login" => login_command(),
         _ => return Err(format!("Unknown setup step {step}")),
     };
     // The step goes in a .command file that Terminal opens and runs. Opening a file needs no
@@ -682,6 +711,38 @@ fn open_setup_terminal(step: String) -> Result<(), String> {
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = script;
     Ok(())
+}
+
+/// A path quoted for the shell the setup steps run in: PowerShell on Windows (in single quotes, a
+/// quote doubled), zsh elsewhere (in single quotes, a quote closed, escaped and reopened).
+fn shell_quote(text: &str, windows: bool) -> String {
+    if windows {
+        format!("'{}'", text.replace('\'', "''"))
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+}
+
+/// How to start a program from the setup shell, by its full path (and, for claude installed with
+/// npm on Windows, node and its script). PowerShell runs a quoted path with the call operator.
+fn shell_invocation(path: &str, leading_args: &[String], windows: bool) -> String {
+    let parts: Vec<String> = std::iter::once(path).chain(leading_args.iter().map(String::as_str)).map(|p| shell_quote(p, windows)).collect();
+    if windows { format!("& {}", parts.join(" ")) } else { parts.join(" ") }
+}
+
+/// The command that signs Claude Code in, by the path Demian found it at, so it works even where
+/// its folder isn't on PATH (a fresh Windows install). Plain `claude …` when it isn't installed.
+fn login_command() -> String {
+    match resolve("claude", &search_path()) {
+        Some(p) => format!("{} auth login --claudeai", shell_invocation(&p.path.to_string_lossy(), &p.leading_args, cfg!(windows))),
+        None => "claude auth login --claudeai".to_string(),
+    }
+}
+
+/// The sign-in command to show for pasting into a terminal (see login_command).
+#[tauri::command]
+fn setup_login_command() -> String {
+    login_command()
 }
 
 fn show_main(app: &AppHandle) {
@@ -826,9 +887,13 @@ pub fn run() {
             sessions::find_session,
             sessions::read_session_progress,
             listen::start_listening,
-            listen::stop_listening
+            listen::stop_listening,
+            cancel_run,
+            cancel_all_runs,
+            setup_login_command
         ])
         .manage(listen::Listening::default())
+        .manage(runs::Runs::default())
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Demian", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Refresh all", true, None::<&str>)?;
@@ -870,6 +935,17 @@ pub fn run() {
                 hide_window_buttons(&window);
             }
 
+            // System prompts left by runs the app didn't outlive (a crash, a forced quit): no run is
+            // going yet, so any in the work folder are stale.
+            if let Ok(dir) = work_dir(app.handle(), None) {
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name.starts_with("system-prompt-") && name.ends_with(".txt") {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
+            }
+
             // Wake the frontend's scheduler once a minute, even while the window is hidden.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -892,6 +968,11 @@ pub fn run() {
         .expect("error while building Demian");
 
     app.run(|_app, _event| {
+        // Quitting ends every run with it, and whatever each one started, so nothing keeps working
+        // (or spending) after the app is gone.
+        if let RunEvent::Exit = _event {
+            _app.state::<runs::Runs>().kill_all();
+        }
         // Clicking the Dock icon while the window is hidden brings it back (macOS only).
         #[cfg(target_os = "macos")]
         if let RunEvent::Reopen { .. } = _event {
@@ -975,5 +1056,31 @@ mod tests {
         drop(guard);
         assert!(!file.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod setup_tests {
+    use super::{shell_invocation, shell_quote};
+
+    #[test]
+    fn quotes_a_path_with_an_apostrophe_for_each_shell() {
+        assert_eq!(shell_quote(r"C:\Users\O'Brien\.local\bin\claude.exe", true), r"'C:\Users\O''Brien\.local\bin\claude.exe'");
+        assert_eq!(shell_quote("/Users/o'brien/.local/bin/claude", false), r"'/Users/o'\''brien/.local/bin/claude'");
+    }
+
+    #[test]
+    fn signs_in_by_full_path_with_powershells_call_operator() {
+        assert_eq!(shell_invocation(r"C:\Users\tom\.local\bin\claude.exe", &[], true), r"& 'C:\Users\tom\.local\bin\claude.exe'");
+        assert_eq!(shell_invocation("/Users/tom/.local/bin/claude", &[], false), "'/Users/tom/.local/bin/claude'");
+    }
+
+    #[test]
+    fn runs_an_npm_installed_claude_through_node_and_its_script() {
+        let script = r"C:\Users\tom\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js".to_string();
+        assert_eq!(
+            shell_invocation(r"C:\Program Files\nodejs\node.exe", &[script], true),
+            r"& 'C:\Program Files\nodejs\node.exe' 'C:\Users\tom\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js'"
+        );
     }
 }

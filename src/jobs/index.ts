@@ -6,7 +6,7 @@ import * as db from "../db";
 import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
-import { codeRequests, currentSessionSteps, linkSession, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { codeRequests, currentSessionSteps, linkSession, withEdit, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
@@ -231,8 +231,8 @@ export async function refreshProject(channelId: string): Promise<void> {
               project.status_override && (!project.last_refreshed_at || project.status_override.at > project.last_refreshed_at) ? project.status_override : null,
           }),
           schema: ProjectRefresh,
-          // Jira too, to find the project's epics.
-          tools: [...TOOLS.slackRead, ...TOOLS.jiraRead],
+          // Jira too, to find the project's epics, and Granola for its meetings.
+          tools: [...TOOLS.slackRead, ...TOOLS.jiraRead, ...TOOLS.granolaRead],
           model: await model(),
         });
         const { profile: found, related_channels, epics, ...snapshot } = data;
@@ -398,7 +398,7 @@ export function checkWatchedTopic(id: string): Promise<void> {
           outcomes: openOutcomes(topic).map((o) => ({ id: o.id, event: o.event, by: o.by })),
         }),
         schema: WatchedCheck,
-        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead],
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.jiraRead, ...TOOLS.granolaRead],
         // A focused look at one topic: the cheaper model is plenty.
         model: "sonnet",
         maxTurns: 30,
@@ -797,16 +797,43 @@ const DOC_REMINDER =
 
 // A task's chat also gets Amplitude's experiment and flag tools, which can change them too: the user
 // is in the conversation, and SESSION_DISPLAY says to change one only when they ask.
-const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead, ...TOOLS.amplitudeExperiments];
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead];
+/**
+ * A chat's tools on a turn you started (your message, or a button you pressed): the Amplitude
+ * experiment and flag tools too, which can change what real users see. A turn Demian starts itself
+ * (after a send, a recheck, code it added) doesn't get them, as no one's there to have asked.
+ */
+export const sessionTools = (byUser: boolean) => (byUser ? [...SESSION_TOOLS, ...TOOLS.amplitudeExperiments] : SESSION_TOOLS);
 
 /**
  * Runs the next turn of a task's working session in the background: the first turn from the start
  * prompt, later ones with the user's reply. The session works until it's done or needs the user,
  * reporting through its transcript; the user never has to open Claude unless they want to.
  */
-function runTaskSession(taskId: string, prompt: string): Promise<void> {
+/** The chat turns under way, by task, so Stop can end one. */
+const turnStops = new Map<string, AbortController>();
+
+/** What a chat shows after you stopped its turn (lastError); Carry on picks it up again. */
+export const STOPPED_BY_YOU = "You stopped it.";
+
+/** Stop in a chat: ends the turn under way, and everything it started. */
+export function stopTaskSession(taskId: string) {
+  turnStops.get(taskId)?.abort();
+}
+
+function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promise<void> {
+  // Made before the turn waits for a free slot, so Stop works on a turn that hasn't started yet too.
+  const stopper = new AbortController();
+  turnStops.set(taskId, stopper);
+  const done = () => {
+    if (turnStops.get(taskId) === stopper) turnStops.delete(taskId);
+  };
   return track(`session:${taskId}`, (status) =>
     logged("session", taskId, async () => {
+      if (stopper.signal.aborted) {
+        await db.updateSessionLink(taskId, { lastError: STOPPED_BY_YOU });
+        throw new Error("Stopped");
+      }
       const link = (await db.getSessionLinks())[taskId];
       await db.updateSessionLink(taskId, { lastError: null });
       try {
@@ -883,7 +910,7 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         // Asked for a doc: say plainly how, every time. A session that once decided it can't make
         // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
         const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
-        const turn = await runSessionTurn({ prompt: asked, tools: SESSION_TOOLS, ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
+        const turn = await runSessionTurn({ signal: stopper.signal, prompt: asked, tools: sessionTools(byUser), ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
           // transcript's copy arrives.
           window.clearTimeout(flush);
@@ -898,11 +925,12 @@ function runTaskSession(taskId: string, prompt: string): Promise<void> {
         if (note) void continueTaskSession(taskId, note).catch(() => {});
         return { value: undefined, costUsd: turn.costUsd };
       } catch (e) {
-        await db.updateSessionLink(taskId, { lastError: (e as Error).message });
+        const stopped = (e as Error).message === "Stopped";
+        await db.updateSessionLink(taskId, { lastError: stopped ? STOPPED_BY_YOU : (e as Error).message });
         throw e;
       }
     }),
-  );
+  ).finally(done);
 }
 
 /**
@@ -1101,7 +1129,7 @@ export function recheckSessionSteps(
 export async function startTaskChat(taskId: string, prompt: string, onTurn: () => void): Promise<void> {
   await linkSession(taskId);
   bump();
-  runTaskSession(taskId, prompt).then(onTurn, onTurn);
+  runTaskSession(taskId, prompt, true).then(onTurn, onTurn);
 }
 
 /**
@@ -1113,7 +1141,7 @@ export async function startChatSession(key: string, prompt: string, onTurn: () =
   await linkSession(key);
   await db.updateSessionLink(key, { topic: true });
   bump();
-  runTaskSession(key, prompt).then(onTurn, onTurn);
+  runTaskSession(key, prompt, true).then(onTurn, onTurn);
 }
 
 /** The global chat's current conversation, kept across restarts until New chat starts another. */
@@ -1129,15 +1157,19 @@ export async function globalChatKey(fresh = false): Promise<string> {
 export async function startGlobalChat(key: string, message: string, onTurn: () => void): Promise<void> {
   await linkSession(key);
   bump();
-  runTaskSession(key, globalChatPrompt(key, message)).then(onTurn, onTurn);
+  runTaskSession(key, globalChatPrompt(key, message), true).then(onTurn, onTurn);
 }
 
 /** Continues a task's working session with the user's answer to what it asked. */
-export async function continueTaskSession(taskId: string, message: string): Promise<void> {
+/**
+ * The chat's next turn. `byUser` when you started it (your message, or a button you pressed); a turn
+ * Demian starts itself gets fewer tools (see sessionTools).
+ */
+export async function continueTaskSession(taskId: string, message: string, byUser = false): Promise<void> {
   // One turn at a time: a turn still running would swallow this one (the queue dedupes by key), so wait it out.
   const key = `session:${taskId}`;
   while (queue.has(key)) await queue.run(key, async () => {}).catch(() => {});
-  return runTaskSession(taskId, message);
+  return runTaskSession(taskId, message, byUser);
 }
 
 /**
@@ -1181,6 +1213,8 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
         : [];
       await db.updateSessionLink(taskId, {
         sentKeys: [...(link?.sentKeys ?? []), send.key],
+        // What you edited went out; the saved edit has done its job.
+        edits: withEdit(link?.edits, send.key, null, send.text),
         artifacts: [...(link?.artifacts ?? []), ...artifact],
         ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
       });
@@ -1261,29 +1295,33 @@ export function recheckTrackedItem(projectId: string, item: TrackedItem): Promis
   );
 }
 
-/** Writes today's reading from what the app already knows; no connector reads. */
+/**
+ * Writes today's briefing: the key projects' news and the tasks that need the user, from what the
+ * app already knows, plus new messages from the people who matter, read fresh (Slack and Gmail,
+ * reading only) since the start of yesterday, or of Friday on a Monday.
+ */
 export function refreshReading(): Promise<void> {
   return track("reading", (status) =>
     logged("reading", null, async () => {
-      const today = localDate(new Date());
-      const [projects, adhoc, manual, assessments, states, calendar, priorityOverrides, plans] = await Promise.all([
+      const now = new Date();
+      const today = localDate(now);
+      const [projects, adhoc, manual, assessments, states, priorityOverrides, userId] = await Promise.all([
         db.listProjects(),
         db.getAdhoc(),
         db.listManualTasks(),
         db.getAssessments(),
         db.getTaskStates(),
-        db.getCalendarDay(today),
         db.getPriorityOverrides(),
-        db.getTaskPlans(),
+        db.getSetting("slack_user_id"),
       ]);
-      const context = readingContext({ projects, adhoc, manual, assessments, states, calendar: calendar?.day ?? null, today, priorityOverrides, plans });
+      const context = readingContext({ projects, adhoc, manual, assessments, states, today, priorityOverrides });
       const { data, costUsd } = await runClaude({
         onStatus: status,
-        prompt: readingPrompt(context),
+        prompt: readingPrompt(context, userId, messagesSince(now)),
         schema: DailyReading,
-        tools: [],
+        tools: [...TOOLS.slackRead, ...TOOLS.gmailRead],
         model: await model(),
-        maxTurns: 2,
+        maxTurns: 16,
       });
       // Keep only ids that are real tasks, in case the model invents one.
       const ids = new Set(context.tasks.map((t) => t.id));
@@ -1296,6 +1334,12 @@ export function refreshReading(): Promise<void> {
       return { value: undefined, costUsd };
     }),
   );
+}
+
+/** Where the briefing's new messages start: the start of yesterday, or of Friday on a Monday (local time). */
+export function messagesSince(now: Date): { date: string; unix: number } {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() === 1 ? 3 : 1));
+  return { date: localDate(start), unix: Math.floor(start.getTime() / 1000) };
 }
 
 export type PlanTask = Omit<PlanPromptInput, "userId"> & { id: string };

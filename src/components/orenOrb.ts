@@ -88,9 +88,10 @@ const FILM_THICKNESS = /* glsl */ `
 /**
  * How the film lays over the page. On a dark page a bubble shows as light: its highlights and tints,
  * as opaque as they are bright, with the room's dim, even reflection taken out so the body stays
- * clear. On a white page its bright reflections vanish and what shows is its edge: clear in the
- * middle, a soft gray, faintly tinted rim where it reflects most (the reflection, laid over the page
- * by Fresnel). Color goes out premultiplied either way.
+ * clear. On a light page it's clear too: only the film's colors show, as a tint strongest toward the
+ * rim, with the room's windows as glints and a fine edge in the film's colors. Its neutral gray
+ * reflection is left out there, since over a light page it could only gray it. Color goes out
+ * premultiplied either way.
  */
 const FILM_LIGHT = /* glsl */ `
 // The film's colors, a little richer: rendered reflections of a mostly neutral room come out paler
@@ -98,8 +99,30 @@ const FILM_LIGHT = /* glsl */ `
 outgoingLight = max(mix(vec3(dot(outgoingLight, vec3(0.299, 0.587, 0.114))), outgoingLight, 1.9), vec3(0.0));
 if (uLightPage > 0.5) {
   float facing = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
-  float a = clamp(0.03 + 0.62 * pow(1.0 - facing, 2.6), 0.0, 1.0);
-  gl_FragColor = vec4(outgoingLight * 0.62 * a, a);
+  float fres = pow(1.0 - facing, 2.2);
+  // The reflection split into its color (brightest channel at 1) and how bright it is. Its neutral
+  // part, the room's even gray, is left out: laid over a light page it would only gray it.
+  float peak = max(outgoingLight.r, max(outgoingLight.g, outgoingLight.b));
+  vec3 hue = outgoingLight / max(peak, 1e-4);
+  float chroma = (1.0 - min(hue.r, min(hue.g, hue.b))) * smoothstep(0.04, 0.2, peak);
+  // The film's color as a tint over the page, faint across the body and strongest toward the rim.
+  float tint = clamp(chroma * (0.45 + 1.4 * fres), 0.0, 0.8);
+  // The room's windows, as glints brighter than the page.
+  float glint = smoothstep(0.8, 1.2, peak) * 0.85;
+  // A fine edge in the film's own color, so the bubble keeps its outline on a white page.
+  float edge = 0.26 * pow(1.0 - facing, 6.0);
+  // Layered edge, then tint, then glints, each "over" the last, in premultiplied color. It's
+  // composed in display (sRGB) color and handed back linear, since the output step that follows
+  // encodes it: encoding a color already scaled by its opacity would brighten a faint tint past
+  // the page, and darken it once the opacity grows.
+  vec3 shown = sRGBTransferOETF(vec4(hue, 1.0)).rgb;
+  vec3 c = shown * 0.72 * edge;
+  float a = edge;
+  c = shown * tint + c * (1.0 - tint);
+  a = tint + a * (1.0 - tint);
+  c = vec3(glint) + c * (1.0 - glint);
+  a = glint + a * (1.0 - glint);
+  gl_FragColor = vec4(sRGBTransferEOTF(vec4(c, 1.0)).rgb, a);
 } else {
   float facing = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
   float rim = pow(1.0 - facing, 1.8);

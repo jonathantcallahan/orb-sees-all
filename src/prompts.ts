@@ -1,6 +1,7 @@
-import { baseSection, PLAN_RULES, SAME_WORK_RULE, TASK_RULES, TITLE_RULE, WRITING_RULES } from "./baseLessons";
+import { baseSection, PLAN_RULES, SAME_WORK_RULE, STEP_RULE, TASK_RULES, TITLE_RULE, WRITING_RULES } from "./baseLessons";
 import type { IndexEntry } from "./taskIndex";
 import { GLOBAL_ACTION_DOCS } from "./openInClaude";
+import { slackTarget } from "./projects";
 import type { Learning } from "./feedback";
 
 /** Who the user is, as the prompts describe them. Learned in the background (learnRole); generic by default. */
@@ -36,7 +37,7 @@ const ASSESSMENT_GUIDE = `assessment: who can get the task done, given Claude ca
   - needs_details: true when the task is too vague to act on without more from the user (e.g. "Check status with Mike": status of what?). Then details_question asks the user for exactly what's missing, and suggestion says what Claude would do once it has that. Otherwise false and details_question null.
   - estimate_minutes: the user's own hands-on time to finish the task: reading, deciding, writing, reviewing what Claude drafts, and any meeting they must hold. Not the time Claude spends on its steps, and not waiting on other people. Base it on what the task involves as you found it (how much there is to read or review, how many people to align), not on how it sounds. Use 5, 10, 15, 30, 45, 60, 90, 120, 180 or 240. null when the task is too vague to judge; a plan made later gives a better estimate.
   - priority: how much the task matters now. "critical" = part of a P0 project, blocks others or a launch, has an exec or external deadline, or is due within two days; "high" = someone is actively waiting on it, or it moves a high-priority project; "medium" = should happen this week or two; "low" = nice to have, no one is waiting.
-  - claude_steps: up to four short, ordered steps that Claude can do on its own toward this task, by this rule: ${CLAUDE_STEP_RULE} Required, with at least one step, whenever automation is "assisted" or "claude": if Claude can do or help with the task, say what it would do. Empty only when automation is "human". When a task carried over from the previous refresh has an assessment without claude_steps, add them.`;
+  - claude_steps: up to four ordered steps that Claude can do on its own toward this task, by this rule: ${CLAUDE_STEP_RULE} ${STEP_RULE} Required, with at least one step, whenever automation is "assisted" or "claude": if Claude can do or help with the task, say what it would do. Empty only when automation is "human". When a task carried over from the previous refresh has an assessment without claude_steps, add them.`;
 const ASSESSMENT_SHAPE = `"assessment": {"automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number|null, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}`;
 
 /**
@@ -158,6 +159,10 @@ ${JSON.stringify(p.profile)}`
     ? `- Work on a project spills into other channels. Search for it by name: slack_search_public_and_private with the query ${names.map((n) => `"${n}"`).join(" OR ")} ${notHere.map((id) => `-in:<#${id}>`).join(" ")} after:${since.date} (one or two searches). Use what you find there for status, blockers and the user's tasks like messages in the project channels.`
     : "";
 
+  // Decisions are often made in meetings and never posted, so the project's meetings count like its channels.
+  const meetingTerms = names.length ? names : p.channels.map((c) => c.name);
+  const meetings = `- Its meetings: decisions are often made in meetings and never posted. In Granola, find the user's meetings since ${since.date} about the project (search_meetings or query_granola_meetings with ${meetingTerms.map((n) => `"${n}"`).join(" or ")}, a search or two), and read the notes of the ones about it (get_meetings; get_meeting_transcript only when the notes don't say enough). Use what was decided, dates set or moved, new risks and new blockers like messages in the project channels, for status, blockers and recent_updates. Link an update from a meeting to the meeting when it has a link. Don't add tasks from meetings.`;
+
   const repos =
     p.repoState && (p.repoState.local.length || p.repoState.prs.length)
       ? `\nLocal repo and GitHub PR state for this project (from git and gh): ${JSON.stringify(p.repoState)}\nA PR waiting on review is a blocker owned by the reviewer when the channel shows who it is.`
@@ -170,6 +175,7 @@ ${known}
 ${baseSection("tasks")}${learningSection(p.learning, "project")}
 ${reading}
 ${elsewhere}
+${meetings}
 ${repos}
 ${taskIndexSection(p.index ?? [], "my_tasks")}
 Fields:
@@ -313,7 +319,7 @@ First research it. Read the source thread if there's a link. Search Slack, Gmail
 
 Then propose a plan:
 - approach: two to four sentences on how to tackle it and what "done" looks like.
-- steps: three to eight concrete, ordered actions the user can take, e.g. "Ask Kim in #tmp-x whether UPM dependencies show on the PDP", "Draft the ticket in CPS with these acceptance criteria: …". Name the people, channels, docs and tickets involved. detail adds specifics; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you". minutes is the user's own hands-on time for the step, judged from your research (how long the doc or thread is, how many people, how much there is to decide or write): for their steps, the whole of it; for Claude's, only the time to review what Claude produces (often 5), or 0 when there's nothing to review. Never count Claude's own time or waiting on other people. Use 0, 5, 10, 15, 30, 45, 60, 90 or 120.
+- steps: three to eight concrete, ordered actions the user can take. title: ${STEP_RULE} detail names the people, channels, docs and tickets involved and adds the specifics, e.g. title "Ask Kim about the launch date", detail "In #tmp-x: is the launch still set for March?"; link points at the relevant doc, ticket or thread if there is one. by is "claude" or "you": ${CLAUDE_STEP_RULE} When in doubt, it's "you". minutes is the user's own hands-on time for the step, judged from your research (how long the doc or thread is, how many people, how much there is to decide or write): for their steps, the whole of it; for Claude's, only the time to review what Claude produces (often 5), or 0 when there's nothing to review. Never count Claude's own time or waiting on other people. Use 0, 5, 10, 15, 30, 45, 60, 90 or 120.
 - open_questions: what's unclear or needs a decision before or during the work. Empty if none.
 - sources: the threads, docs and tickets you relied on. ${LINK_TITLE}
 
@@ -343,17 +349,31 @@ ${READ_ONLY}
 ${JSON_ONLY} Shape: {"assessments": [{"id": string, "title": string|null, "description": string|null, "automation": "human"|"assisted"|"claude", "suggestion": string, "needs_details": boolean, "details_question": string|null, "estimate_minutes": number|null, "priority": "critical"|"high"|"medium"|"low", "claude_steps": [string]}]}`;
 }
 
-export function readingPrompt(context: unknown): string {
-  return `You are the Orb, who sees all of the user's work. Write today's reading and pick today's recommended tasks.
+/**
+ * The daily briefing: the most important news from the user's key projects, the outstanding tasks
+ * only they can move, and new messages from the people who matter, said the way a trusted staffer
+ * briefs a principal between the building and the car. It doesn't plan the day. The projects and
+ * tasks come from what the app already knows; new messages are read fresh, Slack and Gmail, since
+ * `since`.
+ */
+export function readingPrompt(context: unknown, userId: string | null, since: { date: string; unix: number }): string {
+  return `You brief the user (${profile}${userId ? `, Slack user ${userId}` : ""}) the way a trusted chief of staff briefs a principal on the walk from the building to the car: about a minute, out loud, most important first, nothing they don't need.
 
-Base it only on this snapshot of their day: projects with status, priority (P0 highest to P4), their role, blockers (someone is waiting), active work (underway, not blocking) and recent updates; their open tasks with ids, priority and estimates (and which they've planned for today); today's meetings; messages waiting on a quick reply; and news from around the company.
+What you know already, from the latest refresh. Each project says when it was last read (as_of) and each update its date, so you can tell what's new:
 ${JSON.stringify(context)}
 
-The overwhelming focus is P0 projects. Lower-priority work only earns attention when it blocks a P0, has a hard deadline today, or takes minutes.
+First, look for new messages since ${since.date} from the people who matter: the user's manager and the leadership above them, the people listed in people (they drive the key projects), and anyone senior or external who is waiting on the user.
+- Slack: slack_search_public_and_private with "is:dm after:${since.date}" and with "<@${userId ?? "the user"}> after:${since.date}". Read a thread with slack_read_thread only when a message alone isn't clear.
+- Gmail: search_threads with "in:inbox after:${since.date.replaceAll("-", "/")} -category:promotions -category:social -category:updates".
+Leave out messages from anyone else, bots, automated mail, announcements, and FYIs that change nothing. A handful of searches is enough.
 
-- reading: one paragraph (60 to 110 words). Name what will move the P0 projects forward most today (a blocker only the user can clear, a decision, a deliverable, a meeting that needs prep), say roughly how to spend the open time between meetings, and say what can wait. If a project update or piece of news changes today's priorities, weave it in; the full list of updates is shown separately, so don't recite it. Be concrete: use project, task and meeting names. Voice: calm and lightly oracular, but practical; no lists, no headings, no emoji. If there are no P0 projects, focus on the highest priority present.
-- recommended: the ids (copied exactly from the tasks list) of up to five tasks the user should accomplish today to further P0 projects, most important first. Include a task not tied to a P0 project only if it clearly unblocks P0 work. Fit them in the open time today, using their estimates. Empty if nothing qualifies.
+Then write the briefing:
+- reading: 90 to 160 words of spoken English, in two or three short paragraphs separated by a blank line. Lead with the single most important thing the user needs to know. Then the key projects that moved: what changed and what it means for the user, by name; skip a project where nothing changed. Then who needs them: new messages from the people who matter (who, what they want, how pressing) and the outstanding tasks only the user can move (blocked_on_me and the top of tasks). If little changed, say so in a sentence; don't pad.
+  Accuracy comes first. Every fact must come from the snapshot above or a message you read: names, dates and numbers exactly as written; nothing guessed, inferred or rounded, no "likely" or "seems". When something is more than a couple of days old, say when it happened. Say nothing about a project, task or person you weren't given or didn't read about.
+  Voice: plain, confident and specific, like "Legal signed off on refunds yesterday; launch holds for the 17th. Sam needs your call on pricing by Thursday." No advice on how to spend the day, no time estimates, no greeting or sign-off, no lists, headings or emoji.
+- recommended: the ids, copied exactly from tasks, of up to three outstanding tasks the briefing names as needing the user, most important first. Empty if it names none.
 
+${READ_ONLY}
 ${JSON_ONLY} Shape: {"reading": string, "recommended": [string]}`;
 }
 
@@ -438,13 +458,13 @@ Topic: ${input.topic}${input.details?.trim() ? `\nWhat they said about it: ${inp
     input.project ? `\nIt's part of their project "${input.project.name}"${input.project.channels.length ? `; look in its channels first (${input.project.channels.join(", ")})` : ""}.` : ""
   }${input.lastSummary ? `\nWhere it stood at the last check (${input.checkedAt ?? "earlier"}): ${input.lastSummary}` : ""}
 
-Look for what has happened on it: search Slack, email and Jira for recent messages and changes about it${input.checkedAt ? `, mainly since ${input.checkedAt.slice(0, 10)}` : ""}. Read the threads that matter. Keep it short: a handful of searches, not an exhaustive sweep.
+Look for what has happened on it: search Slack, email, Jira and the user's meetings in Granola (search_meetings, then the notes of the ones about it) for recent messages, changes and meeting notes about it${input.checkedAt ? `, mainly since ${input.checkedAt.slice(0, 10)}` : ""}. Read the threads that matter. Keep it short: a handful of searches, not an exhaustive sweep.
 
 ${
     events
       ? `Then say, for each of these events, whether it has happened, judging only by what you found:
 ${events}
-An event has happened only if you found clear evidence of it: a message, email or ticket change that shows it. If you're not sure, it hasn't. Don't count plans or promises ("I'll send it Friday") as the thing having happened.
+An event has happened only if you found clear evidence of it: a message, email, ticket change or meeting note that shows it. If you're not sure, it hasn't. Don't count plans or promises ("I'll send it Friday") as the thing having happened.
 `
       : "The user only wants to know where it stands: there are no events to look for, so outcomes is [].\n"
   }
@@ -522,7 +542,16 @@ ${JSON_ONLY} Shape: {"key": string, "title": string, "status": string, "done": n
 }
 
 export function sendToChannelPrompt(to: string, text: string): string {
-  return `Post the message below to the Slack channel ${to}. ${to.startsWith("#") ? `First find that channel's ID: slack_search_channels for its name (channel_types "public_channel,private_channel"), or slack_list_user_channels with name_prefix set to the name without "#". Use the channel whose name matches exactly; if none does, don't post, and report the error.` : `${to} is the channel ID.`} Then call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
+  const target = slackTarget(to);
+  const where =
+    target.kind === "channel"
+      ? `Post the message below to the Slack channel #${target.name}. First find that channel's ID: slack_search_channels for its name (channel_types "public_channel,private_channel"), or slack_list_user_channels with name_prefix "${target.name}". Use the channel whose name matches exactly; if none does, don't post, and report the error.`
+      : target.kind === "user"
+        ? `Send the message below as a Slack DM to the person with user ID ${target.id}: use "${target.id}" as the channel_id, which sends it as a DM.`
+        : target.kind === "person"
+          ? `Send the message below as a Slack DM to ${target.name}. First find them: slack_search_users for "${target.name}". Use the one person whose name matches it; if no one does, or more than one could be them, don't post, and report the error naming who you found. Then use their user ID as the channel_id, which sends it as a DM.`
+          : `Post the message below to the Slack conversation with channel_id "${target.kind === "conversation" ? target.id : to}".`;
+  return `${where} Call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
 
 Message (between the markers):
 <<<MESSAGE
@@ -684,7 +713,7 @@ Work out where each step really stands from the conversation:
 - blocked: can't move until someone else acts (an answer, an approval). In note, say who or what in a few words, like "Eric's Legal answer".
 - todo: not started yet. A step that can't begin until a blocked step clears is todo, not waiting, even if it's mine.
 
-If the plan itself changed in the conversation (a step reassigned, reworded, dropped or added), return the steps as they now stand: keep finished and skipped steps, reword or add steps to match, mark mine with by "you" and Claude's with by "claude". Otherwise keep the titles exactly as listed. Keep the order the work happens in.
+If the plan itself changed in the conversation (a step reassigned, reworded, dropped or added), return the steps as they now stand: keep finished and skipped steps, reword or add steps to match (${STEP_RULE}), mark mine with by "you" and Claude's with by "claude". Otherwise keep the titles exactly as listed. Keep the order the work happens in.
 When I asked for work the steps don't cover (another analysis, a further check, a change to a draft) and Claude did it or said it would, that's a step: add it where it happens in the work, with its state. A question Claude answered from what it already had isn't a step, and neither is something Claude only offered to do that I haven't taken up.
 Until I've told Claude to go ahead, we're only talking the plan through: no step has started unless the conversation says Claude did the work anyway.
 

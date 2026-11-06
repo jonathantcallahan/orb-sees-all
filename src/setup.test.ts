@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorChecks, findInit, isReady, runSetupChecks } from "./setup";
+import { connectorChecks, findInit, isReady, PROBE_LIMITS, runSetupChecks } from "./setup";
 
 describe("setup checks", () => {
   it("reads connector states from the init line", () => {
@@ -28,6 +28,7 @@ describe("setup checks", () => {
       slides: "missing",
       claude_docs: "missing",
       zoom: "missing",
+      granola: "missing",
       amplitude: "missing",
       jira: "failed",
     });
@@ -41,6 +42,25 @@ describe("setup checks", () => {
     expect(isReady({ ...base, connectors: connected.map((c) => (c.id === "gmail" ? { ...c, state: "needs_auth" as const } : c)) })).toBe(false);
     expect(isReady({ ...base, login: { ok: false }, connectors: connected })).toBe(false);
     expect(isReady({ ...base, connectors: null })).toBe(false);
+  });
+
+  it("gives the tools check a time limit, so a stuck one ends and setup can say so", async () => {
+    let control: unknown;
+    const report = await runSetupChecks(
+      () => {},
+      async (program, args) => {
+        if (program === "gh") return { code: 1, stdout: "", stderr: "" };
+        if (args[0] === "--version") return { code: 0, stdout: "2.1.311 (Claude Code)\n", stderr: "" };
+        return { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "" };
+      },
+      async (_program, _args, _onLine, _input, c) => {
+        control = c;
+        throw new Error("still going after 2 minutes");
+      },
+    );
+    expect(control).toEqual({ limits: PROBE_LIMITS });
+    expect(PROBE_LIMITS.totalSecs).toBeLessThanOrEqual(120);
+    expect(report.probeError).toContain("still going after 2 minutes");
   });
 
   it("stops when Claude Code isn't signed in, without running the probe", async () => {

@@ -9,12 +9,13 @@
  *   sounds, over a phrase rather than a beat: darker, bassier music deepens toward blue and violet,
  *   brighter music lifts toward pink and cyan. Stress pushes it toward magenta, as the other orbs
  *   redden.
- * - The dots: a thin layer resting on the inner orb's surface (white on a dark page, slate violet
- *   on a light one), each with a soft glow of its own (white on a dark page, purple on a light one). They gather into wisps that one broad
+ * - The dots: a thin layer of tiny dots resting on the inner orb's surface, each with a soft glow of
+ *   its own: white on a dark page, and on a light one mostly the rose of the orb's aura and its
+ *   pink, with some of its sky blue and cyan. They gather into wisps that one broad
  *   swirling flow (curl noise) carries around the orb at a pace the mids set. Each dot listens to
  *   one band of the sound, the bass lowest in the layer and the treble highest. Each hit throws them
- *   off the surface and they fall back and bounce, higher for a harder hit or a louder band; the
- *   highs make the upper ones twinkle. Without music they breathe, drift and now and then hop a
+ *   off the surface and they fall back and bounce, higher for a harder hit or a louder band, fading
+ *   the farther they leap; the highs make the upper ones twinkle. Without music they breathe, drift and now and then hop a
  *   little.
  *
  * What it hears comes from orbMusic (Demian's listener); MusicResponse turns it into motion.
@@ -135,7 +136,7 @@ void main() {
   // No hard outline: it fades out over its outer rim, so it reads slightly blurred.
   // Mostly see-through, like a bubble: faint across its middle, denser toward its rim so it still
   // reads as a sphere, and fading out at the very edge with no hard outline.
-  float alpha = mix(0.16, 0.62, pow(1.0 - facing, 1.6)) * smoothstep(0.0, 0.35, facing);
+  float alpha = mix(0.24, 0.7, pow(1.0 - facing, 1.6)) * smoothstep(0.0, 0.35, facing);
   gl_FragColor = vec4(min(c, vec3(0.98)) * alpha, alpha);
 }
 `;
@@ -193,6 +194,7 @@ varying float vAlpha;
 varying vec3 vColor;
 varying float vGlow;
 ${NOISE}
+${PALETTE}
 ${INNER_SHAPE}
 vec3 potential(vec3 p) {
   return vec3(snoise(p), snoise(p + vec3(31.4, 7.1, 2.9)), snoise(p + vec3(-11.7, 19.3, 47.2)));
@@ -265,8 +267,10 @@ void main() {
   float shine = 0.35 + 0.35 * pulse;
   // On each hit the whole layer brightens at once, then fades within a tenth of a second.
   float onBeat = 0.45 * uHit;
-  vAlpha = clamp(shine * (1.0 - 0.3 * uPresence) + uPresence * (0.4 * heard + 0.6 * up + 0.8 * twinkle + onBeat), 0.0, 1.0);
+  vAlpha = clamp(shine * (1.0 - 0.3 * uPresence) + uPresence * (0.4 * heard + 0.8 * twinkle + onBeat), 0.0, 1.0);
   vAlpha *= mix(0.08, 1.0, wisp);
+  // The farther a dot leaps off the orb, the fainter it gets: about a fifth as bright at a big hop's peak.
+  vAlpha *= mix(1.0, 0.2, up);
 
   vec4 view = modelViewMatrix * vec4(p, 1.0);
   // Behind the inner orb? (Treated as a sphere a touch smaller than its surface, so the dots along
@@ -279,23 +283,28 @@ void main() {
   // (Seen through it, as it's mostly see-through: just dimmed a little.)
   if (disc > 0.0 && b - sqrt(disc) < length(view.xyz)) vAlpha *= 1.0 - 0.35 * smoothstep(0.0, 0.02, disc);
 
-  // A soft slate violet on a light page, white on a dark one.
-  vColor = uOnLight > 0.5 ? vec3(0.42, 0.4, 0.55) : vec3(1.0);
+  // White on a dark page. On a light one, each dot one of the orb's colors: most the rose of its
+  // aura (the deeper rose of its rim, INNER_FRAGMENT) or its pink, the rest its sky blue or a
+  // deeper cyan. At full strength, not paled like the orb: a dot this small only shows on the pale
+  // orb and page in a strong color. Each is a color of its own, never a mix: pink and blue mixed
+  // is purple, and the deep blue and lavender at the orb's heart are left out for the same reason.
+  float pick = fract(seed.x * 7.13 + seed.y * 3.7);
+  vec3 hue = pick < 0.45 ? vec3(0.95, 0.55, 0.74)
+    : pick < 0.7 ? PINK
+    : pick < 0.85 ? SKY
+    : vec3(0.2, 0.76, 0.8);
+  vColor = uOnLight > 0.5 ? hue : vec3(1.0);
 
   gl_Position = projectionMatrix * view;
-  // The size of the motes the other orbs give off while working (orbParticles): about 1 to 2.8
-  // points. The music swells a dot within that range, never past it; it shows mostly in how
-  // brightly they shine.
-  float swell = max(pulse, clamp(heard * uPresence + up + twinkle + uHit * uPresence, 0.0, 1.0));
-  // The sprite is three times the dot, to hold its glow: the dot is its center third.
-  gl_PointSize = 3.0 * (1.4 + 1.4 * seed.z) * uPixelRatio * (0.7 + 0.3 * swell);
-  // Each dot's own glow: faint at rest, brighter as it leaps, glints and lands on a hit.
-  vGlow = 0.35 + 0.65 * clamp(up + twinkle + uHit, 0.0, 1.0) * uPresence;
+  // Tiny, about 0.85 to 1.7 points, and they keep their size: the beat shows in how they shine and
+  // leap, not in growing. The sprite is three times the dot, to hold its glow: the dot is its center third.
+  gl_PointSize = 3.0 * (0.85 + 0.85 * seed.z) * uPixelRatio;
+  // Each dot's own glow: faint at rest, brighter as it glints and on a hit.
+  vGlow = 0.35 + 0.65 * clamp(twinkle + uHit, 0.0, 1.0) * uPresence;
 }
 `;
 
 const DOT_FRAGMENT = /* glsl */ `
-uniform float uOnLight;
 varying float vAlpha;
 varying vec3 vColor;
 varying float vGlow;
@@ -304,10 +313,10 @@ void main() {
   // The dot itself, the sprite's center third: round and soft-edged, shaped like the working motes.
   float core = smoothstep(0.34, 0.0, r);
   core *= core;
-  // Its own glow: a soft halo out to the sprite's edge, purple on a light page, white on a dark one.
+  // Its own glow: a soft halo out to the sprite's edge, in the dot's own color.
   float halo = exp(-r * r * 7.0) * (1.0 - smoothstep(0.8, 1.0, r)) * vGlow * 0.45;
   // Premultiplied, so it shows over the orb and over a light or dark page alike.
-  gl_FragColor = vec4((vColor * core + (uOnLight > 0.5 ? vec3(0.6, 0.42, 0.95) : vec3(1.0)) * halo) * vAlpha, (core + halo) * vAlpha);
+  gl_FragColor = vec4(vColor * (core + halo) * vAlpha, (core + halo) * vAlpha);
 }
 `;
 

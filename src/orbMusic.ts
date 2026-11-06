@@ -24,6 +24,9 @@ export interface Heard {
   /** The strongest hit since the last frame, 0 if none. */
   hit: number;
   hits: number;
+  /** The strongest bass hit (a kick, a thump in the low end) since the last frame, 0 if none. */
+  bassHit: number;
+  bassHits: number;
   /** Where the sound's center of brightness sits, 100 Hz (0) to 8 kHz (1). */
   brightness: number;
   /** 0 for a pure tone, toward 1 for noise. */
@@ -140,6 +143,13 @@ export const WAVE_LIFE = 1.0;
 const MAX_WAVES = 4;
 /** Hits closer together than this make one throw, not a burst of them. */
 const WAVE_GAP = 0.12;
+/**
+ * How hard a bass hit must land to move the orb: the dots' bounce, the inner orb's spring and its
+ * glow's pulse. Lighter ones, and hits outside the bass (hi-hats, snares, vocals), leave them alone,
+ * so it's the big thumps that show; the breath, swirl, twinkle and the dots' own bands still follow
+ * everything.
+ */
+export const BIG_BASS_HIT = 0.35;
 
 /**
  * The orb's response to the music, stepped once a frame. Every output is 0..1 (kick is a spring
@@ -180,10 +190,10 @@ export class MusicResponse {
   hear(heard: Heard) {
     this.latest = heard;
     this.sinceHeard = 0;
-    if (heard.hits > 0 && heard.active) {
+    if ((heard.bassHits ?? 0) > 0 && heard.active && heard.bassHit >= BIG_BASS_HIT) {
       // The spring is pushed out at once (not given a shove that peaks later), scaled by how hard
       // it hit and how intense the section is.
-      const strength = clamp01(0.35 + heard.hit * 0.8);
+      const strength = clamp01(0.4 + (heard.bassHit - BIG_BASS_HIT) * 0.9);
       this.kick = Math.min(this.kick + 0.5 * strength * this.gain, 1.2);
       this.hit = Math.max(this.hit, strength * Math.min(this.gain, 1.2));
       if (this.sinceWave >= WAVE_GAP) {

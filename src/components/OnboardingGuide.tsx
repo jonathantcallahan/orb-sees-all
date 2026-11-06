@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { INSTALL_CLAUDE, isWindows, LOGIN_CLAUDE, TERMINAL } from "../platform";
+import { INSTALL_CLAUDE, isWindows, TERMINAL, useLoginCommand } from "../platform";
 import type { ConnectorCheck } from "../setup";
 import { Command, CONNECTORS_URL } from "./SetupScreen";
 
@@ -115,13 +115,15 @@ function TwoWays({
  * The walk-through under onboarding's line when a step needs the person: what to do, in order, with
  * a button that does the fiddly part (opens Terminal running Claude's installer or its sign-in, or
  * opens claude.ai's Connectors page) or the command to paste. Install and sign-in are noticed on
- * their own; connectors take a slower check, so that step has Check again.
+ * their own, and every step also has Check again, for when that's slow to notice or doesn't.
  */
 export function OnboardingGuide({
   kind,
   connectors,
   apiKey,
   optionalOnly,
+  stillNot,
+  checking,
   onCheck,
   onContinue,
   simulate = false,
@@ -132,21 +134,27 @@ export function OnboardingGuide({
   apiKey?: boolean;
   /** Everything needed is connected; this only shows what else can be added. */
   optionalOnly?: boolean;
-  onCheck: () => void;
+  /** Check again just looked and found the step still not done. */
+  stillNot?: boolean;
+  /** A Check again is running. */
+  checking?: boolean;
+  /** Check again; with pretend, in a simulation, as if the step's own button (Install, Sign in) had worked. */
+  onCheck: (pretend?: boolean) => void;
   /** Carry on without the optional connectors. */
   onContinue?: () => void;
   /** A simulation from Settings: Install and Sign in just move it on instead of running anything. */
   simulate?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const loginCommand = useLoginCommand();
   const open = (step: "install" | "login") => {
     setError(null);
-    if (simulate) return onCheck();
+    if (simulate) return onCheck(true);
     openSetupTerminal(step).catch((e) => setError(String(e)));
   };
   const checkAgain = (
-    <button className="cta-ghost" onClick={onCheck}>
-      Check again
+    <button className="cta-ghost" onClick={() => onCheck()} disabled={checking}>
+      {checking ? "Checking…" : "Check again"}
     </button>
   );
 
@@ -155,15 +163,19 @@ export function OnboardingGuide({
       <div className="onboarding-guide">
         <TwoWays
           button={
-            <button className="cta-primary" onClick={() => open("install")}>
-              Install Claude Code
-            </button>
+            <div className="onboarding-guide-actions">
+              <button className="cta-primary" onClick={() => open("install")}>
+                Install Claude Code
+              </button>
+              {checkAgain}
+            </div>
           }
           auto={`${TERMINAL} will open and run Claude's installer.`}
           command={INSTALL_CLAUDE}
           manual={`Open ${TERMINAL}, paste this and press Return`}
           error={error}
         >
+          {stillNot && !checking && <p className="onboarding-guide-note">Claude Code still isn't installed. Let the installer finish, then check again.</p>}
           {isWindows && (
             <p className="onboarding-guide-note">
               Claude Code on Windows also needs Git for Windows. If the installer says it's missing,{" "}
@@ -188,15 +200,26 @@ export function OnboardingGuide({
         )}
         <TwoWays
           button={
-            <button className="cta-primary" onClick={() => open("login")}>
-              Sign in
-            </button>
+            <div className="onboarding-guide-actions">
+              <button className="cta-primary" onClick={() => open("login")}>
+                Sign in
+              </button>
+              {checkAgain}
+            </div>
           }
           auto="Your browser will open. Approve it with the Claude account you use at claude.ai."
-          command={LOGIN_CLAUDE}
+          command={loginCommand}
           manual={`Open a new ${TERMINAL} window, paste this, press Return and approve it in your browser`}
           error={error}
-        />
+        >
+          {stillNot && !checking && (
+            <p className="onboarding-guide-note">
+              {apiKey
+                ? "Claude Code is still signed in with an API key or a company token. Sign it in with your Claude account, then check again."
+                : `Claude Code still isn't signed in. Finish signing in in ${TERMINAL} and your browser, then check again.`}
+            </p>
+          )}
+        </TwoWays>
       </div>
     );
 

@@ -54,7 +54,7 @@ function EpicIssues({ epicKey, stored, expected }: { epicKey: string; stored: St
   if (!stored)
     return (
       <div className="epic-issues small muted">
-        {error ? <span className="error">Couldn't read its issues: {error}</span> : <span title={`${loading ?? "Reading its issues"}…`} aria-label={loading ?? "Reading its issues"}><Spinner /></span>}
+        {error ? <span className="error">Couldn't read its issues: {error}</span> : <span aria-label={loading ?? "Reading its issues"}><Spinner /></span>}
       </div>
     );
   return (

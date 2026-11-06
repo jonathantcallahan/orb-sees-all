@@ -52,6 +52,7 @@ export const CONNECTORS: { id: string; label: string; purpose: string; required:
   { id: "slides", label: "Google Slides", purpose: "Reading decks linked in your work", required: false, server: "claude.ai Google Slides" },
   { id: "claude_docs", label: "Claude Docs", purpose: "Reading docs people share from Claude", required: false, server: "claude.ai Claude Docs" },
   { id: "zoom", label: "Zoom", purpose: "Meeting summaries", required: false, server: "claude.ai Zoom for Claude" },
+  { id: "granola", label: "Granola", purpose: "Meeting notes, for project updates", required: false, server: "claude.ai Granola" },
   { id: "amplitude", label: "Amplitude", purpose: "Product analytics for planning", required: false, server: "claude.ai Amplitude" },
   { id: "jira", label: "Jira", purpose: "Tickets when planning and checking tasks", required: false, server: "mcp-jira" },
 ];
@@ -94,6 +95,9 @@ export function isReady(r: SetupReport): boolean {
 
 /** The same settings override as the refresh jobs: a gateway login would hide the connectors. */
 const USE_CLAUDE_AI_LOGIN = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" } });
+
+/** How long setup's one-turn probe may take (see runSetupChecks). */
+export const PROBE_LIMITS = { idleSecs: 90, totalSecs: 120 };
 
 const PROBE_ARGS = [
   "-p",
@@ -141,7 +145,9 @@ export async function runSetupChecks(
   // A one-turn run on the cheapest model; only its init line matters. A connector can still be
   // connecting when that line is written, so look again (twice at most) while a needed one is pending.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const probe = await stream("claude", PROBE_ARGS).catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
+    // One cheap turn: if it hasn't answered in two minutes, it's stuck (a connector that never
+    // connects, say), and Rust stops it so setup can say so and offer to check again.
+    const probe = await stream("claude", PROBE_ARGS, undefined, undefined, { limits: PROBE_LIMITS }).catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
     const init = findInit(probe.stdout);
     if (!init) {
       report.probeError = (probe.stderr || probe.stdout).trim().slice(-300) || `claude exited ${probe.code}`;

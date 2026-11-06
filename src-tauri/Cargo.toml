@@ -23,6 +23,10 @@ realfft = "3"
 # Hands the captured audio from Core Audio's thread to the analysis thread without locking.
 rtrb = "0.3"
 
+# Stops a run's whole process group (see runs.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Hides macOS's own close/minimize/zoom buttons; the app draws its own (see WindowButtons).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }

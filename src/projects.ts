@@ -198,6 +198,36 @@ export function slackThread(link: string | null | undefined): { channelId: strin
   return { channelId: m[1], threadTs: parent ?? `${m[2]}.${m[3]}` };
 }
 
+/** Where a message handed over to send goes, read from the target a chat wrote. */
+export type SlackTarget =
+  | { kind: "thread"; channelId: string; threadTs: string }
+  /** A channel, DM or group DM by its ID (C…, D…, G…). */
+  | { kind: "conversation"; id: string }
+  /** A person by their user ID (U…, W…): a DM. */
+  | { kind: "user"; id: string }
+  /** A channel by name, "#name", to look up. */
+  | { kind: "channel"; name: string }
+  /** A person by name, "@Ana Lee" or "Ana Lee", to look up: a DM. */
+  | { kind: "person"; name: string };
+
+/**
+ * Reads a send target: a thread's permalink, an ID, "#channel", or a person for a DM ("@U0123ABCD",
+ * "@Ana Lee", "<@U0123ABCD>", or just their name, "DM with Ana Lee" included).
+ */
+export function slackTarget(to: string): SlackTarget {
+  const t = to.trim();
+  const thread = slackThread(t);
+  if (thread) return { kind: "thread", ...thread };
+  const mention = /^<?@/.test(t);
+  const bare = t.replace(/^<?@/, "").replace(/>$/, "").trim();
+  if (/^[UW][A-Z0-9]{6,}$/.test(bare)) return { kind: "user", id: bare };
+  if (!mention && /^[CDG][A-Z0-9]{6,}$/.test(bare)) return { kind: "conversation", id: bare };
+  if (!mention && /^#/.test(bare)) return { kind: "channel", name: bare.replace(/^#/, "") };
+  // Slack's channel names are lowercase with no spaces; a person is named with @ or in words.
+  if (!mention && /^[a-z0-9][a-z0-9._-]*$/.test(bare)) return { kind: "channel", name: bare };
+  return { kind: "person", name: bare.replace(/^(?:a\s+)?DM\s+with\s+/i, "").trim() };
+}
+
 /**
  * How a Slack conversation is named in the app: a channel as "#name"; a group DM (Slack names those
  * "mpdm-ana--ben--cara-1") as its people, "ana, ben, cara"; a DM (its ID starts with D), or any name

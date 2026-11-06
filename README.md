@@ -56,6 +56,18 @@ On first launch, Demian walks you through three steps, checking each as you go. 
    claude auth login --claudeai
    ```
 
+   On Windows, Claude's installer puts `claude.exe` in `%USERPROFILE%\.local\bin` but may leave that folder off your PATH (it says so under "Setup notes"), so PowerShell answers "'claude' is not recognized". Demian finds it there anyway, and its **Sign in** button runs it by its full path. To sign in by hand, run it by its full path:
+
+   ```powershell
+   & "$env:USERPROFILE\.local\bin\claude.exe" auth login --claudeai
+   ```
+
+   or add the folder to your PATH for good, then open a new PowerShell window and use `claude` as usual:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + "$env:USERPROFILE\.local\bin", 'User')
+   ```
+
 3. **Connect your accounts** at [claude.ai → Customize → Connectors](https://claude.ai/new#customize/connectors/yours), signing in with your work account:
 
    | Connector | Used for | Needed? |
