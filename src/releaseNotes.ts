@@ -11,6 +11,20 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.12",
+    date: "2026-11-05",
+    notes: [
+      "The daily briefing is a short update in a few paragraphs, like a staffer catching you between meetings: what moved on your key projects, the tasks only you can move, and new messages from the people who matter.",
+      "Demian reads your Granola meeting notes for project updates and watched topics, once Granola is connected.",
+      "Task chats: while Claude works, Stop takes the send button's place and what it's doing shows in the reply box. Opening a chat no longer starts anything; your first message does. Edits to a drafted message, doc, event or ticket are kept until you send it, even if you close the chat or quit. Messages drafted as a DM to someone now send.",
+      "Task cards: a task Claude is working on says Working. The plan stays open, with a spinner beside its heading while it's written, and its steps are short enough for one line. Task investigation sits under the plan, starts folded and gives its verdict in gray. Every task has Double check, and links sit under a line at the bottom.",
+      "Claude's runs in Demian can only use what each one needs, and never post, send or change anything unless that's its job. A run that stalls or runs too long stops on its own, and quitting Demian stops them all.",
+      "Setup has Check again on the install and sign-in steps, goes straight on once your tools are connected, and on Windows adds Claude Code to your PATH when its installer leaves it off.",
+      "Softer calendar event borders, and no tooltips on task titles, Blocking badges or spinners.",
+      "Fixes: badges cut off at the bottom, the task spinner sitting off-center, and the updated time showing in larger text.",
+    ],
+  },
+  {
     version: "0.6.11",
     date: "2026-11-05",
     notes: [
