@@ -388,6 +388,7 @@ type Store =
   | "description_overrides"
   | "refined_descriptions"
   | "priority_overrides"
+  | "due_overrides"
   | "session_links"
   | "task_checks"
   | "blocker_checks"
@@ -396,6 +397,7 @@ type Store =
   | "project_tracking"
   | "epic_children"
   | "merged_from"
+  | "seen"
   | "project_overrides";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
@@ -447,6 +449,23 @@ export interface StoredTaskCheck extends TaskCheck {
 
 /** Priorities the user set by hand, keyed by task id. */
 export const getPriorityOverrides = () => getRows<Priority>("priority_overrides");
+
+/**
+ * Due dates you set by hand, by task id: a date, or null when you took a task's date off. They win
+ * over the date a refresh found, which a refresh would otherwise write again.
+ */
+export const getDueOverrides = () => getRows<{ due: string | null }>("due_overrides");
+
+/** Sets a task's due date by hand (YYYY-MM-DD), or with null says it has none. */
+export const setDueOverride = (taskId: string, due: string | null) => putRow("due_overrides", taskId, { due });
+
+/** What you've seen of each task, project and watched topic (see unread.ts), by its id. */
+export const getSeen = () => getRows<string[]>("seen");
+
+/** Records what's been seen of several items at once. */
+export async function saveSeen(entries: [string, string[]][]) {
+  for (const [id, facts] of entries) await putRow("seen", id, facts);
+}
 
 /** Projects you moved tasks to, by task id: a task found in one project's channels (or in Slack or email) that belongs to another. */
 export const getProjectOverrides = () => getRows<string>("project_overrides");
@@ -576,7 +595,7 @@ export async function mergeTasks(keepId: string, dropId: string, dropTitle: stri
   await conn.execute(
     `INSERT OR IGNORE INTO task_data (store, task_id, value, updated_at)
      SELECT store, $1, value, $3 FROM task_data
-     WHERE task_id = $2 AND store IN ('priority_overrides', 'session_links', 'description_overrides', 'refined_descriptions', 'project_overrides')`,
+     WHERE task_id = $2 AND store IN ('priority_overrides', 'due_overrides', 'session_links', 'description_overrides', 'refined_descriptions', 'project_overrides')`,
     [keepId, dropId, nowIso()],
   );
   await conn.execute(

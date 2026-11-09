@@ -12,17 +12,20 @@ export function ExternalLink({
   children,
   className,
   title,
+  label,
   style,
 }: {
   href?: string | null;
   children: ReactNode;
   className?: string;
   title?: string;
+  /** The link's name for screen readers, when it shows only an icon. */
+  label?: string;
   style?: CSSProperties;
 }) {
   if (!href)
     return (
-      <span className={className} title={title} style={style}>
+      <span className={className} title={title} aria-label={label} style={style}>
         {children}
       </span>
     );
@@ -30,6 +33,7 @@ export function ExternalLink({
     <a
       className={className}
       title={title}
+      aria-label={label}
       style={style}
       href={href}
       onClick={(e) => {
@@ -248,6 +252,11 @@ export function ComposeModal({
     </div>,
     document.body,
   );
+}
+
+/** The green dot after the name of a task, project or topic Demian found something new about, until you open it. */
+export function UnreadDot() {
+  return <span className="unread-dot" role="img" aria-label="Updated" />;
 }
 
 /** A close mark drawn as two strokes, so it centers exactly (the × character sits low in most fonts). */

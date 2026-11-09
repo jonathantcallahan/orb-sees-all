@@ -22,7 +22,8 @@ import { useDetailTab, type DetailTab } from "./viewMode";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
-import { getNotes, getSetting, markInterruptedJobs, setSetting } from "./db";
+import { getNotes, getSetting, markInterruptedJobs, saveSeen, setSetting } from "./db";
+import { seenAfter, toRecord, unreadIds, updateFacts } from "./unread";
 import { setStandingNotes } from "./claude";
 import { maybeDistill, maybeRunMorning, pollSelfDm, refreshAll } from "./jobs";
 import { localDate } from "./scheduler";
@@ -84,6 +85,14 @@ function useScheduler() {
       unlisteners.forEach((p) => p.then((un) => un()));
     };
   }, []);
+}
+
+/** Marks a project seen while its details are shown: showing them is opening it. */
+function SeenWhileShown({ id, unread, onSeen }: { id: string; unread: boolean; onSeen: (id: string) => void }) {
+  useEffect(() => {
+    if (unread) onSeen(id);
+  }, [id, unread]);
+  return null;
 }
 
 /** One entry per canonical task, keeping the most urgent priority and earliest due date among its ids. */
@@ -161,6 +170,41 @@ export default function App() {
   const [projectFilter, setProjectFilter] = useProjectFilter();
   useScheduler();
 
+  // Unread dots (see unread.ts): what Demian has found about each task, project and topic, against
+  // what you've seen of it.
+  const facts = useMemo(
+    () =>
+      data
+        ? updateFacts({
+            projects: data.projects.filter((p) => !p.hidden && p.state === "tracked"),
+            adhoc: data.adhoc.tasks,
+            manual: data.manual,
+            watched: data.watched,
+            taskAliases: data.taskAliases,
+            refinedDescriptions: data.refinedDescriptions,
+            taskChecks: data.taskChecks,
+            taskStates: data.taskStates,
+          })
+        : null,
+    [data],
+  );
+  const unread = useMemo(() => (data && facts ? unreadIds(facts.facts, facts.mine, data.seen, data.unreadStarted) : new Set<string>()), [data, facts]);
+  // What you have when dots begin starts read; so does each task of your own when it first appears.
+  useEffect(() => {
+    if (!data || !facts) return;
+    const ids = toRecord(facts.facts, facts.mine, data.seen, data.unreadStarted);
+    if (!ids.length && data.unreadStarted) return;
+    saveSeen(ids.map((id) => [id, facts.facts.get(id) ?? []]))
+      .then(() => (data.unreadStarted ? undefined : setSetting("unread_started", new Date().toISOString())))
+      .then(reload, () => {});
+  }, [facts]);
+  /** Opening an item marks what's new about it seen. */
+  const markSeen = (id: string) => {
+    const current = facts?.facts.get(id);
+    if (!data || !current || !unread.has(id)) return;
+    saveSeen([[id, seenAfter(data.seen[id], current)]]).then(reload, () => {});
+  };
+
   // Pick up anything written to the database while the window was in the background.
   useEffect(() => {
     window.addEventListener("focus", reload);
@@ -190,6 +234,11 @@ export default function App() {
       projectFilter,
     ),
   );
+  // A due date you set wins over the one a refresh found.
+  const dueFor = (id: string, found: string | null | undefined) => {
+    const set = data.dueOverrides[canonicalId(id, data.taskAliases)] ?? data.dueOverrides[id];
+    return set ? set.due : (found ?? null);
+  };
   // Every open task the user owns, at the priority its card shows, so the orb weighs what you see.
   // The same work from several sources counts once, under its canonical id, at its highest priority.
   const load = pressure(
@@ -198,18 +247,19 @@ export default function App() {
         const blocking = new Set(myBlockingIds(p.snapshot?.blockers, data.taskStates));
         return (p.snapshot?.my_tasks ?? []).map((t) => ({
           id: t.id,
-          due: t.due,
+          due: dueFor(t.id, t.due),
           projectId: p.channel_id,
           priority: taskPriority(t.assessment?.priority, p.snapshot?.priority?.level, blocking.has(t.id), data.priorityOverrides[t.id]),
         }));
       }),
       ...data.adhoc.tasks.map((t) => ({
         id: t.id,
-        due: t.due,
+        due: dueFor(t.id, t.due),
         priority: taskPriority(t.assessment?.priority, null, false, data.priorityOverrides[t.id]),
       })),
       ...data.manual.map((t) => ({
         id: t.id,
+        due: dueFor(t.id, null),
         projectId: t.project_id,
         priority: taskPriority(data.assessments.get(t.id)?.priority, null, false, data.priorityOverrides[t.id]),
       })),
@@ -285,6 +335,8 @@ export default function App() {
           {tab === "watched" && (
             <WatchedTopics
               topics={data.watched}
+              unread={unread}
+              onSeen={markSeen}
               projects={projects.map((p) => ({ id: p.channel_id, name: projectName(p) }))}
               states={data.taskStates}
               running={running}
@@ -311,6 +363,9 @@ export default function App() {
           taskChecks={data.taskChecks}
           sessionLinks={data.sessionLinks}
           priorityOverrides={data.priorityOverrides}
+          dueOverrides={data.dueOverrides}
+          unread={unread}
+          onSeen={markSeen}
           projectOverrides={data.projectOverrides}
           taskAliases={data.taskAliases}
           refinedDescriptions={data.refinedDescriptions}
@@ -347,6 +402,7 @@ export default function App() {
               busy={running.includes(`project:${p.channel_id}`)}
               taskStates={data.taskStates}
               selected={(shownProject ?? shownProjects[0]?.channel_id) === p.channel_id}
+              unread={unread.has(p.channel_id)}
               reminders={data.reminders}
               blockerChecks={data.blockerChecks}
               onSelect={() => setShownProject(p.channel_id)}
@@ -366,6 +422,7 @@ export default function App() {
                   const project = shownProjects.find((p) => p.channel_id === shownProject) ?? shownProjects[0];
                   return project ? (
                     <>
+                      <SeenWhileShown id={project.channel_id} unread={unread.has(project.channel_id)} onSeen={markSeen} />
                       <header className="column-header">
                         <h2>{projectName(project)}</h2>
                       </header>

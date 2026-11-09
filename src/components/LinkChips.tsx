@@ -18,9 +18,23 @@ export function LinkIcon({ kind }: { kind: LinkKind }) {
   );
 }
 
-/** Links as Google Docs–style smart chips: the product's icon, then the title. "list" puts one per line. */
-export function LinkChips({ links, layout = "wrap" }: { links: TaskLink[]; layout?: "wrap" | "list" }) {
+/**
+ * Links as Google Docs–style smart chips: the product's icon, then the title. "list" puts one per
+ * line. "icons" shows just each chip's icon on its round background, inline with the text around it,
+ * with the title on hover.
+ */
+export function LinkChips({ links, layout = "wrap" }: { links: TaskLink[]; layout?: "wrap" | "list" | "icons" }) {
   if (links.length === 0) return null;
+  if (layout === "icons")
+    return (
+      <span className="link-chips icons">
+        {links.map((l) => (
+          <ExternalLink key={l.url} href={l.url} className={`link-chip icon-only ${l.kind}`} title={l.title} label={l.title}>
+            <LinkIcon kind={l.kind} />
+          </ExternalLink>
+        ))}
+      </span>
+    );
   return (
     <div className={`link-chips ${layout}`}>
       {links.map((l) => (

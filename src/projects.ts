@@ -208,16 +208,29 @@ export type SlackTarget =
   /** A channel by name, "#name", to look up. */
   | { kind: "channel"; name: string }
   /** A person by name, "@Ana Lee" or "Ana Lee", to look up: a DM. */
-  | { kind: "person"; name: string };
+  | { kind: "person"; name: string }
+  /** Several people, by user ID or by name to look up: a group DM. */
+  | { kind: "group"; ids: string[]; names: string[] };
 
 /**
- * Reads a send target: a thread's permalink, an ID, "#channel", or a person for a DM ("@U0123ABCD",
- * "@Ana Lee", "<@U0123ABCD>", or just their name, "DM with Ana Lee" included).
+ * Reads a send target: a thread's permalink, an ID, "#channel", a person for a DM ("@U0123ABCD",
+ * "@Ana Lee", "<@U0123ABCD>", or just their name, "DM with Ana Lee" included), or several people
+ * for a group DM ("@U0123ABCD, @U0456EFGH", "Ana Lee, Ben Ross and Cara Diaz").
  */
 export function slackTarget(to: string): SlackTarget {
   const t = to.trim();
   const thread = slackThread(t);
   if (thread) return { kind: "thread", ...thread };
+  const people = t
+    .replace(/^(?:a\s+)?group\s+DM\s+with\s+/i, "")
+    .split(/\s*[,;&]\s*|\s+and\s+/i)
+    .map((p) => p.replace(/^<?@/, "").replace(/>$/, "").trim())
+    .filter(Boolean);
+  // People only: a list with a channel in it isn't a group DM.
+  if (people.length > 1 && !people.some((p) => /^#/.test(p) || /^[CDG][A-Z0-9]{6,}$/.test(p))) {
+    const isId = (p: string) => /^[UW][A-Z0-9]{6,}$/.test(p);
+    return { kind: "group", ids: people.filter(isId), names: people.filter((p) => !isId(p)) };
+  }
   const mention = /^<?@/.test(t);
   const bare = t.replace(/^<?@/, "").replace(/>$/, "").trim();
   if (/^[UW][A-Z0-9]{6,}$/.test(bare)) return { kind: "user", id: bare };

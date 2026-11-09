@@ -11,7 +11,7 @@ import { LinkChips } from "./LinkChips";
 import { TrackingFeed } from "./TrackingFeed";
 import { activeChannels, channelLabel, dedupeStatements, projectContext, projectName, projectStatus, slackChannelUrl } from "../projects";
 import { useJobStatus } from "../useAppData";
-import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, Updated, updatedText } from "./common";
+import { CloseIcon, ComposeModal, ExternalLink, RefreshButton, Spinner, UnreadDot, Updated, updatedText } from "./common";
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   blocked: "Blocked",
@@ -596,9 +596,12 @@ export function ProjectCard({
   blockerChecks,
   onSelect,
   inlineDetails = false,
+  unread = false,
   onViewTask,
   onChange,
 }: {
+  /** Demian found something new about it since you last opened it: a green dot after its name. */
+  unread?: boolean;
   /** Opens a task in the Tasks area, by id (the Detail view); items that are yours offer it. */
   onViewTask?: (taskId: string) => void;
   /** Its details are shown beside the list (the Detail view), so the card doesn't offer its own. */
@@ -658,6 +661,7 @@ export function ProjectCard({
               </span>
             )}
             {projectName(project)}
+            {unread && <UnreadDot />}
             {/* When it was last refreshed, right after its name; shown while the card is hovered. */}
             <Updated at={project.last_refreshed_at} />
           </h3>

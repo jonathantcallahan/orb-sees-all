@@ -203,6 +203,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-card .dismiss { visibility: hidden; }
 .task-card:hover .dismiss { visibility: visible; }
 .task-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+/* The due date, with the date picker laid invisibly over it (TaskCard's DueDate). */
+.due-date { display: inline-flex; align-items: center; gap: 3px; }
+.due-pick { position: relative; cursor: pointer; }
+.due-pick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.due-pick:hover .due, .due-pick:focus-within .due { color: var(--text); }
+.due-pick:focus-within { border-radius: 4px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.due-clear { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.15s ease; }
+.card:hover .due-clear, .due-clear:focus-visible { opacity: 1; }
+.due-clear:hover { color: var(--text); }
 .source.slack { color: #9b5de5; }
 .source.email { color: var(--accent); }
 .description { margin: 0; white-space: pre-wrap; position: relative; color: var(--muted); }
@@ -369,6 +378,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The hint's own paragraph margins would leave extra space under it. */
 .today-plan.empty > p { margin: 0; }
 .today-plan.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 10%, transparent); }
+/* Room for a card being dragged in (taskDrag.tsx sets --drop-room), opening as the cards make way for it. */
+.today-plan, .today-plan.empty { padding-bottom: calc(10px + var(--drop-room, 0px)); transition: border-color 0.15s, background 0.15s, padding-bottom 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .column.drop { box-shadow: inset 0 0 0 1px var(--border); border-radius: 12px; transition: box-shadow 0.15s; }
 
 /* Tasks outside Today: one row until clicked */
@@ -816,8 +827,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .plan-outline-steps li { display: flex; gap: 4px 8px; align-items: flex-start; flex-wrap: wrap; }
-/* What was sent or made for a step goes on its own line under the title, lined up with it, so a long chip never squeezes the title. */
-.plan-outline-steps li > .link-chips { order: 1; flex-basis: calc(100% - 20px); min-width: 0; margin-left: 20px; }
 /* Each step wraps to as many lines as it needs. */
 .plan-outline-steps li > .hover-tip-anchor { flex: 1; min-width: 0; }
 .plan-outline-steps .step-line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -1343,8 +1352,9 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .chat-step-note { font-size: 11.5px; color: var(--muted); }
 .chat-steps-made { display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
 .chat-steps-made-label { font-size: 11px; color: var(--muted); }
-/* Chips beside a step on the card. */
-.plan-outline-steps li > .link-chips { margin-left: 6px; }
+/* What was sent or made for a step on the card: just its icons, right after the step's text. */
+.link-chips.icons { display: inline-flex; gap: 3px; margin-left: 5px; vertical-align: -4px; white-space: nowrap; }
+.link-chip.icon-only { width: 18px; height: 18px; padding: 0; justify-content: center; border-radius: 50%; }
 
 /* Settings: a centered modal of grouped rows, like macOS settings. Each group is one bordered
    card; rows split by hairlines, the name and a line on what it does on the left, the control
@@ -1977,3 +1987,7 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 /* Settings' What Demian has learned: the label and arrow toggle the list; the (?) sits between them. */
 .learned-toggle { display: flex; flex-direction: row; align-items: center; gap: 5px; }
 .learned-toggle > .setting-toggle { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }
+
+/* Unread: Demian found something new about it (see unread.ts); it goes once you open it. */
+.unread-dot { display: inline-block; flex-shrink: 0; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--green); vertical-align: middle; }
+.task-title-wrap .unread-dot { margin-left: 0; }

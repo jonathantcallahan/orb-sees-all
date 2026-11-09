@@ -31,10 +31,15 @@ export function WatchedTopics({
   projects,
   states,
   running,
+  unread,
+  onSeen,
   onViewTask,
   onChange,
 }: {
   topics: WatchedTopic[];
+  /** Topics with updates you haven't opened, and how opening one marks it seen (see unread.ts). */
+  unread?: Set<string>;
+  onSeen?: (id: string) => void;
   projects: TopicProject[];
   /** Status, done and dismissed (Unwatch) for each topic, kept as a task's are. */
   states: Map<string, TaskState>;
@@ -83,6 +88,8 @@ export function WatchedTopics({
                   projects={projects}
                   checking={running.includes(`watch:${t.id}`)}
                   filling={running.includes(`watchfill:${t.id}`)}
+                  unread={unread?.has(t.id)}
+                  onSeen={onSeen && (() => onSeen(t.id))}
                   onViewTask={onViewTask}
                   onChange={onChange}
                 />
@@ -105,9 +112,13 @@ function TopicCard({
   projects,
   checking,
   filling,
+  unread,
+  onSeen,
   onViewTask,
   onChange,
 }: {
+  unread?: boolean;
+  onSeen?: () => void;
   topic: WatchedTopic;
   state: TaskState;
   projects: TopicProject[];
@@ -190,6 +201,8 @@ function TopicCard({
       assessing={false}
       compact={state.done}
       watch={watch}
+      unread={unread}
+      onSeen={onSeen}
       onChange={onChange}
     />
   );

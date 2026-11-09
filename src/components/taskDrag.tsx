@@ -141,6 +141,9 @@ export function TaskDragProvider({
         const dy = base(x) - x.top + (t >= 0 && k >= t ? size : 0);
         x.el.style.transform = dy ? `translateY(${dy}px)` : "";
       });
+      // A list taking a card from the other one grows by its size as the gap opens, so its box (Today's
+      // gray one) keeps holding the cards the gap pushed down.
+      room(zone, zone === over && over !== d.from ? size : 0, true);
     }
     return before;
   };
@@ -151,6 +154,8 @@ export function TaskDragProvider({
       s.el.style.transform = "";
       if (!animate) requestAnimationFrame(() => (s.el.style.transition = ""));
     }
+    room("today", 0, animate);
+    room("rest", 0, animate);
   };
 
   const end = useCallback(
@@ -269,6 +274,21 @@ export function TaskDragProvider({
         )}
     </DragContext.Provider>
   );
+}
+
+/**
+ * Room at the bottom of a list for a card on its way in (Today's box adds it to its padding in styles.css).
+ * Without `animate` it goes at once: on a drop, the card itself takes its place in the same frame.
+ */
+function room(zone: DropZoneId, px: number, animate: boolean) {
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-drop-zone="${zone}"]`)) {
+    const value = px ? `${px}px` : "";
+    if (el.style.getPropertyValue("--drop-room") === value) continue;
+    if (!animate) el.style.transition = "none";
+    if (value) el.style.setProperty("--drop-room", value);
+    else el.style.removeProperty("--drop-room");
+    if (!animate) requestAnimationFrame(() => (el.style.transition = ""));
+  }
 }
 
 /**

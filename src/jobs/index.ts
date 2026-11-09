@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, projectStatus, slackThread } from "../projects";
+import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, projectStatus, slackTarget, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
 import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
-import { codeRequests, currentSessionSteps, linkSession, withEdit, ORB_NOTE, sendDestination, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { codeRequests, currentSessionSteps, linkSession, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
@@ -1179,10 +1179,16 @@ export async function continueTaskSession(taskId: string, message: string, byUse
 export function sendHandoff(taskId: string, send: PendingSend, text: string): Promise<void> {
   return track(`handoff:${taskId}`, (status) =>
     logged("send", taskId, async () => {
+      // Never posts where the card didn't say it would: the card blocks these too.
+      const problem = sendProblem(send);
+      if (problem) throw new Error(`${problem} Nothing was sent.`);
       const doc = send.kind === "doc";
       const event = send.kind === "event";
       const ticket = send.kind === "ticket";
       const thread = doc || event || ticket ? null : slackThread(send.to);
+      // Several people: the group DM is opened first, after looking up anyone named.
+      const group = doc || event || ticket || thread ? null : slackTarget(send.to);
+      const groupDm = group?.kind === "group" ? group : null;
       const { data, costUsd } = await runClaude({
         onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : ticket ? "Filing the ticket" : "Posting to Slack") : s),
         prompt: doc
@@ -1196,13 +1202,21 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
                 : sendToChannelPrompt(send.to, text),
         schema: SentMessage,
         // A channel by name needs looking up first.
-        tools: doc ? TOOLS.docCreate : event ? TOOLS.eventCreate : ticket ? TOOLS.ticketCreate : thread ? TOOLS.slackSend : [...TOOLS.slackSend, ...TOOLS.slackRead],
+        tools: doc
+          ? TOOLS.docCreate
+          : event
+            ? TOOLS.eventCreate
+            : ticket
+              ? TOOLS.ticketCreate
+              : thread
+                ? TOOLS.slackSend
+                : [...TOOLS.slackSend, ...(groupDm ? TOOLS.slackGroupDm : []), ...TOOLS.slackRead],
         model: "sonnet",
-        maxTurns: ticket ? 10 : 6,
+        maxTurns: ticket ? 10 : groupDm ? 8 + groupDm.names.length : 6,
       });
       if (!data.sent)
         throw new Error(
-          data.error ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : ticket ? "Jira didn't create the ticket" : "Slack didn't accept the message"),
+          (ticket && data.error ? ticketFailure(data.error, text) : data.error) ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : ticket ? "Jira didn't create the ticket" : "Slack didn't accept the message"),
         );
       const link = (await db.getSessionLinks())[taskId];
       // Its link, kept with the step it finished, for a chip beside that step.
@@ -1305,16 +1319,17 @@ export function refreshReading(): Promise<void> {
     logged("reading", null, async () => {
       const now = new Date();
       const today = localDate(now);
-      const [projects, adhoc, manual, assessments, states, priorityOverrides, userId] = await Promise.all([
+      const [projects, adhoc, manual, assessments, states, priorityOverrides, dueOverrides, userId] = await Promise.all([
         db.listProjects(),
         db.getAdhoc(),
         db.listManualTasks(),
         db.getAssessments(),
         db.getTaskStates(),
         db.getPriorityOverrides(),
+        db.getDueOverrides(),
         db.getSetting("slack_user_id"),
       ]);
-      const context = readingContext({ projects, adhoc, manual, assessments, states, today, priorityOverrides });
+      const context = readingContext({ projects, adhoc, manual, assessments, states, today, priorityOverrides, dueOverrides });
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: readingPrompt(context, userId, messagesSince(now)),

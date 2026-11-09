@@ -38,8 +38,13 @@ function Group({
   keepOrder = false,
   dateOf,
   createdOf,
+  unread,
+  onSeen,
   onChange,
 }: {
+  /** Tasks with something new you haven't opened, and how opening one marks it seen (see unread.ts). */
+  unread?: Set<string>;
+  onSeen?: (id: string) => void;
   /** When each task was created, shown in its open card beside the due date. */
   createdOf?: (t: CardTask) => string | null;
   /** Each task's date to show as a badge (the list is sorted by it). */
@@ -95,6 +100,8 @@ function Group({
           compact
           dateBadge={dateOf?.(t)}
           created={createdOf?.(t)}
+          unread={unread?.has(t.id)}
+          onSeen={onSeen && (() => onSeen(t.id))}
           onChange={onChange}
         />
       ))}
@@ -143,6 +150,9 @@ export function TaskColumn({
   taskChecks,
   sessionLinks,
   priorityOverrides,
+  dueOverrides = {},
+  unread,
+  onSeen,
   projectOverrides = {},
   taskAliases,
   refinedDescriptions,
@@ -183,6 +193,11 @@ export function TaskColumn({
   sessionLinks: Record<string, SessionLink>;
   /** Priorities the user set by hand, by task id. */
   priorityOverrides: Record<string, Priority>;
+  /** Due dates the user set by hand, by task id: they win over the ones refreshes found. */
+  dueOverrides?: Record<string, { due: string | null }>;
+  /** Tasks with something new you haven't opened (see unread.ts), and how opening one marks it seen. */
+  unread?: Set<string>;
+  onSeen?: (id: string) => void;
   /** Projects the user moved tasks to, by task id: shown under that project instead of where they were found. */
   projectOverrides?: Record<string, string>;
   /** Other ids for the same tasks, mapped to their canonical ids. */
@@ -254,6 +269,11 @@ export function TaskColumn({
     return descriptionOverrides[cid] ?? descriptionOverrides[id] ?? refinedDescriptions[cid];
   };
   const isRecommended = (id: string) => recommended.has(id) || recommended.has(canonicalId(id, taskAliases));
+  // A due date you set (or took off) wins over the one a refresh found.
+  const dueFor = (id: string, found: string | null | undefined) => {
+    const set = dueOverrides[canonicalId(id, taskAliases)] ?? dueOverrides[id];
+    return set ? set.due : (found ?? null);
+  };
 
   // The project a task was moved to (see setTaskProject), if it's still on the board.
   const movedTo = (id: string) => {
@@ -264,12 +284,12 @@ export function TaskColumn({
 
   // Slack and email items share one inbox; dated items first, soonest first. One you filed under a
   // project shows its badge.
-  const rawInbox = [...adhoc.tasks]
-    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
+  const rawInbox = adhoc.tasks
     .map((t) => {
       const to = movedTo(t.id);
-      return { ...t, ...(to ? projectFields(to) : {}), description: editedDescription(t.id) ?? t.description, recommended: isRecommended(t.id) };
-    });
+      return { ...t, ...(to ? projectFields(to) : {}), due: dueFor(t.id, t.due), description: editedDescription(t.id) ?? t.description, recommended: isRecommended(t.id) };
+    })
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
 
   // The user's tasks from project snapshots, under the project you moved one to if you did: blockers
   // first, then by due date.
@@ -280,6 +300,7 @@ export function TaskColumn({
         ...t,
         source: "project" as const,
         ...projectFields(movedTo(t.id) ?? p),
+        due: dueFor(t.id, t.due),
         description: editedDescription(t.id) ?? t.description,
         blocking: blocking.has(t.id),
         recommended: isRecommended(t.id),
@@ -295,6 +316,7 @@ export function TaskColumn({
       ...t,
       description: t.description || refinedDescriptions[canonicalId(t.id, taskAliases)] || null,
       brief: taskBriefs[t.id] ?? null,
+      due: dueFor(t.id, null),
       source: "manual" as const,
       recommended: isRecommended(t.id),
     }));
@@ -314,7 +336,7 @@ export function TaskColumn({
             title: p.title,
             link: p.link ?? null,
             description: `To prepare for "${ev.title}" at ${time(ev.start)}${ev.summary ? `: ${ev.summary}` : "."}`,
-            due: calendar!.date,
+            due: dueFor(p.id, calendar!.date),
             source: "meeting" as const,
             recommended: isRecommended(p.id),
           })),
@@ -352,7 +374,7 @@ export function TaskColumn({
   const [firstSeen, setFirstSeen] = useState<Record<string, string>>({});
   // When each task was created.
   const createdOf = (t: CardTask) => createdAt(t as CardTask & { created_at?: string | null }, firstSeen);
-  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, mergedFrom, running, createdOf, onChange };
+  const shared = { plans, assessments, checks: taskChecks, sessionLinks, priorityOverrides, openTasks, duplicates, mergedFrom, running, createdOf, unread, onSeen, onChange };
 
   // Today's plan pulls from every group, in the order you arranged it, open tasks first (a task
   // just dropped among the finished ones waits there a moment before moving up).
@@ -390,6 +412,8 @@ export function TaskColumn({
             // Finished tasks shrink to a one-line row (click to see the card again).
             compact={t.done}
             created={createdOf(t)}
+            unread={unread?.has(t.id)}
+            onSeen={onSeen && (() => onSeen(t.id))}
             onChange={onChange}
           />
         ))

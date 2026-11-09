@@ -541,6 +541,19 @@ ${READ_ONLY}
 ${JSON_ONLY} Shape: {"key": string, "title": string, "status": string, "done": number, "total": number, "link": string, "updated": string|null}. link is the issue's browse URL; updated is ISO 8601.`;
 }
 
+/**
+ * How a group DM is reached: anyone named is looked up first, then slack_create_conversation with
+ * everyone's user IDs opens the group DM (Slack hands back the existing one), whose ID it posts to.
+ */
+function groupDmStep(ids: string[], names: string[]): string {
+  const people = [...ids.map((id) => `the person with user ID ${id}`), ...names].join(", ");
+  const find = names.length
+    ? ` First find ${names.length > 1 ? "each person named" : names[0]}: slack_search_users for ${names.map((n) => `"${n}"`).join(", ")}. For each name, use the one person whose name matches it; if no one does, or more than one could be them, don't post, and report the error naming who you found.`
+    : "";
+  const all = ids.length + names.length;
+  return `Send the message below as one Slack group DM to these ${all} people together: ${people}.${find} Then open the group DM: call slack_create_conversation once with user_ids set to all ${all} people's user IDs${ids.length ? ` (${ids.map((id) => `"${id}"`).join(", ")}${names.length ? " and the ones you found" : ""})` : ""} and no channel_name. You're added to it yourself, so leave your own ID out, and if it would hold more than 8 people, don't post and report the error. Slack gives back the group DM's channel_id, the existing one if there already is one: post to that.`;
+}
+
 export function sendToChannelPrompt(to: string, text: string): string {
   const target = slackTarget(to);
   const where =
@@ -550,7 +563,9 @@ export function sendToChannelPrompt(to: string, text: string): string {
         ? `Send the message below as a Slack DM to the person with user ID ${target.id}: use "${target.id}" as the channel_id, which sends it as a DM.`
         : target.kind === "person"
           ? `Send the message below as a Slack DM to ${target.name}. First find them: slack_search_users for "${target.name}". Use the one person whose name matches it; if no one does, or more than one could be them, don't post, and report the error naming who you found. Then use their user ID as the channel_id, which sends it as a DM.`
-          : `Post the message below to the Slack conversation with channel_id "${target.kind === "conversation" ? target.id : to}".`;
+          : target.kind === "group"
+            ? groupDmStep(target.ids, target.names)
+            : `Post the message below to the Slack conversation with channel_id "${target.kind === "conversation" ? target.id : to}".`;
   return `${where} Call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
 
 Message (between the markers):
@@ -809,7 +824,7 @@ Ticket (between the markers):
 ${text}
 TICKET>>>
 
-After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. sent is true once the ticket exists; link is its browse URL: the scheme and host of the "url" the tool returned, then /browse/<its key>. If a field Jira rejected (a component or priority that doesn't exist) made the create fail, create it again without that field once, and say which you left out in error, keeping sent true.`;
+After creating it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. sent is true once the ticket exists; link is its browse URL: the scheme and host of the "url" the tool returned, then /browse/<its key>. If a field Jira rejected (a component or priority that doesn't exist) made the create fail, create it again without that field once, and say which you left out in error, keeping sent true. If Jira says the summary itself "cannot be set" (it's "not on the appropriate screen"), I can't create that kind of ticket in that project: don't retry, and put Jira's message in error word for word.`;
 }
 
 /** An epic's child issues, each with its status and assignee. */

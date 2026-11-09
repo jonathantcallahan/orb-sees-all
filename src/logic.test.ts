@@ -393,6 +393,19 @@ describe("readingContext", () => {
     expect(ctx.projects).toHaveLength(1);
     expect(ctx.projects[0].blocked_on_others).toEqual([]);
   });
+
+  it("uses the due dates you set, including taking one off", () => {
+    const ctx = readingContext({
+      projects: [],
+      adhoc: { tasks: [{ id: "s1", title: "Reply to Kim", source: "slack" as const, due: "2026-11-02" }, { id: "s2", title: "Review the spec", source: "email" as const, due: "2026-11-03" }], replies: [], news: [], refreshed_at: null },
+      manual: [{ id: "m1", title: "Book the room", description: null, project_id: null, created_at: "" }],
+      assessments: new Map(),
+      states: new Map(),
+      today: "2026-10-29",
+      dueOverrides: { s1: { due: null }, m1: { due: "2026-11-01" } },
+    });
+    expect(Object.fromEntries(ctx.tasks.map((t) => [t.id, t.due]))).toEqual({ s1: null, s2: "2026-11-03", m1: "2026-11-01" });
+  });
 });
 
 describe("reminders", () => {

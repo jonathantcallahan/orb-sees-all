@@ -326,6 +326,21 @@ describe("tickets handed to Orb", () => {
     expect(p).toMatch(/exactly as written/);
     expect(SESSION_DISPLAY).toMatch(/\[orb\] ticket step N: /);
     expect(SESSION_DISPLAY).toMatch(/Filing it is your step, not mine/);
+    expect(SESSION_DISPLAY).toMatch(/reporter = currentUser\(\)/);
+    expect(p).toMatch(/summary itself "cannot be set"/);
+  });
+
+  it("says plainly when Jira won't let you file in that project", async () => {
+    const { ticketFailure } = await import("./sessions");
+    const ticket = "project: SHOP\ntype: Story\nlabels: web\n\nHide the option.";
+    const jira = `Jira rejected the create call: "Field 'summary' cannot be set. It is not on the appropriate screen, or unknown." It gave the same error for 'description' and 'labels'.`;
+    expect(ticketFailure(jira, ticket)).toBe(
+      "Jira won't let you create a Story in SHOP, which usually means your account can't file tickets there. Change the project line to one you can file in, or send the ticket to someone on that team to file. Nothing was created.",
+    );
+    expect(ticketFailure(jira, "type: Epic\n\nx")).toMatch(/^Jira won't let you create an Epic in that project,/);
+    // Any other field it couldn't set is kept as Jira said it.
+    const other = "Field 'components' cannot be set. It is not on the appropriate screen, or unknown.";
+    expect(ticketFailure(other, ticket)).toBe(other);
   });
 });
 
@@ -410,6 +425,48 @@ describe("where a message goes", () => {
     expect(sendDestination({ to: "https://example.slack.com/archives/D0456/p1700000000000100" })).toBe("the thread in a DM");
     expect(sendDestination({ to: "https://example.slack.com/archives/C0789/p1700000000000100" })).toBe("the thread in a channel");
     expect(sendDestination({ to: "#launch-team" })).toBe("#launch-team");
+  });
+});
+
+describe("a message whose destination isn't clear", () => {
+  const problem = async (header: string) => {
+    const { parseSends, sendProblem } = await import("./sessions");
+    return sendProblem(parseSends([{ header, body: "Hi" }])[0]);
+  };
+
+  it("won't go to everyone, however it's written", async () => {
+    // The chat once wrote this for a group DM, and "everyone" was looked up as a channel.
+    expect(await problem("[orb] send step 5 to everyone (group DM with Ana, Ben, Cara)")).toMatch(/not clear/);
+    for (const to of ["everyone", "#everyone", "@here", "<!channel>", "#all", "@U0123ABCD, everyone"]) expect(await problem(`[orb] send to ${to}`)).toMatch(/isn't a person or a conversation/);
+  });
+
+  it("won't go somewhere other than the card says", async () => {
+    expect(await problem("[orb] send to #launch-team (group DM with Ana, Ben)")).toMatch(/called it "group DM with Ana, Ben"/);
+    expect(await problem("[orb] send to @U0123ABCD (#launch-team)")).toMatch(/called it "#launch-team"/);
+    expect(await problem("[orb] send to #launch-team (#launch-crew)")).toMatch(/not clear/);
+    expect(await problem("[orb] send to @U0123ABCD, @U0456EFGH (DM with Ana)")).toMatch(/not clear/);
+  });
+
+  it("asks which a bare word is, and checks links are Slack threads", async () => {
+    expect(await problem("[orb] send to launch-team")).toMatch(/could be a channel or a person/);
+    expect(await problem("[orb] send to https://example.com/page")).toMatch(/isn't a link to a Slack thread/);
+  });
+
+  it("sends where the target and the words agree", async () => {
+    for (const header of [
+      "[orb] send to #launch-team",
+      "[orb] send to #launch-team (#launch-team)",
+      "[orb] send to launch-team (#launch-team)",
+      "[orb] send to @U0123ABCD (DM with Ana Lee)",
+      "[orb] send to @Ana Lee",
+      "[orb] send to @U0123ABCD, @U0456EFGH (group DM with Ana, Ben)",
+      "[orb] send to Ana Lee, Ben Wu",
+      "[orb] send to C0123ABCD (#launch-team)",
+      "[orb] send to https://example.slack.com/archives/G0123/p1700000000000100 (group DM with Ana, Ben)",
+    ])
+      expect(await problem(header), header).toBeNull();
+    const { sendProblem } = await import("./sessions");
+    expect(sendProblem({ kind: "ticket", to: "everyone" })).toBeNull();
   });
 });
 

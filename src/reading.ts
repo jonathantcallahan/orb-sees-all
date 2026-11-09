@@ -12,6 +12,8 @@ export interface ReadingInput {
   today: string;
   /** Priorities the user set by hand, which outrank the assessed ones. */
   priorityOverrides?: Record<string, Priority>;
+  /** Due dates you set by hand, by task id: they win over the ones refreshes found. */
+  dueOverrides?: Record<string, { due: string | null }>;
 }
 
 /** The most key projects the briefing covers, and the most of each list it's given. */
@@ -109,7 +111,7 @@ export function readingContext(r: ReadingInput) {
       title: t.title,
       project: t.project,
       priority: taskPriority(t.a?.priority, t.projectPriority, t.blocking, r.priorityOverrides?.[t.id]),
-      due: t.due ?? null,
+      due: r.dueOverrides?.[t.id] ? r.dueOverrides[t.id].due : (t.due ?? null),
     }))
     // Most pressing first: by priority, then the nearest due date.
     .sort((a, b) => rank(a.priority) - rank(b.priority) || (a.due ?? "9999").localeCompare(b.due ?? "9999"))

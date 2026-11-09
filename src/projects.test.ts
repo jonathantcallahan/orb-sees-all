@@ -159,4 +159,28 @@ describe("send targets", () => {
     expect(sendToChannelPrompt("#refunds", "Hi")).toContain("slack_search_channels");
     expect(sendToChannelPrompt("#refunds", "Hi")).toContain("<<<MESSAGE\nHi\nMESSAGE>>>");
   });
+
+  it("reads several people as a group DM", async () => {
+    const { slackTarget } = await import("./projects");
+    // As a chat wrote it, with the first @ left off.
+    expect(slackTarget("U0123ABCD, @U0456EFGH, @W0789IJKL")).toEqual({ kind: "group", ids: ["U0123ABCD", "U0456EFGH", "W0789IJKL"], names: [] });
+    expect(slackTarget("<@U0123ABCD>, <@U0456EFGH>")).toEqual({ kind: "group", ids: ["U0123ABCD", "U0456EFGH"], names: [] });
+    expect(slackTarget("Ana Lee, Ben Ross and @U0123ABCD")).toEqual({ kind: "group", ids: ["U0123ABCD"], names: ["Ana Lee", "Ben Ross"] });
+    expect(slackTarget("group DM with Ana, Ben")).toEqual({ kind: "group", ids: [], names: ["Ana", "Ben"] });
+    // Not a list of people.
+    expect(slackTarget("q-and-a")).toEqual({ kind: "channel", name: "q-and-a" });
+    expect(slackTarget("#refunds, #support").kind).not.toBe("group");
+  });
+
+  it("opens the group DM before sending to several people", async () => {
+    const { sendToChannelPrompt } = await import("./prompts");
+    const ids = sendToChannelPrompt("U0123ABCD, @U0456EFGH", "Hi");
+    expect(ids).toContain("slack_create_conversation");
+    expect(ids).toContain('"U0123ABCD", "U0456EFGH"');
+    expect(ids).not.toContain("slack_search_users");
+    expect(ids).toContain("slack_send_message exactly once");
+    const named = sendToChannelPrompt("Ana Lee, @U0456EFGH", "Hi");
+    expect(named).toContain('slack_search_users for "Ana Lee"');
+    expect(named).toContain("and the ones you found");
+  });
 });

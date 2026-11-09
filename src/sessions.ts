@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import * as db from "./db";
 import { sessionMarker } from "./openInClaude";
 import { WATCH_CHAT } from "./watched";
-import { channelLabel, slackTarget } from "./projects";
+import { channelLabel, slackTarget, slackThread } from "./projects";
 import { GlobalAction } from "./schema";
 
 /** A task's link to the Claude Code session Orb opened for it. */
@@ -688,8 +688,66 @@ export function sendDestination(send: { to: string; label?: string }): string {
   if (label) return thread ? `the thread in ${label}` : label;
   if (!thread) {
     const target = slackTarget(send.to);
-    return target.kind === "person" ? `DM with ${target.name}` : target.kind === "user" ? "a DM" : send.to;
+    return target.kind === "person"
+      ? `DM with ${target.name}`
+      : target.kind === "user"
+        ? "a DM"
+        : target.kind === "group"
+          ? target.ids.length
+            ? "a group DM"
+            : `group DM with ${target.names.join(", ")}`
+          : send.to;
   }
   const kind = id.startsWith("D") ? "a DM" : id.startsWith("G") ? "a group DM" : id.startsWith("C") ? "a channel" : null;
   return kind ? `the thread in ${kind}` : "the thread";
+}
+
+/** Words Slack uses to address a whole channel or workspace: never one place to send to. */
+const EVERYONE = /^<?[!@#]?(?:everyone|here|channel|all)>?$/i;
+
+/** What kind of place the session's words for a destination describe, when they say. */
+function labelKind(label: string): "channel" | "dm" | "group" | null {
+  const l = label.trim();
+  if (/^#?mpdm-/.test(l) || /^(?:a\s+)?group\s+DM\b/i.test(l)) return "group";
+  if (/^#/.test(l)) return "channel";
+  if (/^(?:a\s+)?DM\b/i.test(l)) return "dm";
+  return null;
+}
+
+/**
+ * Why a handed-over message can't be sent as it stands, or null when it can. The card shows where a
+ * message goes in the session's own words, so those words and the target it actually posts to must
+ * agree: a message described as a group DM must never go to a channel. Refused: a target that
+ * addresses everyone ("everyone", "@here"), words and target naming different places, a bare word
+ * that could be a channel or a person, and a link that isn't a Slack thread.
+ */
+export function sendProblem(send: Pick<PendingSend, "kind" | "to" | "label">): string | null {
+  if ((send.kind ?? "message") !== "message") return null;
+  const to = send.to.trim();
+  const unclear = "It's not clear where this goes:";
+  if (/^https?:\/\//.test(to)) return slackThread(to) ? null : `${unclear} "${to}" isn't a link to a Slack thread.`;
+  if (EVERYONE.test(to) || to.split(/\s*,\s*/).some((p) => EVERYONE.test(p))) return `${unclear} "${to}" isn't a person or a conversation.`;
+  const target = slackTarget(to);
+  const kind = target.kind === "channel" ? "channel" : target.kind === "group" ? "group" : target.kind === "user" || target.kind === "person" ? "dm" : null;
+  const said = send.label ? labelKind(send.label) : null;
+  if (said && kind && (said !== kind || (kind === "channel" && target.kind === "channel" && send.label!.trim().replace(/^#/, "") !== target.name)))
+    return `${unclear} the chat wrote "${to}" but called it "${send.label!.trim()}".`;
+  // Channels are written "#name"; a bare word is only a channel when the session's words say so.
+  if (target.kind === "channel" && !/^#/.test(to) && said !== "channel") return `${unclear} "${to}" could be a channel or a person.`;
+  return null;
+}
+
+/**
+ * Why a ticket wasn't filed, in plain words. When Jira won't take even the summary ("Field 'summary'
+ * cannot be set. It is not on the appropriate screen"), there's no create screen for you: your
+ * account can't file that type of ticket in that project. Any other error is kept as it is.
+ */
+export function ticketFailure(error: string, ticket: string): string {
+  if (!/summary'?\s+cannot be set|summary.{0,40}not on the appropriate screen/i.test(error)) return error;
+  const field = (name: string) => ticket.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim();
+  const project = field("project");
+  const type = field("type") ?? "ticket";
+  const where = project ? ` in ${project}` : " in that project";
+  const a = /^[aeiou]/i.test(type) ? "an" : "a";
+  return `Jira won't let you create ${a} ${type}${where}, which usually means your account can't file tickets there. Change the project line to one you can file in, or send the ticket to someone on that team to file. Nothing was created.`;
 }

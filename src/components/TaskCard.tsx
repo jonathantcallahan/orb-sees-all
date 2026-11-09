@@ -3,15 +3,15 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { adoptAsTaskNote, claudeSessionUrl, resumeSessionUrl, sessionPrompt, taskChatPrompt } from "../openInClaude";
-import { clearAssessment, clearTaskCheck, hideMergedNote, markCorrectionApplied, markNotDuplicate, mergeTasks, separateTasks, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type MergedTask, type StoredPlan, type StoredTaskCheck } from "../db";
+import { clearAssessment, clearTaskCheck, hideMergedNote, markCorrectionApplied, markNotDuplicate, mergeTasks, separateTasks, setDueOverride, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type MergedTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskChat, stopTaskSession, STOPPED_BY_YOU } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { TaskChangeCards } from "./ActionRow";
-import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, useScrambled } from "./common";
-import { chatView, readableReply, saveDraftEdit, sendDestination, withEdit, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, UnreadDot, useScrambled } from "./common";
+import { chatView, readableReply, saveDraftEdit, sendDestination, sendProblem, withEdit, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { InDock, useInDock, useTaskChatDock } from "./chatDock";
@@ -248,6 +248,42 @@ function usePointerFocus() {
   };
 }
 
+/**
+ * The due date in an open card, with the date picker laid over it to change it, and × to take it
+ * off. A task without one offers Add due date. The date you pick wins over the one a refresh found.
+ */
+function DueDate({ task, onChange }: { task: CardTask; onChange: () => void }) {
+  const set = async (due: string | null) => {
+    await setDueOverride(task.id, due);
+    onChange();
+  };
+  return (
+    <span className="due-date">
+      <span className="due-pick">
+        <span className="due timestamp">{task.due ? `due ${formatWhen(task.due)}` : "Add due date"}</span>
+        <input
+          type="date"
+          aria-label="Due date"
+          value={task.due?.slice(0, 10) ?? ""}
+          onClick={(e) => {
+            try {
+              e.currentTarget.showPicker();
+            } catch {
+              // Already open, or the picker isn't available: the field still takes typing.
+            }
+          }}
+          onChange={(e) => set(e.target.value || null)}
+        />
+      </span>
+      {task.due && (
+        <button className="due-clear" aria-label="Remove the due date" onClick={() => set(null)}>
+          <CloseIcon />
+        </button>
+      )}
+    </span>
+  );
+}
+
 /** A dismissal, recorded with what the task was, so a refresh doesn't raise it again. */
 function recordDismiss(task: CardTask) {
   // Dismissing a watched topic is unwatching it, not a lesson about tasks.
@@ -433,10 +469,13 @@ function PlanOutline({
                 );
               })()}
               {/* Each step wraps to as many lines as it needs; a blocked one says why on hover. */}
+              {/* What was sent or made for the step follows its text, as icons. */}
               <HoverTip text={step.progress?.state === "blocked" ? `${step.title}${step.progress.note ? ` (blocked: ${step.progress.note})` : " (blocked)"}` : null}>
-                <span className="small step-line">{step.line ?? step.title}</span>
+                <span className="small step-line">
+                  {step.line ?? step.title}
+                  {step.links && step.links.length > 0 && <LinkChips links={step.links} layout="icons" />}
+                </span>
               </HoverTip>
-              {step.links && step.links.length > 0 && <LinkChips links={step.links} />}
               {step.trailing && <span className="step-trailing">{step.trailing}</span>}
               {onRemind && step.progress?.state === "blocked" && (
                 <button className="link-button small step-remind" onClick={() => onRemind(i)}>
@@ -663,6 +702,19 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   // Something to create (a doc, an event or a ticket) rather than a message to send.
   const creates = doc || event || ticket;
   const where = sendDestination(send);
+  // Where it goes isn't clear (see sendProblem): it can't be sent, only handed back to the chat to fix.
+  const problem = sendProblem(send);
+  const chatBusy = useJobStatus(`session:${taskId}`);
+  const askToFix = async () => {
+    const link = (await db.getSessionLinks())[taskId];
+    await db.updateSessionLink(taskId, { dismissedKeys: [...(link?.dismissedKeys ?? []), send.key] });
+    continueTaskSession(
+      taskId,
+      `The message you handed over${send.step ? ` for step ${send.step}` : ""} wasn't sent. ${problem} Hand it over again with a send line that names exactly where it goes: #channel-name for a channel, @person for a DM (their Slack user ID, like @U0123ABCD, when you know it), each person in a group DM the same way, comma-separated (@U0123ABCD, @U0456EFGH), or the permalink of the thread to reply in.`,
+      true,
+    ).then(onChange, onChange);
+    onChange();
+  };
   // An event's "when:" line, shown on the card; and whether it invites anyone.
   const when = event ? text.match(/^when:\s*(.+)$/im)?.[1] : undefined;
   const invites = event && /^who:\s*\S/im.test(text);
@@ -673,7 +725,7 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
     <div className="handoff small">
       <div className="handoff-head">
         <span className="handoff-label">
-          {doc ? `Ready to create a Google Doc: ${send.to}` : event ? `Ready to create an event: ${send.to}` : ticket ? `Ready to file a Jira ticket: ${send.to}` : send.to.startsWith("http") ? `Ready to reply in ${where}` : `Ready to send to ${where}`}
+          {problem ? "Can't send this yet" : doc ? `Ready to create a Google Doc: ${send.to}` : event ? `Ready to create an event: ${send.to}` : ticket ? `Ready to file a Jira ticket: ${send.to}` : send.to.startsWith("http") ? `Ready to reply in ${where}` : `Ready to send to ${where}`}
         </span>
         <span className="action-buttons">
           {!sending && (
@@ -689,13 +741,23 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
               Not this
             </button>
           )}
-          <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
-            {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
-          </button>
+          {problem ? (
+            <button className="cta-primary" disabled={!!chatBusy} title="Asks the chat to hand it over again, saying exactly where it goes" onClick={askToFix}>
+              Ask to fix
+            </button>
+          ) : (
+            <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
+              {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
+            </button>
+          )}
         </span>
       </div>
-      <div className="muted handoff-preview">{when ?? ticketWhere ?? text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
-      {open && (
+      {problem ? (
+        <div className="handoff-preview error">{problem}</div>
+      ) : (
+        <div className="muted handoff-preview">{when ?? ticketWhere ?? text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
+      )}
+      {open && !problem && (
         <ComposeModal
           heading={creates ? `Create "${send.to}"` : send.to.startsWith("http") ? `Reply in ${where}` : `Send to ${where}`}
           note={
@@ -1491,6 +1553,8 @@ export function TaskCard({
   duplicateOf,
   mergedIn = [],
   compact = false,
+  unread = false,
+  onSeen,
   dateBadge,
   created,
   watch,
@@ -1526,6 +1590,10 @@ export function TaskCard({
   mergedIn?: MergedTask[];
   /** Show a one-line row (title, priority, estimate, status) until clicked. */
   compact?: boolean;
+  /** Demian found something new about it since you last opened it: a green dot after its title. */
+  unread?: boolean;
+  /** Marks it seen; called while the card is open. */
+  onSeen?: () => void;
   onChange: () => void;
 }) {
   const checkStatus = useJobStatus(`taskcheck:${task.id}`);
@@ -1982,6 +2050,10 @@ export function TaskCard({
 
 
   const drag = useTaskDrag(task.id, cardRef);
+  // Opening the card is reading what's new on it, and anything new while it's open is read too.
+  useEffect(() => {
+    if (!collapsed && unread) onSeen?.();
+  }, [collapsed, unread]);
 
   const toggle = (
     <button
@@ -2007,6 +2079,10 @@ export function TaskCard({
       {formatMinutes(estimateMinutes)}
     </span>
   );
+  const human = needsInput && !task.done;
+  const working = !!sessionWorking && !task.done;
+  const pinStatus = human || working;
+  const status = <StatusSelect task={task} human={human} working={working} onChange={onChange} />;
   // One header for both states, so the title row stays exactly where it is when the card opens or closes.
   const header = (
     <header className="task-card-header">
@@ -2026,6 +2102,7 @@ export function TaskCard({
         <span className="task-title">
           {watch?.titlePending ? <span className="muted">{watch.titlePending}</span> : task.title}
         </span>
+        {unread && <UnreadDot />}
         {watch?.stamp && <span className="timestamp small card-stamp">{watch.stamp}</span>}
       </span>
       {estimate && <span className="task-extras">{estimate}</span>}
@@ -2038,11 +2115,15 @@ export function TaskCard({
       ) : (
         <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />
       )}
-      <span className="task-extras">
-        {task.recommended && <RecommendedBadge />}
-        {dateBadge && <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />}
-        <StatusSelect task={task} human={needsInput && !task.done} working={!!sessionWorking && !task.done} onChange={onChange} />
-      </span>
+      {(task.recommended || dateBadge || !pinStatus) && (
+        <span className="task-extras">
+          {task.recommended && <RecommendedBadge />}
+          {dateBadge && <PriorityBadge task={task} priority={priority} manual={manualPriority} automatic={automaticPriority} onChange={onChange} />}
+          {!pinStatus && status}
+        </span>
+      )}
+      {/* Human or Working stays in the title row, folded or open: it's what you'd look for. */}
+      {pinStatus && status}
       {watch?.refresh ? (
         <span className={`card-refresh${watch.refresh.busy ? " busy" : ""}`} onClick={(e) => e.stopPropagation()}>
           <RefreshButton busy={watch.refresh.busy} title="Check now" status="Checking" onClick={watch.refresh.onClick} />
@@ -2085,12 +2166,12 @@ export function TaskCard({
         <div className="task-body-inner">
           {bodyMounted && (
             <>
-              {(watch?.meta || SOURCE_LABEL[task.source] || task.project || task.requester || task.due || created) && (
+              {(watch?.meta || !watch || SOURCE_LABEL[task.source] || task.project || task.requester || task.due || created) && (
                 <div className="muted small task-meta">
                   {watch?.meta ?? (task.project && <span className="task-project">{task.project.name}</span>)}
                   {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
                   {task.requester && <span>{task.requester}</span>}
-                  {task.due && <span className="due timestamp">due {formatWhen(task.due)}</span>}
+                  {watch ? task.due && <span className="due timestamp">due {formatWhen(task.due)}</span> : <DueDate task={task} onChange={onChange} />}
                   {created && (
                     // Just the day (in your time zone), not the time.
                     <span className="timestamp" title={new Date(created).toLocaleString()}>
