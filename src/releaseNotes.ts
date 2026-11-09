@@ -11,6 +11,20 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.13",
+    date: "2026-11-09",
+    notes: [
+      "A green dot beside a task, project or watched topic means Demian found something new about it since you last opened it: a new source, a refreshed description or double check, a status change or new updates.",
+      "Set or take off a task's due date from its open card. Add due date is always there, and the date you pick stays through refreshes.",
+      "Working and Human badges stay in a task's title row, even on a folded card.",
+      "Dragging a task into Today makes room for it as the other cards move aside.",
+      "What was sent or made for a plan step shows as small icons right after the step. Hover one for its title, click it to open it.",
+      "Task chats can send one message to several people as a group DM.",
+      "Demian won't send a message when it's unclear where it goes, or when it goes somewhere other than the card says. The card says why, and Ask to fix has the chat hand it over again.",
+      "When Jira won't let you file in a project, Demian says so plainly instead of passing on Jira's error, and the chat warns you before handing over a ticket for a project you've never filed in.",
+    ],
+  },
+  {
     version: "0.6.12",
     date: "2026-11-05",
     notes: [
