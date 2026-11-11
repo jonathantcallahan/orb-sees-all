@@ -588,6 +588,8 @@ export async function runSessionTurn(
     effort?: "low" | "medium" | "high";
     maxTurns?: number;
     resume?: string;
+    /** The folder to run in: a session you started yourself resumes only from its own folder. */
+    cwd?: string;
     /** More for the system prompt this turn, after SESSION_DISPLAY (e.g. the steps as Orb shows them). */
     context?: string;
     /** Code folders the session may read (local checkouts and GitHub mirrors). */
@@ -642,7 +644,7 @@ export async function runSessionTurn(
     } catch {
       // Not a JSON line.
     }
-  }, { stdin: opts.prompt, appendSystemPrompt: system }, { limits: SESSION_LIMITS, signal: opts.signal });
+  }, { stdin: opts.prompt, appendSystemPrompt: system }, { limits: SESSION_LIMITS, signal: opts.signal, cwd: opts.cwd });
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   return {

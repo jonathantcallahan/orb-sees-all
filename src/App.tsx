@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
-import { Kbd, RefreshButton, ScrambleText } from "./components/common";
+import { Kbd, RefreshButton, ScrambleText, Spinner } from "./components/common";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
@@ -25,7 +25,7 @@ import { TodayColumn } from "./components/TodayColumn";
 import { getNotes, getSetting, markInterruptedJobs, saveSeen, setSetting } from "./db";
 import { seenAfter, toRecord, unreadIds, updateFacts } from "./unread";
 import { setStandingNotes } from "./claude";
-import { maybeDistill, maybeRunMorning, pollSelfDm, refreshAll } from "./jobs";
+import { assessPendingTasks, checkWatchedTopics, maybeDistill, maybeRunMorning, pollSelfDm, refreshAdhoc, refreshAll, refreshCalendar, refreshReading, scanClaudeSessions } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, stateOf, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
@@ -320,6 +320,7 @@ export default function App() {
                     projects={data.projects}
                     news={data.adhoc.news}
                     states={data.taskStates}
+                    inbox={new Set(data.adhoc.replies.map((r) => r.id))}
                     busy={running.includes("reading")}
                     updatesBusy={running.some((k) => k.startsWith("project:") || k === "adhoc")}
                     onChange={reload}
@@ -557,8 +558,30 @@ function viewIcon(rects: Rect[], outlined: boolean, size = 14, paths: string[] =
 }
 
 /**
+ * What can be refreshed on its own, from the bottom bar's menu: each area that used to have its own
+ * refresh button. `jobs` are the keys of the jobs that refresh it (a prefix ending in ":" stands for
+ * all of a kind), so it shows a spinner while they run.
+ */
+const REFRESH_AREAS: { label: string; jobs: string[]; run: () => Promise<unknown> }[] = [
+  { label: "Calendar", jobs: ["calendar"], run: refreshCalendar },
+  // Then your Claude Code sessions, matched against the tasks those found (whether or not Slack and
+  // email could be read); any it adds are assessed.
+  {
+    label: "Tasks",
+    jobs: ["adhoc", "assess", "sessions"],
+    run: () =>
+      Promise.allSettled([refreshAdhoc(), assessPendingTasks()])
+        .then(() => scanClaudeSessions())
+        .then((added) => (added.length ? assessPendingTasks() : undefined)),
+  },
+  { label: "Daily briefing", jobs: ["reading"], run: refreshReading },
+  { label: "Watched topics", jobs: ["watch:"], run: checkWatchedTopics },
+];
+
+/**
  * The bottom bar's Refresh everything, or while anything loads, its line of text in its place. Its
- * own component, so the status streaming in re-renders this line alone, not the whole app.
+ * own component, so the status streaming in re-renders this line alone, not the whole app. Pointing
+ * at either opens a small menu above it: Everything, or one area on its own (see REFRESH_AREAS).
  */
 function BottomStatus({ running }: { running: string[] }) {
   const allStatus = useJobStatus("all");
@@ -566,10 +589,32 @@ function BottomStatus({ running }: { running: string[] }) {
   const loadingStatus = useStatusFeed();
   // What's running in the background: chats show their own progress.
   const loading = running.filter((k) => !isChatJob(k));
-  if (loading.length === 0) return <RefreshButton busy={running.includes("all")} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />;
+  const isRunning = (job: string) => running.some((k) => (job.endsWith(":") ? k.startsWith(job) : k === job));
   return (
-    <span className="bottom-status small" title={loadingStatus}>
-      <ScrambleText text={loadingStatus ? `${loadingStatus}…` : `${loading.filter((k) => k !== "all").length || 1} refreshing…`} />
+    <span className="refresh-menu-anchor">
+      {loading.length === 0 ? (
+        <RefreshButton busy={running.includes("all")} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
+      ) : (
+        <span className="bottom-status small" title={loadingStatus}>
+          <ScrambleText text={loadingStatus ? `${loadingStatus}…` : `${loading.filter((k) => k !== "all").length || 1} refreshing…`} />
+        </span>
+      )}
+      <span className="card menu-card refresh-menu small" role="menu" aria-label="Refresh">
+        <button role="menuitem" className="link-button small" disabled={running.includes("all")} onClick={refreshAllSafely}>
+          {running.includes("all") && <Spinner />}
+          Everything
+          <Kbd keys={`${MOD}R`} />
+        </button>
+        {REFRESH_AREAS.map((area) => {
+          const busy = area.jobs.some(isRunning);
+          return (
+            <button key={area.label} role="menuitem" className="link-button small" disabled={busy} onClick={() => area.run().catch(() => {})}>
+              {busy && <Spinner />}
+              {area.label}
+            </button>
+          );
+        })}
+      </span>
     </span>
   );
 }

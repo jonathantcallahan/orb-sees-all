@@ -1,23 +1,18 @@
 import { shockOrb } from "../orbEvents";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NewsItem } from "../schema";
-import { setTaskState, type Project, type StoredReading } from "../db";
+import { moveToInbox, setTaskState, type Project, type StoredReading } from "../db";
+import { inboxItemFromUpdate, newsKey, projectUpdateKey, type UpdateItem } from "../inboxMoves";
 import { stateOf, type TaskState } from "../tasks";
-import { refreshReading } from "../jobs";
 import { projectName } from "../projects";
+import { updateLabel } from "../reading";
 import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
-import { ExternalLink, RefreshButton, Reveal, Spinner } from "./common";
+import { ExternalLink, Reveal, Spinner } from "./common";
 import { ExplainChat } from "./ExplainChat";
 import { DockedChat, useChatDock } from "./chatDock";
 
-interface Update {
-  key: string;
-  label: string;
-  text: string;
-  link?: string | null;
-  date?: string | null;
-}
+type Update = UpdateItem;
 
 /** Project updates and news, newest first. */
 function collectUpdates(projects: Project[], news: NewsItem[]): Update[] {
@@ -25,15 +20,14 @@ function collectUpdates(projects: Project[], news: NewsItem[]): Update[] {
     .filter((p) => !p.hidden)
     .flatMap((p) =>
       (p.snapshot?.recent_updates ?? []).map((u) => ({
-        // Keyed by permalink (or text) so read state survives refreshes.
-        key: `update:${u.link ?? `${p.channel_id}:${u.summary}`}`,
+        key: projectUpdateKey(p.channel_id, u),
         label: projectName(p),
         text: u.summary,
         link: u.link,
         date: u.date,
       })),
     );
-  const fromNews = news.map((n) => ({ key: `update:${n.id}`, label: n.where ?? "News", text: n.headline, link: n.link, date: n.date }));
+  const fromNews = news.map((n) => ({ key: newsKey(n), label: updateLabel(n.where), text: n.headline, link: n.link, date: n.date }));
   return [...fromProjects, ...fromNews].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 }
 
@@ -49,12 +43,15 @@ function sourceLabel(link: string): string {
 const ADVANCE_MS = 230;
 
 /**
- * Updates as a stack of cards, the newest on top. Marking one read slides it off to the right,
- * fading, its button turning to "✓ Read"; the cards behind glide forward into place, one a hair
- * after the other, and the new update's text fades in on the card that rose.
+ * Updates as a stack of cards, the newest on top. Dismissing one, or moving it to the inbox, slides
+ * it off to the right, fading, its button turning to "✓ Dismissed" or "✓ Moved"; the cards behind
+ * glide forward into place, one a hair after the other, and the new update's text fades in on the
+ * card that rose.
  */
-function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Update) => Promise<void> }) {
-  const [leaving, setLeaving] = useState(false);
+function UpdateStack({ updates, onRead, onMove }: { updates: Update[]; onRead: (u: Update) => Promise<void>; onMove: (u: Update) => Promise<void> }) {
+  /** How the top card is leaving, while it does. */
+  const [leavingBy, setLeavingBy] = useState<"dismiss" | "move" | null>(null);
+  const leaving = leavingBy !== null;
   /** The update whose Explain this chat is open. */
   const [explaining, setExplaining] = useState<Update | null>(null);
   // In the Detail view the chat opens in the dock beside the updates, not as a window.
@@ -65,6 +62,19 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
   /** The top card arrived by the stack moving up, so it doesn't also slide in. */
   const [advanced, setAdvanced] = useState(false);
   const top = updates[0];
+  const leave = (by: "dismiss" | "move") => {
+    setLeavingBy(by);
+    shockOrb();
+    // The stack moves up before the update is removed; the card that rose is the next one.
+    setTimeout(
+      () =>
+        (by === "move" ? onMove : onRead)(top).finally(() => {
+          setAdvanced(true);
+          setLeavingBy(null);
+        }),
+      ADVANCE_MS,
+    );
+  };
   // Up to two cards peek out behind the top one, as plain edges the same size as it.
   const behind = Math.min(updates.length - 1, 2);
   // While the top card leaves, each card behind moves a step forward.
@@ -138,23 +148,15 @@ function UpdateStack({ updates, onRead }: { updates: Update[]; onRead: (u: Updat
               Explain
             </button>
             <button
-              className="link-button small mark-read"
+              className="link-button small move-to-inbox"
+              title="Put this in your inbox, to draft a response or make it a task"
               disabled={leaving}
-              onClick={() => {
-                setLeaving(true);
-                shockOrb();
-                // The stack moves up before the read update is removed; the card that rose is the next one.
-                setTimeout(
-                  () =>
-                    onRead(top).finally(() => {
-                      setAdvanced(true);
-                      setLeaving(false);
-                    }),
-                  ADVANCE_MS,
-                );
-              }}
+              onClick={() => leave("move")}
             >
-              {leaving ? <span className="read-tick">✓ Dismissed</span> : "Dismiss"}
+              {leavingBy === "move" ? <span className="read-tick">✓ Moved</span> : "Move to inbox"}
+            </button>
+            <button className="link-button small mark-read" disabled={leaving} onClick={() => leave("dismiss")}>
+              {leavingBy === "dismiss" ? <span className="read-tick">✓ Dismissed</span> : "Dismiss"}
             </button>
           </span>
         </div>
@@ -175,6 +177,7 @@ export function DailyReading({
   projects,
   news,
   states,
+  inbox,
   busy,
   updatesBusy = false,
   alwaysOpen = false,
@@ -188,6 +191,8 @@ export function DailyReading({
   projects: Project[];
   news: NewsItem[];
   states: Map<string, TaskState>;
+  /** Ids of what's in the inbox: an update moved there shows there, not here. */
+  inbox: Set<string>;
   busy: boolean;
   onChange: () => void;
 }) {
@@ -198,7 +203,7 @@ export function DailyReading({
   useEffect(() => localStorage.setItem("updates-open", updatesOpen ? "1" : "0"), [updatesOpen]);
   const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
-  const updates = collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed);
+  const updates = collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed && !inbox.has(u.key));
 
   return (
     <>
@@ -206,7 +211,12 @@ export function DailyReading({
         <header className="column-header">
           <h4 className="section-title">Daily briefing</h4>
           <div className="row reading-header-actions">
-            <RefreshButton busy={busy} status={status} title="Write today's briefing again" onClick={() => refreshReading().catch(() => {})} />
+            {/* Written again from the bottom bar's Refresh menu; a spinner here while it's written. */}
+            {busy && (
+              <span className="section-spinner" aria-label={status ?? "Writing the briefing"}>
+                <Spinner />
+              </span>
+            )}
             {!alwaysOpen && <Disclosure open={open} what="the briefing" onToggle={() => setOpen(!open)} />}
           </div>
         </header>
@@ -245,6 +255,10 @@ export function DailyReading({
               updates={updates}
               onRead={async (u) => {
                 await setTaskState(u.key, { dismissed: true });
+                onChange();
+              }}
+              onMove={async (u) => {
+                await moveToInbox(inboxItemFromUpdate(u));
                 onChange();
               }}
             />

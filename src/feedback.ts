@@ -97,6 +97,8 @@ export const label = {
   plan: (title: string) => `Changed the plan for ${quote(title)}`,
   message: (to: string) => `Edited the message to ${to}`,
   unlink: (channel: string) => `Unlinked #${channel}`,
+  sessionUnlink: (title: string) => `Disconnected the Claude session from ${quote(title)}`,
+  sessionNotTask: (title: string) => `Dismissed ${quote(title)}, made from a Claude session`,
 };
 
 // ---- what Demian has learned, for the prompts
@@ -133,6 +135,10 @@ export function describeFeedback(f: db.Feedback): string | null {
       }
       case "message_edit":
         return `Rewrote a drafted message before sending. Draft: "${short(str(field(f.before, "text")), 200)}". Sent: "${short(str(field(f.after, "text")), 200)}".`;
+      case "session_unlink":
+        return field(f.before, "created")
+          ? `Dismissed "${title}", the task Demian made from their Claude Code session "${str(field(f.before, "session"))}": that session isn't work they track as a task.`
+          : `Disconnected their Claude Code session "${str(field(f.before, "session"))}" from "${title}": the session isn't that task's work.`;
       case "channel_unlink":
         return `Unlinked #${str(field(f.before, "channel"))} from "${str(field(f.before, "project"))}": it isn't part of this project.`;
       case "project_focus":

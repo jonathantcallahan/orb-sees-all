@@ -1,6 +1,7 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
 import type { Blocker, ManualAssessment, Priority } from "./schema";
 import { projectName } from "./projects";
+import { newsKey, projectUpdateKey } from "./inboxMoves";
 import { blockerKey, myBlockingIds, PRIORITY_RANK, stateOf, taskPriority, type TaskState } from "./tasks";
 
 export interface ReadingInput {
@@ -41,6 +42,8 @@ export function readingContext(r: ReadingInput) {
     return !st.done && !st.dismissed;
   };
   const openBlockers = (list: Blocker[] = []) => list.filter((b) => !stateOf(r.states, blockerKey(b.id)).dismissed);
+  // An update you moved to the inbox is in replies_waiting now, not an update as well.
+  const inInbox = new Set(r.adhoc.replies.map((x) => x.id));
 
   const key = r.projects
     .filter((p) => !p.hidden && p.snapshot)
@@ -68,6 +71,7 @@ export function readingContext(r: ReadingInput) {
       blocked_on_me: (s.blockers ?? []).filter((b) => b.owners.some((o) => o.is_me)).map((b) => b.what),
       blocked_on_others: (s.blockers ?? []).filter((b) => !b.owners.some((o) => o.is_me)).map((b) => `${b.what} (${b.owners.map((o) => o.name).join(", ")})`),
       recent_updates: [...(s.recent_updates ?? [])]
+        .filter((u) => !inInbox.has(projectUpdateKey(p.channel_id, u)))
         .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
         .slice(0, MAX_UPDATES)
         .map((u) => ({ what: u.summary, date: u.date ?? null })),
@@ -127,6 +131,35 @@ export function readingContext(r: ReadingInput) {
       .sort((a, b) => (b.received ?? "").localeCompare(a.received ?? ""))
       .slice(0, MAX_REPLIES)
       .map((x) => ({ from: x.from, about: x.summary, where: x.where ?? null, received: x.received?.slice(0, 10) ?? null })),
-    news: r.adhoc.news.slice(0, MAX_NEWS).map((n) => ({ what: n.headline, date: n.date ?? null })),
+    news: r.adhoc.news.filter((n) => !inInbox.has(newsKey(n))).slice(0, MAX_NEWS).map((n) => ({ what: n.headline, date: n.date ?? null })),
   };
+}
+
+/** What mail clients put before a subject, and what calendar invites do. */
+const REPLY_PREFIX = /^(?:re|fwd?|fw|aw)\s*:\s*/i;
+const INVITE_PREFIX = /^(?:invitation|updated invitation|accepted|declined|tentatively accepted|canceled event|cancelled event)\s*:\s*/i;
+/** An invite's "@ Mon Nov 17, 2026 10am - 11am (CST) (…)" tail. */
+const INVITE_WHEN = /\s+@\s+(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\b.*$/is;
+
+/**
+ * An update's eyebrow from where it was posted: "#channel", or "Email: " and the subject without
+ * what mail clients put around it (Re:, Fwd:, and a calendar invite's "Invitation:" and its "@ date"
+ * tail), so it fits on one line. A long one is still cut short where it's shown. An "@" in the
+ * subject itself ("Lunch @ the new office") stays.
+ */
+export function updateLabel(where: string | null | undefined): string {
+  if (!where) return "News";
+  const email = where.match(/^email:\s*(.*)$/is);
+  if (!email) return where.trim();
+  let subject = email[1].trim();
+  let invite = false;
+  for (;;) {
+    if (REPLY_PREFIX.test(subject)) subject = subject.replace(REPLY_PREFIX, "");
+    else if (INVITE_PREFIX.test(subject)) {
+      subject = subject.replace(INVITE_PREFIX, "");
+      invite = true;
+    } else break;
+  }
+  subject = (invite ? subject.replace(/\s+@\s.*$/s, "") : subject.replace(INVITE_WHEN, "")).trim();
+  return subject ? `Email: ${subject}` : "Email";
 }

@@ -6,17 +6,18 @@ import * as db from "../db";
 import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
 import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
-import { codeRequests, currentSessionSteps, linkSession, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { codeRequests, connectSession, currentSessionSteps, listSessions, linkSession, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
 import { parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmOutcome } from "../selfDm";
-import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, GlobalAction, SameWork, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
-import { blockerKey, longTitled, stateOf } from "../tasks";
+import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { blockerKey, longTitled, sinceWhen, stateOf } from "../tasks";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { codeFor, codeNote, githubReposOf, projectOfTask, resolveCheckout, type CodeSource } from "../code";
 import { acceptedMerges } from "../duplicates";
+import { acceptedSessionMatches, nextScanSince, scanCandidates, scanEntry, scanSkips } from "../sessionScan";
 import { JobQueue } from "./queue";
 import { collectRepoState } from "./repos";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
@@ -264,7 +265,8 @@ export async function refreshAdhoc(): Promise<void> {
   const uid = await userId();
   return track("adhoc", (status) =>
     logged("adhoc", null, async () => {
-      const previous = await db.getAdhoc();
+      // As the refresh last wrote it: it writes the inbox afresh, and moved updates are kept apart.
+      const previous = await db.getStoredAdhoc();
       const startedAt = new Date();
       const index = await loadTaskIndex();
       const [learning, descriptions, priorities] = await Promise.all([learningFor(null, ["tasks", "priority"]), db.getDescriptionOverrides(), db.getPriorityOverrides()]);
@@ -704,6 +706,83 @@ export function dedupeTasks(focus?: string[]): Promise<void> {
   );
 }
 
+/** The first session scan looks back this far; later ones, from where the one before left off (see nextScanSince). */
+const SCAN_FIRST_DAYS = 7;
+const SCAN_MARGIN_MS = 10 * 60_000;
+/** Most sessions one scan looks at (the newest; the rest wait for the next), and most tasks it adds, so a busy week doesn't flood the list. */
+const SCAN_SESSIONS = 20;
+const SCAN_NEW_TASKS = 5;
+
+/**
+ * Looks through your Claude Code sessions with activity since the last scan (see sessionScan.ts):
+ * each one that's an open task's work is connected to it, and each that's unfinished work no task
+ * covers becomes a task of yours, connected to it. Resolves with the tasks it added, for assessing.
+ */
+export function scanClaudeSessions(): Promise<string[]> {
+  return track("sessions", (status) =>
+    logged("sessions", "Claude Code sessions", async () => {
+      const now = Date.now();
+      const since = Number((await db.getSetting("session_scan_since")) ?? 0) || now - SCAN_FIRST_DAYS * 86_400_000;
+      const [decisions, linksBefore] = await Promise.all([db.getSessionScan(), db.getSessionLinks()]);
+      // One more than a scan takes, to know whether more are waiting.
+      const listed = await listSessions(since, SCAN_SESSIONS + 1, scanSkips(decisions, linksBefore));
+      const waiting = scanCandidates(listed, decisions);
+      const sessions = waiting.slice(0, SCAN_SESSIONS);
+      const decided = new Set<string>();
+      const done = () => db.setSetting("session_scan_since", String(nextScanSince({ now, since, more: listed.length > SCAN_SESSIONS, waiting, decided, marginMs: SCAN_MARGIN_MS })));
+      if (!sessions.length) {
+        await done();
+        return { value: [] };
+      }
+      const [index, projects, lessons] = await Promise.all([loadTaskIndex(), db.listProjects(), lessonsFor(["tasks"])]);
+      const tracked = projects.filter((p) => !p.hidden);
+      status(`Looking through ${sessions.length} Claude Code session${sessions.length === 1 ? "" : "s"}`);
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: sessionScanPrompt({
+          sessions: sessions.map((s) => scanEntry(s, sinceWhen(new Date(s.modifiedMs).toISOString()))),
+          index,
+          projects: tracked.map((p) => ({ id: p.channel_id, name: projectName(p), folders: p.local_repos })),
+          lessons,
+        }),
+        schema: SessionScan,
+        tools: [],
+        // Judging what a conversation was for against many short entries: as for merging, no tools.
+        model: "sonnet",
+        maxTurns: 2,
+      });
+      // Read now, not before Claude answered: a task you opened a chat on meanwhile follows its own session.
+      const links = await db.getSessionLinks();
+      const matches = acceptedSessionMatches(data.sessions, {
+        sessions,
+        open: new Set(index.map((e) => e.id)),
+        // Any task with a link already follows, or is about to follow, a session of its own.
+        linked: new Set(Object.keys(links)),
+        projects: new Set(tracked.map((p) => p.channel_id)),
+        maxNew: SCAN_NEW_TASKS,
+      });
+      const created: string[] = [];
+      for (const m of matches) {
+        if (m.action === "connect") {
+          await connectSession(m.taskId, m.session, { session: m.session.title, created: false });
+          await db.saveSessionScanDecision(m.session.sessionId, { decision: "connected", taskId: m.taskId, at: now });
+        } else if (m.action === "new") {
+          const id = await db.addManualTask(m.title, m.projectId, m.description);
+          await connectSession(id, m.session, { session: m.session.title, created: true });
+          await db.saveSessionScanDecision(m.session.sessionId, { decision: "created", taskId: id, at: now });
+          created.push(id);
+        } else {
+          await db.saveSessionScanDecision(m.session.sessionId, { decision: "skipped", at: m.session.modifiedMs });
+        }
+        decided.add(m.session.sessionId);
+      }
+      await done();
+      if (matches.some((m) => m.action !== "skip")) bump();
+      return { value: created, costUsd };
+    }),
+  );
+}
+
 /** Has Claude critically re-examine a task: captured right, still needed, not a duplicate. */
 export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTasks: CheckTaskInput["otherTasks"]): Promise<void> {
   return track(`taskcheck:${taskId}`, (status) =>
@@ -910,7 +989,7 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         // Asked for a doc: say plainly how, every time. A session that once decided it can't make
         // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
         const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
-        const turn = await runSessionTurn({ signal: stopper.signal, prompt: asked, tools: sessionTools(byUser), ...SESSION_MODEL, resume: link?.sessionId, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
+        const turn = await runSessionTurn({ signal: stopper.signal, prompt: asked, tools: sessionTools(byUser), ...SESSION_MODEL, resume: link?.sessionId, cwd: link?.cwd, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
           // transcript's copy arrives.
           window.clearTimeout(flush);
@@ -1497,6 +1576,11 @@ export function refreshAll(): Promise<void> {
         checkWatchedTopics(),
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
+      // Your own Claude Code sessions: connected to the tasks they're the work of (including any this
+      // refresh just found), or made tasks of their own, which are then assessed like ones you add.
+      status("Looking through your Claude Code sessions");
+      const fromSessions = await scanClaudeSessions().catch(() => [] as string[]);
+      if (fromSessions.length) await assessPendingTasks().catch(() => {});
       // Refreshes ran side by side, so two may have added the same work; and this catches any already there.
       status("Merging duplicate tasks");
       await dedupeTasks().catch(() => {});

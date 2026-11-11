@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("./db", () => ({}));
+const links: Record<string, { sessionId?: string }> = {};
+vi.mock("./db", () => ({ getSessionLinks: async () => links }));
 
-const { parseProgress, parsePlan, currentPlan, readableReply, parseSends } = await import("./sessions");
+const { parseProgress, parsePlan, currentPlan, readableReply, parseSends, rankSessions, connectableSessions } = await import("./sessions");
+const { invoke } = await import("@tauri-apps/api/core");
 const { taskChatPrompt, sessionMarker, resumeSessionUrl } = await import("./openInClaude");
 
 describe("session progress", () => {
@@ -489,5 +491,36 @@ describe("draft edits", () => {
     expect(withEdit(edits, "b", "Other", "Orig")).toEqual({ a: "Hi Ana, here's the sheet", b: "Other" });
     expect(withEdit(edits, "a", "Hi, here's the sheet", "Hi, here's the sheet")).toEqual({});
     expect(withEdit(edits, "a", null, "Hi, here's the sheet")).toEqual({});
+  });
+});
+
+describe("connecting a session you started yourself", () => {
+  const session = (sessionId: string, title: string, modifiedMs: number, prompt = "") => ({ path: `/p/${sessionId}.jsonl`, sessionId, modifiedMs, cwd: "/Users/me/repo", title, prompt, lastAsk: null, lastReply: null });
+
+  it("offers likely matches first, then the rest newest first", () => {
+    const ranked = rankSessions({ title: "Fix the checkout publisher filter", description: "Refunds drop publishers" }, [
+      session("old", "Lunch plans", 1),
+      session("new", "Release notes", 3),
+      session("match", "Checkout filter", 2, "The publisher filter drops rows"),
+      session("weak", "Checkout copy", 4),
+    ]);
+    expect(ranked.map((r) => [r.session.sessionId, r.likely])).toEqual([
+      ["match", true],
+      ["weak", false],
+      ["new", false],
+      ["old", false],
+    ]);
+  });
+
+  it("leaves out sessions another task already follows", async () => {
+    links["t-other"] = { sessionId: "taken" };
+    links["t-1"] = { sessionId: "mine" };
+    links["t-new"] = {};
+    vi.mocked(invoke).mockResolvedValueOnce([session("mine", "B", 2), session("free", "C", 1)]);
+    const found = await connectableSessions("t-1", 100 * 86_400_000);
+    expect(found.map((s) => s.sessionId)).toEqual(["mine", "free"]);
+    // Left out before they're read, so they don't take up the list.
+    expect(invoke).toHaveBeenCalledWith("list_sessions", { sinceMs: 86 * 86_400_000, limit: 40, skip: { taken: Number.MAX_SAFE_INTEGER } });
+    for (const id of Object.keys(links)) delete links[id];
   });
 });

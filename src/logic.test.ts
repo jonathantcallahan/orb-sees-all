@@ -320,6 +320,8 @@ describe("calendar layout", () => {
   it("starts an hour before now early in the morning, before the usual 8am", () => {
     expect(dayRange([ev("a", [10, 0], [11, 0])], new Date(2026, 9, 29, 6, 30))).toEqual({ startHour: 5.5, endHour: 24 });
     expect(dayRange([], new Date(2026, 9, 29, 0, 20))).toEqual({ startHour: 0, endHour: 24 });
+    // Half an hour back, while the pomodoro timer is on.
+    expect(dayRange([], new Date(2026, 9, 29, 13, 15), 30)).toEqual({ startHour: 12.75, endHour: 24 });
   });
 
   it("clips a meeting that started before the grid", () => {
@@ -392,6 +394,26 @@ describe("readingContext", () => {
     });
     expect(ctx.projects).toHaveLength(1);
     expect(ctx.projects[0].blocked_on_others).toEqual([]);
+  });
+
+  it("lists an update you moved to the inbox as waiting on you, not as an update too", () => {
+    const moved = (id: string, summary: string) => ({ id, source: "slack" as const, from: "x", summary, where: null, received: "2026-10-29T08:00:00Z" });
+    const ctx = readingContext({
+      projects: [project({ snapshot: snapshot("P1") })],
+      adhoc: {
+        tasks: [],
+        replies: [moved("update:https://slack.com/p", "Dev-complete moved to Nov 17"), moved("update:n1", "Reorg announced")],
+        news: [{ id: "n1", headline: "Reorg announced" }, { id: "n2", headline: "Offsite booked" }],
+        refreshed_at: null,
+      },
+      manual: [],
+      assessments: new Map(),
+      states: new Map(),
+      today: "2026-10-29",
+    });
+    expect(ctx.projects[0].recent_updates.map((u) => u.what)).toEqual(["Kickoff held"]);
+    expect(ctx.news.map((n) => n.what)).toEqual(["Offsite booked"]);
+    expect(ctx.replies_waiting.map((r) => r.about)).toEqual(["Dev-complete moved to Nov 17", "Reorg announced"]);
   });
 
   it("uses the due dates you set, including taking one off", () => {

@@ -1,7 +1,9 @@
 import { withUpdate, type WatchedOutcome, type WatchedStatus, type WatchedTopic, type WatchedUpdate } from "./watched";
 import type { SessionLink } from "./sessions";
+import type { SessionScanDecision } from "./sessionScan";
 import Database from "@tauri-apps/plugin-sql";
 import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import { withMovedUpdates } from "./inboxMoves";
 import { foldProfile, projectName, type DiscoveryPlan, type ProjectChannel } from "./projects";
 import type { ProjectTracking } from "./jobs/tracking";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
@@ -358,10 +360,20 @@ export interface AdhocStore {
   refreshed_at: string | null;
 }
 
-export async function getAdhoc(): Promise<AdhocStore> {
+/** The Slack and email refresh's tasks, inbox and news, as it last wrote them. */
+export async function getStoredAdhoc(): Promise<AdhocStore> {
   const stored = json<Partial<AdhocStore>>(await getSetting("adhoc"));
   return { tasks: [], replies: [], news: [], refreshed_at: null, ...stored };
 }
+
+/** The Slack and email refresh's tasks, inbox and news, with the updates you moved to the inbox in it. */
+export async function getAdhoc(): Promise<AdhocStore> {
+  const [adhoc, moved] = await Promise.all([getStoredAdhoc(), getRows<QuickReply>("inbox_moves")]);
+  return { ...adhoc, replies: withMovedUpdates(adhoc.replies, Object.values(moved)) };
+}
+
+/** Puts an update in the inbox (see inboxMoves.ts), kept apart from what the refresh writes there. */
+export const moveToInbox = (item: QuickReply) => putRow("inbox_moves", item.id, item);
 
 // ---- daily reading and reply drafts
 
@@ -398,7 +410,9 @@ type Store =
   | "epic_children"
   | "merged_from"
   | "seen"
-  | "project_overrides";
+  | "inbox_moves"
+  | "project_overrides"
+  | "session_scan";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -504,6 +518,14 @@ export const saveProjectTracking = (projectId: string, tracking: ProjectTracking
 export const getSessionLinks = () => getRows<SessionLink>("session_links");
 
 export const saveSessionLink = (taskId: string, link: SessionLink) => putRow("session_links", taskId, link);
+
+/** Stops a task following its session (the session itself is left as it is). */
+export const deleteSessionLink = (taskId: string) => deleteRow("session_links", taskId);
+
+/** What the session scan decided for each Claude Code session it looked at, by session id (see sessionScan.ts). */
+export const getSessionScan = () => getRows<SessionScanDecision>("session_scan");
+
+export const saveSessionScanDecision = (sessionId: string, d: SessionScanDecision) => putRow("session_scan", sessionId, d);
 
 /** Changes part of a task's session link, keeping the rest as it is now (not as the caller last saw it). */
 export async function updateSessionLink(taskId: string, patch: Partial<SessionLink>) {
@@ -841,6 +863,7 @@ export type FeedbackKind =
   | "project_track"
   | "project_focus"
   | "channel_unlink"
+  | "session_unlink"
   | "note";
 
 export interface Feedback {

@@ -1,4 +1,5 @@
 import { baseSection, PLAN_RULES, SAME_WORK_RULE, STEP_RULE, TASK_RULES, TITLE_RULE, WRITING_RULES } from "./baseLessons";
+import type { scanEntry } from "./sessionScan";
 import type { IndexEntry } from "./taskIndex";
 import { GLOBAL_ACTION_DOCS } from "./openInClaude";
 import { slackTarget } from "./projects";
@@ -265,7 +266,7 @@ Return the full lists of what's still open: carried-over items that aren't resol
 - follow_up: the single next action that would close or advance the task. kind is one of "reply" (answer in the thread or email), "review" (read or review a doc, PR or design), "decide" (make a call others are waiting on), "do" (produce something: a ticket, doc, update), "schedule" (set up a meeting), "share" (send something to someone). action is one specific imperative sentence that names where and with what, e.g. "Reply in the #asset-store-eng thread with the Nov 17 dev-complete date".
 - ${ASSESSMENT_GUIDE}
 
-For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: <subject>"; date is when it was posted, as ISO 8601 date-time with offset. At most eight, most important first.
+For each news item: id is the message permalink or "gmail:<thread id>"; link is the Slack permalink or the Gmail URL "https://mail.google.com/mail/u/0/#all/<thread id>"; headline is under 12 words; detail is one sentence on why it matters to the user; where is "#channel" or "Email: " and the subject in at most six words, without prefixes like Re:, Fwd: or Invitation:; date is when it was posted, as ISO 8601 date-time with offset. At most eight, most important first.
 
 For each reply:
 - id: as for tasks, reusing the existing id for carried-over replies. from: the sender's name. summary: what they asked, in under 12 words. where: "#channel", "DM" or the email subject. received: when the message was sent, as ISO 8601 date-time with offset (e.g. "2026-10-29T14:05:00-07:00"). link: as for tasks.
@@ -651,6 +652,36 @@ Find the tasks that are the same work, so each piece of work shows once. ${SAME_
 For each set that's the same work, give the one to keep and the ones to fold into it. Keep the user's own task (an id starting "manual:") when the set has one; otherwise keep the one whose title and gist say most clearly what's to be done. why is one short sentence on what makes them the same work.
 
 ${JSON_ONLY} Shape: {"groups": [{"keep": string, "drop": [string], "why": string}]}, ids copied exactly from the list. No duplicates: "groups": [].`;
+}
+
+/**
+ * The session scan (see sessionScan.ts): for each of the user's recent Claude Code sessions, whether
+ * it's an open task's work, unfinished work that should be a task, or neither.
+ */
+export function sessionScanPrompt(p: {
+  sessions: ReturnType<typeof scanEntry>[];
+  index: IndexEntry[];
+  projects: { id: string; name: string; folders: string[] }[];
+  lessons: string[];
+}): string {
+  return `The user (${profile}) works in Claude Code sessions as well as in their planner. These are their sessions with activity since the planner last looked, newest first, as id, title, the folder it runs in, when it was last active, what they first asked, and where it got to (their latest message and Claude's latest reply):
+${p.sessions.map((s) => JSON.stringify(s)).join("\n")}
+
+These are all of their open tasks, from every source, as id, title, project and gist:
+${p.index.map((e) => JSON.stringify(e)).join("\n") || "(none)"}
+
+Their projects, as id, name and the code folders they work in:
+${p.projects.map((pr) => JSON.stringify(pr)).join("\n") || "(none)"}
+
+Decide what each session is:
+- "connect": it's the work of one of the open tasks: task_id is that task. ${SAME_WORK_RULE} A task follows one session, so connect each task to at most one: the session that's most clearly its work.
+- "new": it's work the user is still doing, or left unfinished, that no open task covers: a change, a document, a decision, a message or an investigation with something still to deliver. title: ${TITLE_RULE} description: two or three sentences on what's being done and what's left. project_id: the project it's clearly part of (the folder it runs in is a strong sign), otherwise null.
+- "skip": anything else: a question that was answered, a quick lookup or explanation, a test or experiment, work that's finished, or something that isn't the user's to track. When it isn't clear, skip.
+why: one short sentence.${
+    p.lessons.length ? `\n\nWhat the user has taught the planner about what counts as a task:\n${p.lessons.map((l) => `- ${l}`).join("\n")}` : ""
+  }
+
+${JSON_ONLY} Shape: {"sessions": [{"id": string, "action": "connect"|"new"|"skip", "task_id": string|null, "title": string|null, "description": string|null, "project_id": string|null, "why": string}]}, one entry per session, ids copied exactly from the lists.`;
 }
 
 export interface CheckTaskInput {

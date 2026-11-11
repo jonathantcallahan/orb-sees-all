@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TaskChatDockProvider, type TaskChatDock } from "./chatDock";
 import { isWindows, MOD } from "../platform";
 import { addManualTask, type AdhocStore, type ManualTask, type MergedTask, type Project, type StoredPlan } from "../db";
-import { assessPendingTasks, refreshAdhoc } from "../jobs";
+import { assessPendingTasks } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
 import { applyOrder, applyTaskState, formatMinutes, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName } from "../projects";
-import { CloseIcon, Kbd, RefreshButton, Updated } from "./common";
+import { CloseIcon, Kbd, Spinner, Updated } from "./common";
 import { getSetting, setSetting, setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
@@ -227,7 +227,7 @@ export function TaskColumn({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const tasksStatus = useJobStatus("adhoc", "assess");
+  const tasksStatus = useJobStatus("adhoc", "assess", "sessions");
   const [filter, setFilter] = useTaskFilter();
   const filtering = isFiltering(filter);
   /** Effective priority, matching the card's badge: tasks in P0 projects are critical. */
@@ -528,10 +528,12 @@ export function TaskColumn({
           <h2>Tasks</h2>
           <Updated at={adhoc.refreshed_at} />
         </div>
-        <RefreshButton busy={running.includes("adhoc") || running.includes("assess")} status={tasksStatus} title="Refresh tasks" onClick={() => {
-            refreshAdhoc().catch(() => {});
-            assessPendingTasks().catch(() => {});
-          }} />
+        {/* Refreshed from the bottom bar's Refresh menu; a spinner here while it runs. */}
+        {(running.includes("adhoc") || running.includes("assess") || running.includes("sessions")) && (
+          <span className="section-spinner" aria-label={tasksStatus ?? "Refreshing tasks"}>
+            <Spinner />
+          </span>
+        )}
         {headerExtra && <div className="header-extra">{headerExtra}</div>}
       </header>
   );

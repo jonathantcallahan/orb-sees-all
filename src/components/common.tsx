@@ -297,10 +297,11 @@ const SCRAMBLE_MS = 500;
 /**
  * Text that, when it changes, morphs from the old string into the new one: each letter flips
  * through random characters (some funky) and lands on its new letter at its own random moment,
- * all within half a second (or `duration`). With reduced motion it just changes.
+ * all within half a second (or `duration`). With reduced motion it just changes. It shimmers too
+ * (see .text-shimmer), as it's always something working.
  */
 export function ScrambleText({ text, duration = SCRAMBLE_MS, from }: { text: string; duration?: number; from?: string }) {
-  return <span className="scramble">{useScrambled(text, duration, from)}</span>;
+  return <span className="scramble text-shimmer">{useScrambled(text, duration, from)}</span>;
 }
 
 /** The scramble as a string (ScrambleText's), for places that can't hold a span, like a placeholder. */

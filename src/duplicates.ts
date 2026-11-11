@@ -19,7 +19,8 @@ const STOP = new Set(
   "the a an to for of and on in with from by at is be it this that your my our we you i me on up out about into get got any all can will".split(" "),
 );
 
-function words(text: string | null | undefined): Set<string> {
+/** The words that tell texts apart: lowercase, no short or common words, simple plurals folded. */
+export function words(text: string | null | undefined): Set<string> {
   return new Set(
     (text ?? "")
       .toLowerCase()

@@ -31,6 +31,8 @@ export interface RunLimits {
 export interface RunControl {
   limits?: RunLimits;
   signal?: AbortSignal;
+  /** The folder to run in, for a streaming run; otherwise the app's own work folder. */
+  cwd?: string;
 }
 
 export type CliRunner = (program: "claude" | "git" | "gh", args: string[], cwd?: string, input?: CliInput, control?: RunControl) => Promise<CliOutput>;
@@ -74,7 +76,7 @@ export const runCliStreaming: StreamingCliRunner = async (program, args, onLine,
       })
     : null;
   try {
-    return await invoke<CliOutput>("run_cli_stream", { streamId, program, args, input, limits: control?.limits });
+    return await invoke<CliOutput>("run_cli_stream", { streamId, program, args, cwd: control?.cwd, input, limits: control?.limits });
   } finally {
     unlisten?.();
     done();

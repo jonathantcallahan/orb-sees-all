@@ -2,15 +2,15 @@ import { revealTask } from "./TaskCard";
 import { showDetailTab } from "../viewMode";
 import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { setTaskState } from "../db";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
-import { refreshCalendar } from "../jobs";
 import type { CalendarDay, CalendarEvent } from "../schema";
 import { stateOf, type Pressure, type TaskState } from "../tasks";
-import { RefreshButton, Updated } from "./common";
+import { Spinner } from "./common";
 import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
+import { formatRemaining, restartPomodoro, SESSIONS, togglePomodoroPause, usePomodoro, usePomodoroSettings } from "../pomodoro";
 
 /** Pixels per minute on the day grid (72px an hour). */
 /**
@@ -51,13 +51,17 @@ function TimeParts({ date, minutes }: { date: Date; minutes: boolean }) {
 }
 const hourLabel = (h: number) => <TimeParts date={new Date(2000, 0, 1, h)} minutes={false} />;
 
-/** The current time, refreshed every minute so the now line moves. */
-function useNow(): Date {
+/**
+ * The current time, refreshed every `everyMs`. The calendar's is every few seconds: often enough
+ * that it and the now line move a pixel at a time (2.9px a minute is one about every 20s) instead
+ * of a few at once each minute.
+ */
+function useNow(everyMs = 3_000): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
+    const id = setInterval(() => setNow(new Date()), everyMs);
     return () => clearInterval(id);
-  }, []);
+  }, [everyMs]);
   return now;
 }
 
@@ -159,22 +163,28 @@ function MeetingCard({
 
 function DayGrid({
   events: all,
-  now,
   states,
+  pomodoroOn,
   onChange,
 }: {
   events: CalendarEvent[];
-  now: Date;
   states: Map<string, TaskState>;
+  /** The pomodoro timer is on: its current block is drawn under the meetings. */
+  pomodoroOn: boolean;
   onChange: () => void;
 }) {
+  // The time here, not in the column, so only the calendar redraws as it moves.
+  const now = useNow();
   // Meetings you declined don't take up space on your day.
   const events = all.filter((ev) => ev.my_response !== "declined");
   // The grid is the whole day, midnight to midnight, in its own scroll box under the header. It rests
   // an hour before now (see dayRange), so only the last hour of the past shows, and can be scrolled
-  // up to earlier in the day or down to midnight; see useRestingScroll.
+  // up to earlier in the day or down to midnight; see useRestingScroll. While the pomodoro timer is
+  // on, it takes room from the column, so the calendar rests only half an hour back.
   const range = { startHour: 0, endHour: 24 };
-  const restPx = dayRange(events, now).startHour * 60 * PX_PER_MIN;
+  // Both on whole pixels, and from the same time, so as the day goes on the calendar and the now
+  // line step together, one pixel at a time, and never shimmy against each other.
+  const restPx = wholePx(dayRange(events, now, pomodoroOn ? 30 : 60).startHour * 60 * PX_PER_MIN);
   // Every whole hour from the start on, midnight at the bottom included.
   const firstHour = Math.ceil(range.startHour);
   const hours = Array.from({ length: range.endHour - firstHour + 1 }, (_, i) => firstHour + i);
@@ -192,7 +202,7 @@ function DayGrid({
   const minutes = (range.endHour - range.startHour) * 60;
   // Where the now line sits, in px, and which hour labels its time would sit on top of: those step
   // aside (the Detail view shows the time beside the line; see .now-label).
-  const nowPx = nowTop != null ? nowTop * PX_PER_MIN : null;
+  const nowPx = nowTop != null ? wholePx(nowTop * PX_PER_MIN) : null;
   const nearNow = (h: number) => nowPx != null && Math.abs((h - range.startHour) * 60 * PX_PER_MIN - nowPx) < NOW_LABEL_CLEARANCE;
 
   const scroll = useRestingScroll(restPx, () => setHover(null));
@@ -206,6 +216,7 @@ function DayGrid({
         </div>
       ))}
       <div className="events">
+        {pomodoroOn && <PomodoroBlock range={range} />}
         {placed.map(({ event: ev, top, height, column, columns }) => {
           const past = new Date(ev.end) < now;
           const current = !past && new Date(ev.start) <= now;
@@ -279,14 +290,263 @@ function DayGrid({
   );
 }
 
+/**
+ * The pomodoro's current block on the calendar, from when it began to when it will end, under the
+ * meetings: no title, just a field of small dots (see PomodoroField), steady down to now and
+ * pulsing after, so it doesn't read as a meeting.
+ */
+function PomodoroBlock({ range }: { range: { startHour: number; endHour: number } }) {
+  // The timer ticks every second; only the block redraws for it, not the calendar around it.
+  const block = usePomodoro();
+  if (!block) return null;
+  // Placed on today, the day the calendar shows: a block running past midnight runs off its bottom.
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const minutesIn = (t: number) => Math.min(Math.max((t - midnight.getTime()) / 60_000 - range.startHour * 60, 0), (range.endHour - range.startHour) * 60);
+  const top = minutesIn(block.start);
+  const bottom = minutesIn(block.end);
+  if (bottom <= top) return null;
+  return (
+    <div
+      className={`pomodoro-block ${block.phase}`}
+      style={{ top: wholePx(top * PX_PER_MIN) + EVENT_INSET_TOP, height: Math.max(wholePx((bottom - top) * PX_PER_MIN) - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 4) }}
+      aria-hidden
+    >
+      <PomodoroField doneY={() => minutesIn(Date.now()) * PX_PER_MIN - wholePx(top * PX_PER_MIN) - EVENT_INSET_TOP} paused={block.paused} />
+    </div>
+  );
+}
+
+/** How often the pulsing dots are drawn (ms). */
+const PULSE_FRAME_MS = 50;
+/** The dot field's grid: a dot every 6px. */
+const FIELD_STEP = 6;
+/** How far the done part's edge wanders either way, and how deep the blend into pulsing dots is, in px. */
+const EDGE_WANDER = 5;
+const EDGE_BLEND = 14;
+
+/** A steady pseudo-random number in [0, 1) for a dot. */
+const dotRandom = (i: number, j: number, k: number) => {
+  const v = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453;
+  return v - Math.floor(v);
+};
+const smooth = (a: number, b: number, x: number) => {
+  const t = Math.min(Math.max((x - a) / (b - a), 0), 1);
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The pomodoro block's dots on the calendar. What's done of the block, from its top down to now,
+ * is a steady field of full dots; the rest, below the now line, pulse in and out, each dot on its
+ * own beat. The edge between them isn't a straight line: each column's edge bobs up and down a
+ * little on its own slow beat (smoothed with its neighbors', so nothing ripples sideways) and
+ * blends into the pulsing dots, so the front looks fluid as it moves down. Only whole dots are
+ * drawn: none where a meeting covers the field, even in part, so none shows cut by a meeting's edge
+ * or through a meeting that's over (drawn half see-through). Paused, or with reduced motion,
+ * everything holds still. Drawn on a canvas, as each dot's size changes on its own; its
+ * color comes from the CSS (see .pomodoro-field). \`doneY\` is how far down the block now is, in px.
+ */
+function PomodoroField({ doneY, paused }: { doneY: () => number; paused: boolean }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const latest = useRef({ doneY, paused });
+  latest.current = { doneY, paused };
+  /** Starts the drawing loop over now, at the right pace (see the effect below). */
+  const restart = useRef(() => {});
+  useEffect(() => {
+    const el = canvas.current!;
+    const ctx = el.getContext("2d")!;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let frame = 0;
+    let wait = 0;
+    let color = "";
+    let readAt = -Infinity;
+    // The meetings, as rects in the canvas's own px with a little margin: no dots under them.
+    let covered: { left: number; right: number; top: number; bottom: number }[] = [];
+    // The pulsing's clock: it runs only while the timer does.
+    let clock = 0;
+    let last = performance.now();
+    // Draws the field as it is now. The pulsing only moves on while the timer runs.
+    const paint = (now: number) => {
+      const { doneY, paused } = latest.current;
+      const still = paused || reduce;
+      if (!still) clock += Math.min(now - last, 100) / 1000;
+      last = now;
+      // The color follows the CSS (gray at rest, in color under the pointer), and the meetings can
+      // move: both are checked a few times a second.
+      if (now - readAt > 100) {
+        color = getComputedStyle(el).color;
+        const box = el.getBoundingClientRect();
+        covered = [...(el.closest(".events")?.querySelectorAll(".event-block") ?? [])].map((ev) => {
+          const r = ev.getBoundingClientRect();
+          return { left: r.left - box.left - 2, right: r.right - box.left + 2, top: r.top - box.top - 2, bottom: r.bottom - box.top + 2 };
+        });
+        readAt = now;
+      }
+      const dpr = window.devicePixelRatio || 1;
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (el.width !== Math.round(w * dpr) || el.height !== Math.round(h * dpr)) {
+        el.width = Math.round(w * dpr);
+        el.height = Math.round(h * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = color;
+      const done = doneY();
+      const cols = Math.floor(w / FIELD_STEP);
+      const rows = Math.floor(h / FIELD_STEP);
+      const x0 = FIELD_STEP / 2;
+      const y0 = (h - rows * FIELD_STEP + FIELD_STEP) / 2;
+      // Each column's edge: now, pushed a little up or down by two slow swells of its own, then
+      // eased toward its neighbors' so the front stays smooth.
+      const bob = Array.from({ length: cols }, (_, i) =>
+        0.6 * Math.sin(clock * (0.4 + 0.5 * dotRandom(i, 0, 3)) + dotRandom(i, 0, 4) * Math.PI * 2) +
+        0.4 * Math.sin(clock * (0.7 + 0.6 * dotRandom(i, 0, 5)) + dotRandom(i, 0, 6) * Math.PI * 2),
+      );
+      for (let i = 0; i < cols; i++) {
+        const x = x0 + i * FIELD_STEP;
+        const edge = done + EDGE_WANDER * (0.25 * (bob[i - 1] ?? bob[i]) + 0.5 * bob[i] + 0.25 * (bob[i + 1] ?? bob[i]));
+        for (let j = 0; j < rows; j++) {
+          const y = y0 + j * FIELD_STEP;
+          if (covered.some((r) => x > r.left && x < r.right && y > r.top && y < r.bottom)) continue;
+          // 0 in the done part, 1 well past its edge.
+          const pulsing = smooth(edge - EDGE_BLEND / 2, edge + EDGE_BLEND / 2, y);
+          // Each dot on its own beat, a few seconds long, from a speck to a full dot and back.
+          const beat = 0.5 + 0.5 * Math.sin(clock * (0.9 + 1.6 * dotRandom(i, j, 1)) + dotRandom(i, j, 2) * Math.PI * 2);
+          // Done: full dots (r 1, at 55%).
+          ctx.globalAlpha = 0.55 - pulsing * (0.45 - 0.3 * beat);
+          ctx.beginPath();
+          ctx.arc(x, y, 1 - pulsing * (0.65 - 0.65 * beat), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    };
+    // Pulsing is drawn about 20 times a second, plenty for dots that swell over a few seconds and
+    // far less work than every frame; standing still, once a second is enough for the edge.
+    const loop = (now: number) => {
+      paint(now);
+      wait = window.setTimeout(() => (frame = requestAnimationFrame(loop)), latest.current.paused || reduce ? 1000 : PULSE_FRAME_MS);
+    };
+    restart.current = () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(wait);
+      frame = requestAnimationFrame(loop);
+    };
+    // The block grows every second while paused and moves on Restart: drawn again at once at its new
+    // size, before it's shown, or the old drawing would show stretched until the next one.
+    const resized = new ResizeObserver(() => paint(performance.now()));
+    resized.observe(el);
+    loop(performance.now());
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(wait);
+      resized.disconnect();
+    };
+  }, []);
+  // Paused or carrying on: the loop changes pace straight away, not at its next once-a-second turn.
+  useEffect(() => restart.current(), [paused]);
+  return <canvas ref={canvas} className="pomodoro-field" aria-hidden />;
+}
+
+/**
+ * Where the series is: a small rounded square cut into quarters, one per focus session, read like
+ * text (the first two on top, the next two under them). Done sessions are filled (the one before a
+ * break as soon as the break starts), the one you're in light gray, the rest open; pointing at it
+ * shows Focus or Break under it. 15px, drawn on whole pixels with even quarters (6px each side of a
+ * 1px cross) so its lines stay crisp.
+ */
+function SeriesSquare({ session, focus, phase }: { session: number; focus: boolean; phase: string }) {
+  const clip = useId();
+  // The square is centered on its line, so it can land part way into a pixel, blurring its lines:
+  // nudge it back onto a whole one each time it's drawn (the timer redraws every second).
+  const svg = useRef<SVGSVGElement>(null);
+  useLayoutEffect(() => {
+    const el = svg.current;
+    if (!el) return;
+    const dpr = window.devicePixelRatio || 1;
+    const whole = (v: number) => Math.round(v * dpr) / dpr;
+    el.style.transform = "";
+    const { left, top } = el.getBoundingClientRect();
+    const dx = whole(left) - left;
+    const dy = whole(top) - top;
+    if (dx || dy) el.style.transform = `translate(${dx}px, ${dy}px)`;
+  });
+  const quarters = [
+    [0, 0],
+    [7.5, 0],
+    [0, 7.5],
+    [7.5, 7.5],
+  ];
+  return (
+    <span className="pomodoro-square">
+      <svg ref={svg} className="pomodoro-series" width="15" height="15" viewBox="0 0 15 15" role="img" aria-label={`${phase}, session ${session + 1} of ${SESSIONS}`}>
+        <clipPath id={clip}>
+          <rect x="0.5" y="0.5" width="14" height="14" rx="3" />
+        </clipPath>
+        <g clipPath={`url(#${CSS.escape(clip)})`}>
+          {quarters.map(([x, y], i) =>
+            i <= session ? <rect key={i} x={x} y={y} width="7.5" height="7.5" fill="currentColor" fillOpacity={i < session || !focus ? 1 : 0.45} /> : null,
+          )}
+        </g>
+        <rect x="0.5" y="0.5" width="14" height="14" rx="3" fill="none" stroke="currentColor" />
+        <path d="M7.5 0.5V14.5M0.5 7.5H14.5" stroke="currentColor" />
+      </svg>
+      <span className="card pomodoro-tip small" aria-hidden>
+        {phase}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The pomodoro timer, at the right of the calendar's heading: a square for the series (a quarter for each focus
+ * session, filled as they're done; pointing at it says Focus or Break), then the time left in the
+ * timestamps' gray. Pointing at the time shows Pause (Resume while paused) and Restart in a small
+ * menu under it, like Refresh's.
+ */
+function PomodoroTimer() {
+  // Ticking every second here, not in the column, so only the timer redraws.
+  const timer = usePomodoro();
+  if (!timer) return null;
+  const phase = timer.phase === "focus" ? "Focus" : "Break";
+  return (
+    <div className={`pomodoro ${timer.phase}${timer.paused ? " paused" : ""}`}>
+      <SeriesSquare session={timer.session} focus={timer.phase === "focus"} phase={phase} />
+      <span className="pomodoro-time-wrap">
+        <span className={`pomodoro-time timestamp${timer.paused ? "" : " text-shimmer"}`} role="timer" aria-label={`${phase}, ${formatRemaining(timer.remainingMs)} left${timer.paused ? ", paused" : ""}`}>
+          {formatRemaining(timer.remainingMs)}
+        </span>
+        <span className="card menu-card pomodoro-tip small" role="menu" aria-label="Pomodoro timer">
+          <button role="menuitem" className="link-button small" onClick={togglePomodoroPause}>
+            {timer.paused ? "Resume" : "Pause"}
+          </button>
+          <button role="menuitem" className="link-button small" onClick={restartPomodoro}>
+            Restart
+          </button>
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A length on whole pixels, so the calendar's scroll and what's drawn over it land on the same ones
+ * (a scroll position may not take part of a pixel) and step together.
+ */
+const wholePx = (px: number) => Math.round(px);
+
 /** How long the calendar takes to ease back to where it rests, after you've scrolled it and left. */
 const RETURN_MS = 1500;
+/** How long it takes to glide to a new resting point (the pomodoro timer turned on, say). */
+const GLIDE_MS = 700;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 /**
  * The calendar's scroll box: it sits at `restPx` (an hour before now), following it as the day goes
- * on. Scroll it yourself and it stays where you put it while the pointer is over it; leave, and it
- * eases back over a second and a half. Only your own scrolling (wheel, touch, keys) moves it off.
+ * on, a pixel at a time; a bigger move (the pomodoro timer turned on, waking from sleep) glides
+ * there instead. Scroll it yourself and it stays where you put it while the pointer is over it;
+ * leave, and it eases back over a second and a half. Only your own scrolling (wheel, touch, keys)
+ * moves it off.
  */
 function useRestingScroll(restPx: number, onUserScroll: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -296,9 +556,34 @@ function useRestingScroll(restPx: number, onUserScroll: () => void) {
   const away = useRef(false);
   const frame = useRef(0);
   const stopReturn = () => cancelAnimationFrame(frame.current);
-  // At rest it follows the resting point, minute by minute.
+  /** Placed at its first resting point yet. */
+  const placed = useRef(false);
+  // Eases from where it is to the resting point (as it is each frame) over `ms`, then is at rest.
+  const easeBack = (el: HTMLDivElement, ms: number) => {
+    const from = el.scrollTop;
+    const begin = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - begin) / ms);
+      el.scrollTop = from + (restPxRef.current - from) * easeInOut(t);
+      if (t < 1) frame.current = requestAnimationFrame(step);
+      else {
+        frame.current = 0;
+        away.current = false;
+      }
+    };
+    stopReturn();
+    frame.current = requestAnimationFrame(step);
+  };
+  // At rest it follows the resting point: a pixel at a time, or gliding when it's further.
   useLayoutEffect(() => {
-    if (!away.current && !frame.current && ref.current) ref.current.scrollTop = restPx;
+    const el = ref.current;
+    // Scrolled away, or already easing toward it (which follows the point as it moves).
+    if (!el || away.current || frame.current) return;
+    // Where it can actually get to: late in the day the point is past the bottom of the scroll.
+    const reachable = Math.min(restPx, Math.max(0, el.scrollHeight - el.clientHeight));
+    if (!placed.current || Math.abs(el.scrollTop - reachable) <= 2) el.scrollTop = restPx;
+    else easeBack(el, GLIDE_MS);
+    placed.current = true;
   }, [restPx]);
   useEffect(() => stopReturn, []);
   const leftAlone = () => {
@@ -316,20 +601,7 @@ function useRestingScroll(restPx: number, onUserScroll: () => void) {
     },
     onMouseLeave: () => {
       const el = ref.current;
-      if (!away.current || !el) return;
-      const from = el.scrollTop;
-      const begin = performance.now();
-      const step = (now: number) => {
-        const t = Math.min(1, (now - begin) / RETURN_MS);
-        el.scrollTop = from + (restPxRef.current - from) * easeInOut(t);
-        if (t < 1) frame.current = requestAnimationFrame(step);
-        else {
-          frame.current = 0;
-          away.current = false;
-        }
-      };
-      stopReturn();
-      frame.current = requestAnimationFrame(step);
+      if (away.current && el) easeBack(el, RETURN_MS);
     },
   };
 }
@@ -352,26 +624,35 @@ export function TodayColumn({
   busy: boolean;
   onChange: () => void;
 }) {
-  const now = useNow();
+  // The day's name changes at midnight; checking each minute is enough.
+  const today = useNow(60_000);
+  const pomodoroOn = usePomodoroSettings().on;
   const calendarStatus = useJobStatus("calendar");
   const events = calendar?.day.events ?? [];
 
   return (
     <section className="column today-column">
       <PressureBlob pressure={pressure} look={orbLook} working={working} />
+      {/* The day, "Tuesday November 10" with the weekday in the darker text color, and the pomodoro timer at the right. */}
       <header className="column-header">
         <div>
           <h2>
-            Today <span className="timestamp today-date">{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</span>
+            <span className="today-weekday">{today.toLocaleDateString([], { weekday: "long" })}</span>{" "}
+            <span className="timestamp today-date">{today.toLocaleDateString([], { month: "long", day: "numeric" })}</span>
+            {/* Refreshed from the bottom bar's Refresh menu; a spinner here while it runs. */}
+            {busy && (
+              <span className="section-spinner" aria-label={calendarStatus ?? "Refreshing the calendar"}>
+                <Spinner />
+              </span>
+            )}
           </h2>
-          <Updated at={calendar?.refreshed_at} />
         </div>
-        <RefreshButton busy={busy} status={calendarStatus} title="Refresh calendar" onClick={() => refreshCalendar().catch(() => {})} />
+        {pomodoroOn && <PomodoroTimer />}
       </header>
 
       {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}
       {calendar && events.length === 0 && <p className="muted small">No meetings today.</p>}
-      {calendar && <DayGrid events={events} now={now} states={taskStates} onChange={onChange} />}
+      {calendar && <DayGrid events={events} states={taskStates} pomodoroOn={pomodoroOn} onChange={onChange} />}
 
     </section>
   );

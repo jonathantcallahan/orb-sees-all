@@ -358,6 +358,18 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   animation: badge-shimmer 1.8s linear infinite;
 }
 @keyframes badge-shimmer { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+/* A soft light sweeping across text while something works, like Claude's own text: the jumbling
+   lines (ScrambleText, the chat's status) and the pomodoro's running time. The sweep goes a
+   quarter of the way from the text's color toward the page's text color, so it shows on gray in
+   both themes; on text already that color (onboarding's line) it dims toward the page instead. */
+.text-shimmer {
+  --shimmer-to: var(--text);
+  background: linear-gradient(100deg, currentColor 0%, currentColor 36%, color-mix(in srgb, currentColor 75%, var(--shimmer-to)) 50%, currentColor 64%, currentColor 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: badge-shimmer 1.8s linear infinite;
+}
+.onboarding .text-shimmer { --shimmer-to: var(--bg); }
+@media (prefers-reduced-motion: reduce) { .text-shimmer { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .status-badge .shimmer { animation: none; } }
 .status-badge.blocked { color: var(--red); background: var(--red-bg); border-color: transparent; }
 .status-badge.done { color: var(--green); background: var(--green-bg); border-color: transparent; }
@@ -495,6 +507,55 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .event-prep { display: inline-flex; gap: 3px; align-items: center; vertical-align: middle; }
 .prep-dot { width: 6px; height: 6px; border-radius: 50%; box-sizing: border-box; border: 1px solid currentColor; }
 .prep-dot.done { background: currentColor; }
+/* The pomodoro timer, at the right of the calendar's heading, on its line: the series' square,
+   then the time left in the timestamps' gray, 8px on. Pointing at the square says Focus or Break,
+   and pointing at the time shows Pause and Restart, each in a small card under it. */
+.pomodoro {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 21px; font-size: 12px; flex-shrink: 0;
+  --pom-tint: var(--accent);
+}
+.pomodoro.break { --pom-tint: var(--green); }
+/* The time left in the timestamps' gray (it's a .timestamp too), shimmering as it runs (see
+   .text-shimmer). */
+/* It opens Pause and Restart, like the refresh button opens its menu: the same pointing hand, and
+   not selectable as text. The square beside it, which only names the block, keeps the arrow. */
+.pomodoro-time { font-variant-numeric: tabular-nums; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.pomodoro-square { cursor: default; user-select: none; -webkit-user-select: none; }
+/* The small cards by the square (Focus or Break, under it) and the time (Pause and Restart, over
+   it), each shown while you point at what it's by (or, for the buttons, tab into them). An
+   invisible strip bridges the gap between the buttons' card and the time, so the pointer can reach
+   it. */
+.pomodoro-time-wrap, .pomodoro-square { position: relative; display: inline-flex; }
+.pomodoro-tip {
+  position: absolute; top: calc(100% + 6px); left: 50%; z-index: 3; display: flex; gap: 10px; padding: 4px 10px;
+  white-space: nowrap; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  opacity: 0; pointer-events: none; transform: translate(-50%, -3px); transition: opacity 120ms ease, transform 120ms ease;
+}
+.pomodoro-tip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 8px; }
+:is(.pomodoro-time-wrap, .pomodoro-square):is(:hover, :focus-within) > .pomodoro-tip { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+/* Pause and Restart: a menu like Refresh's (see .menu-card), opening the way it does, above and to
+   the right, its options lined up with the time. Narrower than Refresh's, so it stays inside the
+   column (which clips past the rail), over the rule. The strip bridging the gap is under it. */
+.pomodoro-time-wrap > .pomodoro-tip { top: auto; bottom: calc(100% + 8px); left: -12px; transform: translateY(3px); }
+.pomodoro-time-wrap > .pomodoro-tip::after { bottom: auto; top: 100%; height: 10px; }
+.pomodoro-tip.menu-card { flex-direction: column; gap: 2px; padding: 6px 4px; min-width: 96px; }
+.pomodoro-time-wrap:is(:hover, :focus-within) > .pomodoro-tip { transform: none; }
+.pomodoro-square > .pomodoro-tip { color: var(--muted); }
+/* The series' square (see SeriesSquare): its lines and done quarters the gray of the window's
+   buttons at rest (their text-color 18%, here mixed into the page so lines over fills don't double). */
+.pomodoro-series { flex-shrink: 0; color: color-mix(in srgb, var(--text) 18%, var(--bg)); }
+@media (prefers-reduced-motion: reduce) { .pomodoro-tip { transition: none; } }
+/* The pomodoro's block on the calendar: no title, no border and no fill, just a field of small
+   dots (see PomodoroField) across the calendar's width, gray at rest like the meetings over it, in
+   color while you point at the calendar. Focus is in the accent, a break in green. The meetings
+   stop short of the right edge; it reaches it, and in the Detail view runs on to just short of
+   the rule beside the calendar (17px past the column's edge). */
+.pomodoro-block { position: absolute; left: 0; right: -4px; pointer-events: none; --pom-tint: var(--accent); }
+.detail-layout .pomodoro-block { right: -19px; }
+.pomodoro-block.break { --pom-tint: var(--green); }
+.day-grid:not(:hover) .pomodoro-block { --pom-tint: var(--muted); }
+.pomodoro-field { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--pom-tint); }
+
 /* The current time: a 1px line, the same weight as the hour lines, in red. */
 .now-line { position: absolute; left: 44px; right: 0; height: 0; border-top: 1px solid var(--red); z-index: 2; pointer-events: none; }
 
@@ -629,7 +690,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   to { transform: translateX(36%) scale(0.985); opacity: 0; }
 }
 /* A barely-there press under the click. */
-.update-card:has(.mark-read:active) { transform: scale(0.992); transition: transform 80ms ease-out; }
+.update-card:has(:is(.mark-read, .move-to-inbox):active) { transform: scale(0.992); transition: transform 80ms ease-out; }
 /* The button's confirmation, fading in. */
 .read-tick { color: var(--green); animation: read-tick 140ms ease-out; }
 @keyframes read-tick { from { opacity: 0; } }
@@ -644,16 +705,21 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
   .update-card-behind { transition: none; }
 }
 @keyframes update-fade { to { opacity: 0; } }
-.update-meta { display: flex; justify-content: space-between; gap: 8px; }
-/* The time a little smaller than the label beside it, like the inbox's. */
-.update-meta .timestamp { font-size: 11px; }
+.update-meta { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+/* The eyebrow stays on one line, cut short with an ellipsis if it's too long. */
+.update-meta .update-label { min-width: 0; margin-right: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The time a little smaller than the label beside it, like the inbox's, and never broken. */
+.update-meta .timestamp { font-size: 11px; flex-shrink: 0; white-space: nowrap; }
 .update-text { font-size: 13px; margin: 0; }
 .update-links { display: flex; gap: 12px; }
 .update-links .source-link { color: var(--muted); }
-/* Explain and Dismiss stay gray until the pointer is over the update. */
-.update-card :is(.mark-read, .explain-link) { color: var(--muted); transition: color 0.15s ease; }
-.update-card:hover :is(.mark-read, .explain-link) { color: var(--accent); }
-.update-actions { display: flex; justify-content: space-between; align-items: center; }
+/* Explain, Move to inbox and Dismiss stay gray until the pointer is over the update. */
+.update-card :is(.mark-read, .explain-link, .move-to-inbox) { color: var(--muted); transition: color 0.15s ease; }
+.update-card:hover :is(.mark-read, .explain-link, .move-to-inbox) { color: var(--accent); }
+.update-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+/* The links stay on one line, each label whole; in a narrow pane "N more" gives way to them. */
+.update-links { flex-shrink: 0; white-space: nowrap; }
+.update-actions > .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
 /* The RACI letter matches the P0-P4 badge beside it. */
@@ -1018,19 +1084,44 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
 /* One line, cut with an ellipsis; hovering shows the full title. */
 .task-title-wrap .task-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Open in Claude beside Show links: the same small link, with Claude's mark before the words. */
+/* Claude beside Show links: the same small link, with Claude's mark before the word. */
 /* Baseline-aligned like the links beside it: the text sets the baseline, the icon centers on it. */
 .claude-link { display: inline-flex; align-items: baseline; gap: 4px; }
 .claude-link img { align-self: center; }
 /* In the plan box's bottom-right corner, gray, words and mark; Claude's mark turns orange only while
    you hover the link itself, and the words stay gray. */
-.plan-actions > .claude-link { margin-left: auto; }
-/* Links sits at the right, just left of Open in Claude. */
+.plan-actions > .claude-menu-anchor { margin-left: auto; }
+/* Links sits at the right, just left of Claude. */
 .plan-actions > .links-toggle { margin-left: auto; }
-.plan-actions > .links-toggle + .claude-link { margin-left: 4px; }
+.plan-actions > .links-toggle + .claude-menu-anchor { margin-left: 4px; }
 .link-button.more-link.claude-link, .link-button.more-link.claude-link:hover { color: var(--muted); }
 .claude-link img { transition: filter 0.15s ease; filter: grayscale(1); }
 .claude-link:hover img { filter: none; }
+/* Claude's menu, Open in Claude and Connect a session: like Refresh's (see .menu-card), opening
+   above when you point at Claude, its right edge lined up with Claude's so it stays in the card. */
+.claude-menu-anchor { position: relative; display: inline-flex; align-items: center; }
+.claude-menu {
+  position: absolute; right: -8px; bottom: calc(100% + 6px); z-index: 5;
+  opacity: 0; pointer-events: none; transform: translateY(3px); transition: opacity 120ms ease, transform 120ms ease;
+}
+.claude-menu::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 8px; }
+.claude-menu-anchor:is(:hover, :focus-within) > .claude-menu { opacity: 1; pointer-events: auto; transform: none; }
+@media (prefers-reduced-motion: reduce) { .claude-menu { transition: none; } }
+/* Connect a session: your recent sessions as rows, title over folder and when, likely matches first. */
+.connect-modal { width: min(560px, 100%); }
+.connect-intro { margin: -6px 0 0; line-height: 1.5; }
+.connect-search { width: 100%; }
+.connect-lists { display: flex; flex-direction: column; gap: 14px; min-height: 120px; overflow-y: auto; }
+.connect-heading { margin: 0 0 4px; font-size: 11px; font-weight: 500; color: var(--muted); }
+.connect-sessions { list-style: none; margin: 0 -8px; padding: 0; display: flex; flex-direction: column; }
+.connect-session {
+  width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left;
+}
+.connect-session:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.connect-session:disabled { opacity: 1; }
+.connect-session-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connect-session-meta { display: inline-flex; align-items: center; gap: 6px; }
 .tab-close { color: var(--muted); }
 .work-tab:hover .tab-close { color: var(--text); }
 
@@ -1391,6 +1482,9 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .time-input { height: 24px; padding: 0 8px; border-radius: 999px; font-size: 12px; }
+/* A length in minutes: a short number field and its unit. */
+.minutes-input { display: inline-flex; align-items: center; gap: 6px; }
+.minutes-input .time-input { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Two or three choices side by side; the picked one sits raised on the track. */
 .segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: 999px; background: var(--grey-bg); }
@@ -1446,11 +1540,29 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .automation-role { font-size: 12px; }
 
 /* Settings and Refresh all in the bottom-left corner, over the fog. Fixed outside the columns, so
-   pointing at them doesn't count as hovering the Today column (which shows its own refresh). */
+   pointing at them doesn't count as hovering the Today column. */
 .app-tools { position: fixed; left: 20px; bottom: 16px; z-index: 6; display: flex; align-items: center; gap: 6px; }
 .app-tools .timestamp { margin-left: 2px; }
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
+/* A small menu card of options, one per line, each lit gray under the pointer: Refresh's menu, and
+   the pomodoro timer's Pause and Restart. */
+.menu-card { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 4px; min-width: 150px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); }
+.menu-card .link-button { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; color: var(--text); text-align: left; }
+.menu-card .link-button:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); text-decoration: none; }
+.menu-card .link-button:disabled { color: var(--muted); cursor: default; }
+.menu-card .kbd { margin-left: auto; }
+/* Refresh's menu: pointing at the refresh button (or the line that takes its place while anything
+   loads) opens it above, Everything and then each area on its own, a spinner beside any that's
+   refreshing. An invisible strip under the card bridges the gap, so the pointer can reach it. */
+.refresh-menu-anchor { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.refresh-menu {
+  position: absolute; left: -6px; bottom: calc(100% + 8px);
+  opacity: 0; pointer-events: none; transform: translateY(3px); transition: opacity 120ms ease, transform 120ms ease;
+}
+.refresh-menu::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.refresh-menu-anchor:is(:hover, :focus-within) > .refresh-menu { opacity: 1; pointer-events: auto; transform: none; }
+@media (prefers-reduced-motion: reduce) { .refresh-menu { transition: none; } }
 /* Settings in glass to match the orb: clear with a faint rainbow edge for Demian, frosted for Roth,
    glossy white for Ophelia, soap-film clear for Oren, milky frosted for Penelope, polished over opal for Edith, a soft glow for Ephedra.
    Its text is the refresh wheel's gray. */
@@ -1538,7 +1650,8 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .window-buttons:hover .minimize { background: #febc2e; }
 .window-buttons:hover .zoom { background: #28c840; }
 .window-button:active { filter: brightness(0.85); }
-.today-date { margin-left: 4px; }
+.today-weekday { color: var(--text); }
+.today-date { margin-left: 2px; }
 
 /* Onboarding: Demian alone on black, its line of text beneath, and Start at the end. */
 .onboarding {
@@ -1605,7 +1718,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* Today's header: the title and date stay on one line, and what a calendar refresh is doing sits
    beside them on that line, truncating in the room left over instead of pushing the date onto a
    second line. */
-.today-column > .column-header { align-items: flex-start; }
+.today-column > .column-header { align-items: center; }
 .today-column > .column-header > div:first-child { flex-shrink: 0; white-space: nowrap; }
 .today-column > .column-header > .refresh-wrap { flex: 1; justify-content: flex-end; line-height: 18px; }
 

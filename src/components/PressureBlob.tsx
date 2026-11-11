@@ -39,16 +39,18 @@ const TIP: Record<OrbLook, [number, number]> = {
   prism: [0.006, 0.03],
 };
 
+// The light ones are deep enough to read as small dots on a light page (they used to be about 40%
+// lighter, and faded into it).
 const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [number, number, number] }> = {
-  glass: { dark: [0.45, 0.85, 1.0], light: [0.15, 0.35, 0.85] },
-  crystal: { dark: [0.78, 0.9, 1.0], light: [0.3, 0.4, 0.72] },
-  porcelain: { dark: [1.0, 0.97, 0.93], light: [0.55, 0.52, 0.5] },
-  film: { dark: [0.55, 0.85, 1.0], light: [0.1, 0.4, 0.75] },
-  resin: { dark: [1.0, 0.92, 0.7], light: [0.85, 0.45, 0.6] },
-  opal: { dark: [0.7, 0.95, 0.9], light: [0.25, 0.5, 0.7] },
-  aura: { dark: [1.0, 0.97, 0.85], light: [0.55, 0.6, 0.75] },
-  frost: { dark: [0.85, 0.85, 1.0], light: [0.45, 0.45, 0.85] },
-  prism: { dark: [0.6, 0.9, 0.95], light: [0.1, 0.5, 0.6] },
+  glass: { dark: [0.45, 0.85, 1.0], light: [0.08, 0.2, 0.55] },
+  crystal: { dark: [0.78, 0.9, 1.0], light: [0.17, 0.23, 0.45] },
+  porcelain: { dark: [1.0, 0.97, 0.93], light: [0.32, 0.3, 0.29] },
+  film: { dark: [0.55, 0.85, 1.0], light: [0.05, 0.24, 0.48] },
+  resin: { dark: [1.0, 0.92, 0.7], light: [0.55, 0.25, 0.37] },
+  opal: { dark: [0.7, 0.95, 0.9], light: [0.14, 0.3, 0.44] },
+  aura: { dark: [1.0, 0.97, 0.85], light: [0.32, 0.36, 0.48] },
+  frost: { dark: [0.85, 0.85, 1.0], light: [0.27, 0.27, 0.55] },
+  prism: { dark: [0.6, 0.9, 0.95], light: [0.04, 0.3, 0.37] },
 };
 
 /**
@@ -98,9 +100,15 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     const blob = orb.group;
     // Motes off the wave tips while Orb works; they ride along as the orb turns.
     const moteColor = new THREE.Color();
-    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look]);
+    // On a light page the motes' bright centers would vanish into it, so they're deepened instead.
+    const lightPage = { value: 0 };
+    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look], lightPage);
     blob.add(particles.points);
-    const paintMotes = () => moteColor.setRGB(...MOTE_COLORS[look][isDark((document.documentElement.dataset.theme as Theme) ?? "system") ? "dark" : "light"]);
+    const paintMotes = () => {
+      const dark = isDark((document.documentElement.dataset.theme as Theme) ?? "system");
+      moteColor.setRGB(...MOTE_COLORS[look][dark ? "dark" : "light"]);
+      lightPage.value = dark ? 0 : 1;
+    };
     paintMotes();
     // The orb spins inside a group that turns it toward the cursor when the cursor comes near.
     const facing = new THREE.Group();

@@ -164,6 +164,9 @@ fn command(exe: &Program, args: &[String], dir: &PathBuf, path: &std::ffi::OsStr
 /// up a project's CLAUDE.md.
 fn work_dir(app: &AppHandle, cwd: Option<String>) -> Result<PathBuf, String> {
     match cwd {
+        // Said plainly, rather than as the OS's error from starting a program in it (a Claude
+        // session carried on in its own folder, once that folder has been removed).
+        Some(dir) if !Path::new(&dir).is_dir() => Err(format!("The folder {dir} isn't there anymore")),
         Some(dir) => Ok(PathBuf::from(dir)),
         None => {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("work");
@@ -279,7 +282,7 @@ async fn run_cli(
     let dir = work_dir(&app, cwd)?;
 
     let input = input.unwrap_or_default();
-    let prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
+    let prompt_file = with_system_prompt(&work_dir(&app, None)?, &mut args, input.append_system_prompt)?;
     let has_stdin = input.stdin.is_some();
     let id = id.unwrap_or_else(|| format!("run-{}", nanos()));
     tauri::async_runtime::spawn_blocking(move || {
@@ -324,7 +327,7 @@ async fn run_cli_stream(
     let dir = work_dir(&app, cwd)?;
 
     let input = input.unwrap_or_default();
-    let prompt_file = with_system_prompt(&dir, &mut args, input.append_system_prompt)?;
+    let prompt_file = with_system_prompt(&work_dir(&app, None)?, &mut args, input.append_system_prompt)?;
     let has_stdin = input.stdin.is_some();
     tauri::async_runtime::spawn_blocking(move || {
         let _prompt_file = prompt_file;
@@ -886,6 +889,7 @@ pub fn run() {
             checkout_root,
             sessions::find_session,
             sessions::read_session_progress,
+            sessions::list_sessions,
             listen::start_listening,
             listen::stop_listening,
             cancel_run,

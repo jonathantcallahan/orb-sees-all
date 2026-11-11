@@ -5,6 +5,7 @@ import { sessionMarker } from "./openInClaude";
 import { WATCH_CHAT } from "./watched";
 import { channelLabel, slackTarget, slackThread } from "./projects";
 import { GlobalAction } from "./schema";
+import { words } from "./duplicates";
 
 /** A task's link to the Claude Code session Orb opened for it. */
 export interface SessionLink {
@@ -51,7 +52,8 @@ export interface SessionLink {
   /**
    * Started as a chat about something else (an update to explain, a message to reply to), so it
    * hasn't been given a task's steps or how to report them. A task that shares its key (an inbox
-   * item that's also a task) gives it them with your next message there.
+   * item that's also a task) gives it them with your next message there. So does a session you
+   * started yourself and connected to a task (see connectSession).
    */
   topic?: boolean;
   /** Code the session asked to read ("[orb] code …") beyond its project's, found and added (see resolveCheckout). */
@@ -65,6 +67,27 @@ export interface SessionLink {
    * review box, the chat or the app keeps them. Dropped once the draft is sent or turned down.
    */
   edits?: Record<string, string>;
+  /**
+   * What the session was waiting on you for (its waiting step and unsent drafts, see humanKey) when
+   * you set the task's status yourself: the card stops showing Human for it, until the session asks
+   * for something new.
+   */
+  humanSeen?: string;
+  /**
+   * The folder a session you connected (see connectSession) runs in: it carries on there, since
+   * Claude Code finds a session by its folder. Sessions Orb opens run in its own.
+   */
+  cwd?: string;
+  /**
+   * Set when the session scan connected the session (see sessionScan.ts): its title, and whether
+   * the scan made the task for it. The card says so, with Disconnect to undo it, until you hide it.
+   */
+  found?: { session: string; created: boolean; hidden?: boolean };
+}
+
+/** What a session is waiting on you for, as a key: its waiting step's title and the drafts it handed over. */
+export function humanKey(waitingStepTitle: string | undefined, unsentKeys: string[]): string {
+  return [waitingStepTitle ?? "", ...unsentKeys].join("|");
 }
 
 /** The edits with one draft's text set, or dropped when it's back to what Claude wrote (or `text` is null). */
@@ -515,6 +538,89 @@ interface FoundSession {
 /** Stop looking for a session that never turned up after this long. */
 export const GIVE_UP_MS = 2 * 60 * 60 * 1000;
 const POLL_MS = 10_000;
+
+/** A Claude Code session you started yourself, as list_sessions finds it. */
+export interface RecentSession {
+  path: string;
+  sessionId: string;
+  modifiedMs: number;
+  /** The folder it runs in. */
+  cwd: string | null;
+  /** Its title in Claude, or the start of its first message. */
+  title: string;
+  /** The first thing you asked in it. */
+  prompt: string;
+  /** The latest thing you asked, and Claude's latest text. */
+  lastAsk: string | null;
+  lastReply: string | null;
+}
+
+/** How far back Connect a session looks, and how many it lists. */
+const CONNECT_DAYS = 14;
+const CONNECT_LIMIT = 40;
+
+/** For `skip`: leave the session out whatever it does next. */
+export const SKIP_ALWAYS = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Your Claude Code sessions active since `sinceMs` that can be carried on (their folder is still
+ * there), newest first, at most `limit`: not Orb's own, and not those in `skip`, by id, unless
+ * they've changed since the time given (ms; SKIP_ALWAYS for never).
+ */
+export function listSessions(sinceMs: number, limit: number, skip: Record<string, number> = {}): Promise<RecentSession[]> {
+  return invoke<RecentSession[]>("list_sessions", { sinceMs, limit, skip });
+}
+
+/**
+ * Your recent Claude Code sessions that could be connected to a task: not Orb's own, and not one
+ * another task is following already.
+ */
+export async function connectableSessions(taskId: string, now = Date.now()): Promise<RecentSession[]> {
+  const links = await db.getSessionLinks();
+  const taken = Object.entries(links).flatMap(([id, l]) => (id !== taskId && l.sessionId ? [[l.sessionId, SKIP_ALWAYS] as const] : []));
+  return listSessions(now - CONNECT_DAYS * 86_400_000, CONNECT_LIMIT, Object.fromEntries(taken));
+}
+
+/** Sessions sharing at least this many of a task's words are offered first, as likely matches. */
+const LIKELY_SHARED = 2;
+
+/**
+ * The sessions for a task, likely ones first (most words shared with its title and description,
+ * against the session's title and first message), then the rest, each newest first.
+ */
+export function rankSessions(task: { title: string; description?: string | null }, sessions: RecentSession[]): { session: RecentSession; likely: boolean }[] {
+  const want = words(`${task.title} ${task.description ?? ""}`);
+  const scored = sessions.map((session) => {
+    const have = words(`${session.title} ${session.prompt.slice(0, 4000)}`);
+    let shared = 0;
+    for (const w of want) if (have.has(w)) shared++;
+    return { session, shared, likely: shared >= LIKELY_SHARED };
+  });
+  return scored
+    .sort((a, b) => Number(b.likely) - Number(a.likely) || (a.likely ? b.shared - a.shared : 0) || b.session.modifiedMs - a.session.modifiedMs)
+    .map(({ session, likely }) => ({ session, likely }));
+}
+
+/**
+ * Connects a session you started yourself to a task, in place of any it had: the card follows the
+ * session, and the task's chat carries on in it, in its own folder. It hasn't seen the task's steps,
+ * so your next message there gives it them (see SessionLink.topic).
+ */
+export async function connectSession(taskId: string, s: RecentSession, found?: SessionLink["found"]) {
+  await db.saveSessionLink(taskId, { startedAt: s.modifiedMs, path: s.path, sessionId: s.sessionId, ...(s.cwd ? { cwd: s.cwd } : {}), topic: true, ...(found ? { found } : {}) });
+}
+
+/**
+ * Undoes the session scan connecting a session to a task (Disconnect, or Not a task, on the card):
+ * the task stops following it, and the scan won't connect it, or make a task for it, again. A task
+ * the scan made for it is dismissed by the card (Not a task), not here.
+ */
+export async function disconnectSession(taskId: string) {
+  const link = (await db.getSessionLinks())[taskId];
+  if (!link) return;
+  await db.deleteSessionLink(taskId);
+  if (link.sessionId) await db.saveSessionScanDecision(link.sessionId, { decision: "declined", taskId, at: Date.now() });
+}
 
 /** Links `taskId` to the session it opens next. Called just before opening it. */
 export async function linkSession(taskId: string) {

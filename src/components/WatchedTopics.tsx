@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as db from "../db";
-import { applyDiscussedActions, assessPendingTasks, checkWatchedTopic, checkWatchedTopics, watchFromText } from "../jobs";
+import { applyDiscussedActions, assessPendingTasks, checkWatchedTopic, watchFromText } from "../jobs";
 import { stateOf, type TaskState } from "../tasks";
 import { actionLine, orderTopics, OUTCOME_STEP, outcomeState, outcomeTaskDescription, shortDate, type WatchedOutcome, type WatchedTopic } from "../watched";
-import { BadgeSelect, ExternalLink, RefreshButton, useAutoGrow } from "./common";
+import { BadgeSelect, ExternalLink, useAutoGrow } from "./common";
 import { formatWhen } from "../scheduler";
 import { TaskChatDockProvider, type TaskChatDock } from "./chatDock";
 import { WatchChat } from "./ExplainChat";
@@ -67,10 +67,7 @@ export function WatchedTopics({
             <div className="title-line">
               <h2>Watched topics</h2>
             </div>
-            {shown.length > 0 && (
-              // Never spins: what's being checked shows in the status line at the bottom of the window.
-              <RefreshButton busy={false} title="Check all watched topics" onClick={() => checkWatchedTopics().catch(() => {})} />
-            )}
+            {/* Checked again from the bottom bar's Refresh menu. */}
           </header>
           <AddTopic onAdded={onChange} />
           <div className="task-list">

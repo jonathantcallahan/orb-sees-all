@@ -429,6 +429,24 @@ export const SameWork = z.object({
 });
 export type SameWork = z.infer<typeof SameWork>;
 
+/** What a scan of your Claude Code sessions made of each one (see sessionScanPrompt). */
+export const SessionScan = z.object({
+  sessions: z
+    .array(
+      z.object({
+        id: z.string(),
+        action: z.enum(["connect", "new", "skip"]).catch("skip"),
+        task_id: z.string().nullish(),
+        title: z.string().nullish(),
+        description: z.string().nullish(),
+        project_id: z.string().nullish(),
+        why: z.string().nullish(),
+      }),
+    )
+    .default([]),
+});
+export type SessionScan = z.infer<typeof SessionScan>;
+
 /** One check of the user's own Slack DM: the newest message seen, and the #demian messages among the new ones, as written. */
 export const SelfDmPoll = z.object({
   latest_ts: z.string().nullish(),

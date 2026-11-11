@@ -9,6 +9,7 @@ import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
 import { useListeningStatus, type ListeningState } from "../orbMusic";
 import { activeChannels, channelLabel, projectName } from "../projects";
+import { clampMinutes, POMODORO_MAX_MIN, setPomodoroSettings, usePomodoroSettings } from "../pomodoro";
 import { ago } from "../tasks";
 import { localDate } from "../scheduler";
 import { parseSelfDmState, SELF_DM_DEFAULT, selfDmEvery, type SelfDmEvery, type SelfDmState } from "../selfDm";
@@ -48,6 +49,35 @@ function Segmented<T extends string>({ label, value, options, onChange }: { labe
 /** An on/off switch: a checkbox drawn as a sliding toggle. */
 function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
   return <input type="checkbox" role="switch" className="switch" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />;
+}
+
+/** A length in whole minutes, saved once you leave the field or press Return. */
+function MinutesInput({ label, value, onChange }: { label: string; value: number; onChange: (minutes: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    // Left empty, it keeps the length it had.
+    const minutes = text.trim() ? clampMinutes(Number(text), value) : value;
+    setText(String(minutes));
+    if (minutes !== value) onChange(minutes);
+  };
+  return (
+    <span className="minutes-input">
+      <input
+        type="number"
+        className="time-input"
+        aria-label={`${label}, in minutes`}
+        min={1}
+        max={POMODORO_MAX_MIN}
+        step={1}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      />
+      <span className="muted small">min</span>
+    </span>
+  );
 }
 
 /** One setting: its name and a line on what it does on the left, its control on the right. */
@@ -326,6 +356,7 @@ export function Settings({
   showLearnings?: boolean;
 }) {
   const listening = useListeningStatus();
+  const pomodoro = usePomodoroSettings();
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
@@ -429,6 +460,21 @@ export function Settings({
                   onChange={onOrbLookChange}
                   options={ORB_LOOKS.map((look) => ({ value: look, label: ORB_LOOK_NAMES[look] }))}
                 />
+              </SettingRow>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h4>Pomodoro</h4>
+            <div className="settings-group">
+              <SettingRow label="Pomodoro timer" hint="A focus timer above the calendar: a focus session, then a break, over and over. The block you're in shows on the calendar.">
+                <Switch label="Pomodoro timer" checked={pomodoro.on} onChange={(on) => setPomodoroSettings({ on })} />
+              </SettingRow>
+              <SettingRow label="Focus session" hint="How long each focus session lasts. Changing it starts the series over.">
+                <MinutesInput label="Focus session" value={pomodoro.focusMin} onChange={(focusMin) => setPomodoroSettings({ focusMin })} />
+              </SettingRow>
+              <SettingRow label="Break" hint="How long each break lasts. Changing it starts the series over.">
+                <MinutesInput label="Break" value={pomodoro.breakMin} onChange={(breakMin) => setPomodoroSettings({ breakMin })} />
               </SettingRow>
             </div>
           </section>

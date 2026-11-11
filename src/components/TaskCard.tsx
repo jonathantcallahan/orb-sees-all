@@ -6,12 +6,12 @@ import { adoptAsTaskNote, claudeSessionUrl, resumeSessionUrl, sessionPrompt, tas
 import { clearAssessment, clearTaskCheck, hideMergedNote, markCorrectionApplied, markNotDuplicate, mergeTasks, separateTasks, setDueOverride, setPriorityOverride, saveDescriptionOverride, setTaskState, updateManualTask, type MergedTask, type StoredPlan, type StoredTaskCheck } from "../db";
 import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskChat, stopTaskSession, STOPPED_BY_YOU } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
-import { ago, formatMinutes, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
+import { ago, formatMinutes, sinceWhen, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
 import { useJobStatus } from "../useAppData";
 import { formatWhen, localDate } from "../scheduler";
 import { TaskChangeCards } from "./ActionRow";
 import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, UnreadDot, useScrambled } from "./common";
-import { chatView, readableReply, saveDraftEdit, sendDestination, sendProblem, withEdit, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { chatView, connectableSessions, connectSession, disconnectSession, humanKey, rankSessions, readableReply, saveDraftEdit, sendDestination, sendProblem, withEdit, linkSession, markStepDone, planFinished, stepState, stepsNeedRecheck, unsentMessages, useSessionProgress, type ChatMessage, type ChatTurn, type PendingSend, type RecentSession, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { LinkChips } from "./LinkChips";
 import { useTaskDrag } from "./taskDrag";
 import { InDock, useInDock, useTaskChatDock } from "./chatDock";
@@ -119,6 +119,123 @@ function DescriptionEditor({
   );
 }
 
+/** A session's folder as you'd know it: its last part. */
+const folderName = (dir: string | null) => dir?.replace(/\/+$/, "").split("/").pop() || null;
+
+/**
+ * Connect a session (the Claude menu): your recent Claude Code sessions, likely matches for the task
+ * first. Picking one connects it to the task (see connectSession).
+ */
+function ConnectSessionModal({
+  task,
+  replacing,
+  onClose,
+  onConnected,
+}: {
+  task: { id: string; title: string; description?: string | null };
+  /** The task follows a session already, which the one you pick replaces. */
+  replacing: boolean;
+  onClose: () => void;
+  onConnected: () => void;
+}) {
+  const [sessions, setSessions] = useState<{ session: RecentSession; likely: boolean }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [connecting, setConnecting] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    connectableSessions(task.id).then(
+      (found) => !cancelled && setSessions(rankSessions(task, found)),
+      (e) => !cancelled && setError(String(e)),
+    );
+    return () => {
+      cancelled = true;
+    };
+    // The task's words are read once, when the picker opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const connect = async (s: RecentSession) => {
+    setConnecting(s.sessionId);
+    try {
+      await connectSession(task.id, s);
+      onConnected();
+    } catch (e) {
+      setError(String(e));
+      setConnecting(null);
+    }
+  };
+  const q = query.trim().toLowerCase();
+  const shown = (sessions ?? []).filter(({ session: s }) => !q || `${s.title}\n${s.prompt}\n${s.cwd ?? ""}`.toLowerCase().includes(q));
+  const likely = shown.filter((r) => r.likely);
+  const rest = shown.filter((r) => !r.likely);
+  const list = (rows: typeof shown) => (
+    <ul className="connect-sessions">
+      {rows.map(({ session: s }) => (
+        <li key={s.sessionId}>
+          <button className="connect-session" disabled={connecting !== null} onClick={() => connect(s)}>
+            <span className="connect-session-title">{s.title}</span>
+            <span className="connect-session-meta muted small">
+              {connecting === s.sessionId && <Spinner />}
+              {[folderName(s.cwd), sinceWhen(new Date(s.modifiedMs).toISOString())].filter(Boolean).join(" · ")}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+  return createPortal(
+    <div className="modal-backdrop plan-modal-backdrop" onClick={onClose}>
+      <div className="modal plan-modal connect-modal" role="dialog" aria-label="Connect a session" onClick={(e) => e.stopPropagation()}>
+        <header className="column-header">
+          <h2>Connect a session</h2>
+        </header>
+        <p className="muted small connect-intro">
+          Pick the Claude Code session you started for this task. The card follows it, and the task's chat carries on in it.
+          {replacing && " It takes the place of the session the task follows now."}
+        </p>
+        <input autoFocus className="connect-search" placeholder="Search sessions" aria-label="Search sessions" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <div className="connect-lists">
+          {error ? (
+            <div className="small session-error">Couldn't list sessions: {error}</div>
+          ) : !sessions ? (
+            <div className="muted small">
+              <Spinner /> Finding your sessions…
+            </div>
+          ) : !shown.length ? (
+            <div className="muted small">{q ? "No sessions match." : "No Claude Code sessions in the last two weeks."}</div>
+          ) : (
+            <>
+              {likely.length > 0 && (
+                <section>
+                  <h4 className="connect-heading">Likely matches</h4>
+                  {list(likely)}
+                </section>
+              )}
+              {rest.length > 0 && (
+                <section>
+                  <h4 className="connect-heading">{likely.length ? "Other recent sessions" : "Recent sessions"}</h4>
+                  {list(rest)}
+                </section>
+              )}
+            </>
+          )}
+        </div>
+        <footer className="plan-modal-actions edit-actions">
+          <button className="cta-ghost" onClick={onClose}>
+            Cancel
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 const PRIORITY_LABEL: Record<EffectivePriority, string> = {
   blocking: "Blocking",
   critical: "Critical",
@@ -151,6 +268,8 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 const DISMISS = "dismiss";
+/** The status menu's value while it reads Human, so choosing any status (the saved one too) answers it. */
+const HUMAN = "human";
 
 /**
  * A watched topic's statuses: Watching, or Human when something needs you (shown on its own when an
@@ -197,7 +316,6 @@ function PriorityBadge({
   return (
     <span
       className={`badge priority menu-badge ${priority ?? "unset hover-only"}${manual ? " manual" : ""}${focus.pointer ? " pointer-focus" : ""}`}
-      title={manual ? "Priority set by you" : "Set the priority"}
     >
       {priority ? PRIORITY_LABEL[priority] : "Priority"}
       <select
@@ -296,30 +414,50 @@ function recordDismiss(task: CardTask) {
  * While the task's Claude session is waiting on you, it reads "Human" instead (yellow); while the
  * session is working, "Working", shimmering. Neither is saved: they go once it's answered or done.
  */
-function StatusSelect({ task, human = false, working = false, onChange }: { task: CardTask; human?: boolean; working?: boolean; onChange: () => void }) {
+function StatusSelect({
+  task,
+  human = false,
+  working = false,
+  onPicked,
+  onChange,
+}: {
+  task: CardTask;
+  human?: boolean;
+  working?: boolean;
+  /** You set a status yourself (not Dismiss): it replaces Human until the session asks again. */
+  onPicked?: () => Promise<void>;
+  onChange: () => void;
+}) {
   const watched = task.source === "watched";
   const options = watched ? WATCH_STATUS : (Object.keys(STATUS_LABEL) as TaskStatus[]).map((value) => ({ value, label: STATUS_LABEL[value] }));
   // A watched topic set to Human shows it like one whose action is ready.
   const showHuman = !working && (human || (watched && task.status === "waiting"));
+  // The session's Human (not a watched topic's waiting status, which is a status of its own).
+  const sessionHuman = !working && human && !watched;
   const focus = usePointerFocus();
   return (
     <span
       className={`badge status-badge ${working ? "working" : showHuman ? "human" : watched && task.status !== "done" ? "todo" : task.status}${focus.pointer ? " pointer-focus" : ""}`}
-      title={showHuman && human ? (watched ? "A conditional action is ready" : "Claude needs your input: open the chat") : undefined}
     >
       {working ? <span className="shimmer">Working</span> : showHuman ? "Human" : watched ? watchStatusLabel(task.status) : STATUS_LABEL[task.status]}
       <select
-        value={watched && task.status !== "done" && task.status !== "waiting" ? "todo" : task.status}
+        value={sessionHuman ? HUMAN : watched && task.status !== "done" && task.status !== "waiting" ? "todo" : task.status}
         aria-label="Status"
         {...focus.props}
         onChange={async (e) => {
           // Dismiss lives in the same menu: it hides the task rather than setting a status.
           const dismiss = e.target.value === DISMISS;
           await setTaskState(task.id, dismiss ? { dismissed: true } : { status: e.target.value as TaskStatus });
+          if (!dismiss) await onPicked?.();
           onChange();
           if (dismiss) recordDismiss(task);
         }}
       >
+        {sessionHuman && (
+          <option value={HUMAN} hidden>
+            Human
+          </option>
+        )}
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -1021,7 +1159,7 @@ function Composer({
           {caret && <span key={`${caret.x}:${caret.y}`} className="composer-caret" style={{ left: caret.x, top: caret.y, height: caret.h }} aria-hidden />}
           {/* What Claude is doing, in the placeholder's place: drawn over the box so it stays on one line. */}
           {showStatus && (
-            <span className="composer-status" role="status">
+            <span className="composer-status text-shimmer" role="status">
               {scrambledStatus}
             </span>
           )}
@@ -1602,7 +1740,7 @@ export function TaskCard({
   const linked = !!sessionLink?.sessionId;
   // Collapsed cards show one line; the arrow after the badges opens and closes them. At most one card
   // is open at a time: every card starts collapsed except the one you last opened, and opening a card
-  // closes the other. A card that becomes compact (a task just marked done in Today) closes too.
+  // closes the other, and its chat if that's open. A card that becomes compact (a task just marked done in Today) closes too.
   // Every id this card's task goes by: its own, and those of tasks merged into it.
   const ids = useMemo(() => new Set([task.id, ...(("aliasIds" in task ? (task as { aliasIds: string[] }).aliasIds : []) ?? [])]), [task]);
   const [collapsed, setCollapsedState] = useState(() => !(openTask && ids.has(openTask)));
@@ -1659,6 +1797,7 @@ export function TaskCard({
   }, [task.id]);
   const [editing, setEditing] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const manual = task.source === "manual";
   const assessment = manual ? manualAssessment : task.assessment;
   const priority = taskPriority(assessment?.priority, task.projectPriority, task.blocking, manualPriority);
@@ -1796,7 +1935,16 @@ export function TaskCard({
     owned.current = ownsDock;
   }, [ownsDock]);
   const openChat = () => setChatFor(waitingIndex >= 0 ? waitingIndex + 1 : 0);
-  // The chat stays open until you close it, whatever the session does meanwhile.
+  // Opening another card closes this one's chat, as a window or in the dock, so the chat on screen
+  // is the open card's or none.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!ids.has((e as CustomEvent<string>).detail)) setChatFor(null);
+    };
+    window.addEventListener(TASK_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(TASK_OPEN_EVENT, onOpen);
+  }, [ids]);
+  // Otherwise the chat stays open until you close it, whatever the session does meanwhile.
   const chatAsk: SessionAsk | null =
     chatFor === null
       ? null
@@ -1829,7 +1977,8 @@ export function TaskCard({
   };
   const openTaskChat = () => openChat();
   // The task's chat. In the Detail view it sits in the dock beside the list, drawn whatever state
-  // the card is in (collapsed, or done and shrunk to a row), so it stays until you close it.
+  // the card is in (collapsed, or done and shrunk to a row), so it stays until you close it or open
+  // another card.
   const chatView = watch ? (
     chatFor !== null ? watch.chat(() => setChatFor(null)) : null
   ) : chatFor !== null ? (
@@ -1878,19 +2027,29 @@ export function TaskCard({
         onChange={onChange}
       />
     ) : null;
-  // Opens the task in Claude (its session, once it has one), at the right of the row under the plan box.
+  // Claude, at the right of the row under the plan box: pointing at it opens a menu above with Open
+  // in Claude (its session, once it has one; clicking Claude does this too) and Connect a session,
+  // for one you started yourself.
+  const pick = (run: () => void) => (e: { stopPropagation(): void }) => {
+    e.stopPropagation();
+    (document.activeElement as HTMLElement | null)?.blur();
+    run();
+  };
   const claudeLink = (
-    <button
-      className="link-button small more-link claude-link"
-      onClick={(e) => {
-        e.stopPropagation();
-        openInClaude();
-      }}
-      title={linked ? "Open the Claude Code session working on this task" : "Open this task in a new Claude Code session"}
-    >
-      <img src={CLAUDE_ICON} width={11} height={11} alt="" />
-      Open in Claude
-    </button>
+    <span className="claude-menu-anchor" onClick={(e) => e.stopPropagation()}>
+      <button className="link-button small more-link claude-link" aria-haspopup="menu" onClick={pick(openInClaude)}>
+        <img src={CLAUDE_ICON} width={11} height={11} alt="" />
+        Claude
+      </button>
+      <span className="card menu-card claude-menu small" role="menu" aria-label="Claude">
+        <button role="menuitem" className="link-button small" onClick={pick(openInClaude)}>
+          Open in Claude
+        </button>
+        <button role="menuitem" className="link-button small" onClick={pick(() => setConnecting(true))}>
+          Connect a session
+        </button>
+      </span>
+    </span>
   );
   // Inside the plan box: what belongs to the plan itself (a plan being written, and the session's
   // view of it). There's no Plan steps button: a task gets its plan in its chat.
@@ -2002,7 +2161,7 @@ export function TaskCard({
       />
     </span>
   );
-  // In the row at the bottom of the card, just left of Open in Claude.
+  // In the row at the bottom of the card, just left of Claude.
   const linksToggle =
     links.length > 0 ? (
       <button className="link-button small more-link links-toggle" onClick={() => setLinksOpen(!linksOpen)} aria-expanded={linksOpen}>
@@ -2010,7 +2169,7 @@ export function TaskCard({
       </button>
     ) : null;
   // Under the plan box, so they show on an open card whether the box is open or not: Open in chat
-  // (with what Claude is doing, or why it stopped) and, at the right, Links and Open in Claude.
+  // (with what Claude is doing, or why it stopped) and, at the right, Links and Claude.
   const chatActions = watch ? undefined : (
       <div className="plan-actions task-chat-actions">
         {/* On every task, planned or not, all yours or not: it's also where you change a task. Once
@@ -2079,10 +2238,20 @@ export function TaskCard({
       {formatMinutes(estimateMinutes)}
     </span>
   );
-  const human = needsInput && !task.done;
+  // Human until you set the status yourself, which answers it until the session asks for something new.
+  const waitingFor = humanKey(waitingStep?.title, toSend.map((m) => m.key));
+  const human = needsInput && !task.done && (!!watch || sessionLink?.humanSeen !== waitingFor);
   const working = !!sessionWorking && !task.done;
   const pinStatus = human || working;
-  const status = <StatusSelect task={task} human={human} working={working} onChange={onChange} />;
+  const status = (
+    <StatusSelect
+      task={task}
+      human={human}
+      working={working}
+      onPicked={human && !watch ? () => db.updateSessionLink(task.id, { humanSeen: waitingFor }) : undefined}
+      onChange={onChange}
+    />
+  );
   // One header for both states, so the title row stays exactly where it is when the card opens or closes.
   const header = (
     <header className="task-card-header">
@@ -2109,7 +2278,7 @@ export function TaskCard({
       {/* Folded, the card shows only the badge its list is sorted by (the date when sorted by one,
           else the priority); the rest slide in beside it while it's hovered, and stay when it's open. */}
       {watch ? null : dateBadge ? (
-        <span className={`badge date-badge${dateBadge.date ? "" : " none"}`} title={dateBadge.date ? new Date(dateBadge.date.length === 10 ? `${dateBadge.date}T12:00:00` : dateBadge.date).toLocaleString() : undefined}>
+        <span className={`badge date-badge${dateBadge.date ? "" : " none"}`}>
           {dateBadge.date ? `${dateBadge.kind === "due" ? "Due " : ""}${formatWhen(dateBadge.date)}` : dateBadge.kind === "due" ? "No due date" : "No date"}
         </span>
       ) : (
@@ -2181,6 +2350,17 @@ export function TaskCard({
                 </div>
               )}
 
+              {connecting && (
+                <ConnectSessionModal
+                  task={{ id: task.id, title: task.title, description }}
+                  replacing={linked}
+                  onClose={() => setConnecting(false)}
+                  onConnected={() => {
+                    setConnecting(false);
+                    onChange();
+                  }}
+                />
+              )}
               {editing && (
                 <DescriptionEditor title={task.title} initial={description ?? ""} onSave={saveDescription} onCancel={() => setEditing(false)} />
               )}
@@ -2266,6 +2446,50 @@ export function TaskCard({
                   </span>
                 </div>
               ))}
+
+              {sessionLink?.found && !sessionLink.found.hidden && (
+                <div className="duplicate-note merged-note small">
+                  <span className="duplicate-text">
+                    {sessionLink.found.created ? "Made from Claude session " : "Connected to Claude session "}
+                    <span className="duplicate-title">"{sessionLink.found.session}"</span>
+                  </span>
+                  <span className="duplicate-actions">
+                    {/* Made from the session, the task goes with it: what's learned is that it isn't one.
+                        Connected, the task stays: the session just isn't its work. */}
+                    <button
+                      className="link-button small"
+                      onClick={async () => {
+                        const found = sessionLink.found!;
+                        await disconnectSession(task.id);
+                        if (found.created) await setTaskState(task.id, { dismissed: true });
+                        onChange();
+                        recordCorrection(
+                          { kind: "session_unlink", subject: "task", subject_id: task.id, project_id: task.project?.id, before: { task: taskSnapshot(task), session: found.session, created: found.created } },
+                          found.created ? label.sessionNotTask(task.title) : label.sessionUnlink(task.title),
+                        );
+                      }}
+                      title={
+                        sessionLink.found.created
+                          ? "Dismiss this task, and don't make tasks from this session"
+                          : "Stop following this session; Demian won't connect it again"
+                      }
+                    >
+                      {sessionLink.found.created ? "Not a task" : "Disconnect"}
+                    </button>
+                    <button
+                      className="icon-button merged-close"
+                      title="Hide this note; the session stays connected"
+                      aria-label="Hide this note"
+                      onClick={async () => {
+                        await db.updateSessionLink(task.id, { found: { ...sessionLink.found!, hidden: true } });
+                        onChange();
+                      }}
+                    >
+                      <CloseIcon size={8} />
+                    </button>
+                  </span>
+                </div>
+              )}
 
               {watch ? (
                 <>

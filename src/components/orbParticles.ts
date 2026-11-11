@@ -16,6 +16,7 @@ uniform float uStress;
 uniform float uWorking;
 uniform float uPixelRatio;
 uniform vec2 uTip;
+uniform float uLightPage;
 attribute vec3 seed;
 varying float vAlpha;
 ${NOISE}
@@ -55,27 +56,31 @@ void main() {
 
   vec4 view = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * view;
-  gl_PointSize = (1.4 + 1.4 * seed.z) * uPixelRatio * (0.7 + 0.3 * pulse);
+  // A little larger on a light page, where a dark speck this small would read as faint gray.
+  gl_PointSize = (1.4 + 1.4 * seed.z) * uPixelRatio * (0.7 + 0.3 * pulse) * (1.0 + 0.35 * uLightPage);
 }
 `;
 
 const FRAGMENT = /* glsl */ `
 uniform vec3 uColor;
+uniform float uLightPage;
 varying float vAlpha;
 void main() {
-  // A soft round dot with a brighter center.
+  // A soft round dot with a brighter center; on a light page, a deeper one instead (a white center
+  // would vanish into the page) and more solid.
   float r = length(gl_PointCoord - 0.5) * 2.0;
   float a = smoothstep(1.0, 0.0, r);
-  a *= a * vAlpha;
+  a = min(1.0, a * a * vAlpha * (1.0 + 0.8 * uLightPage));
+  vec3 core = mix(vec3(1.0), uColor * 0.6, uLightPage);
   // Premultiplied, so the motes show over the orb and over a light or dark page alike.
-  gl_FragColor = vec4(mix(uColor, vec3(1.0), 0.35 * (1.0 - r)) * a, a);
+  gl_FragColor = vec4(mix(uColor, core, 0.35 * (1.0 - r)) * a, a);
 }
 `;
 
 /**
- * The particle layer for a look: `surface` is its orbSurface GLSL, `color` its mote color, and `tip`
+ * The particle layer for a look: `surface` is its orbSurface GLSL, `color` its mote color, `tip`
  * how far (low, high) a point must stand above the surface around it to count as a wave tip, since
- * the looks' waves differ in depth.
+ * the looks' waves differ in depth, and `lightPage` 1 while the page is light (see FRAGMENT).
  */
 export function buildParticles(
   surface: string,
@@ -83,6 +88,7 @@ export function buildParticles(
   color: THREE.Color,
   pixelRatio: number,
   tip: [number, number],
+  lightPage: { value: number },
 ) {
   const positions = new Float32Array(COUNT * 3);
   const seeds = new Float32Array(COUNT * 3);
@@ -102,7 +108,7 @@ export function buildParticles(
   const material = new THREE.ShaderMaterial({
     vertexShader: vertex(surface),
     fragmentShader: FRAGMENT,
-    uniforms: { ...uniforms, uColor: { value: color }, uPixelRatio: { value: pixelRatio }, uTip: { value: new THREE.Vector2(...tip) } },
+    uniforms: { ...uniforms, uColor: { value: color }, uLightPage: lightPage, uPixelRatio: { value: pixelRatio }, uTip: { value: new THREE.Vector2(...tip) } },
     transparent: true,
     depthWrite: false,
     blending: THREE.CustomBlending,
