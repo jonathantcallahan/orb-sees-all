@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "day-planner"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "block2",
  "dispatch2",
