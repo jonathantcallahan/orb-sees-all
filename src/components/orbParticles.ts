@@ -10,12 +10,29 @@ import { FERRO, RIPPLE, type OrbUniforms } from "./orbEffects";
 
 const COUNT = 4800;
 
+/**
+ * A look whose motes rise inside its glass rather than off its outside (Kitten's, off its cross):
+ * the render layer they're drawn on, so the glass shows them bent, and their gap (see
+ * buildParticles). They're against the glass rather than the page, so they keep their colors for a
+ * dark page whatever the page is.
+ */
+export interface OrbMotes {
+  layer: number;
+  gap: [number, number];
+  /** How much larger they are than the other looks' motes. */
+  size: number;
+  /** How much brighter, past white, so they stand out against the lit glass behind them. */
+  boost: number;
+}
+
 const vertex = (surface: string) => /* glsl */ `
 uniform float uTime;
 uniform float uStress;
 uniform float uWorking;
 uniform float uPixelRatio;
 uniform vec2 uTip;
+uniform vec2 uGap;
+uniform float uSize;
 uniform float uLightPage;
 attribute vec3 seed;
 varying float vAlpha;
@@ -47,7 +64,7 @@ void main() {
   float tip = smoothstep(uTip.x, uTip.y, h - around);
 
   // A clear gap off the surface, widening as the mote drifts out.
-  vec3 p = d * (h + 0.14 + 0.16 * life);
+  vec3 p = d * (h + uGap.x + uGap.y * life);
   // In and out of being: a soft swell over its life, with a quicker flicker on top.
   float pulse = sin(life * 3.14159);
   pulse *= pulse * (0.65 + 0.35 * sin(uClock * 9.0 + seed.z * 40.0));
@@ -57,12 +74,13 @@ void main() {
   vec4 view = modelViewMatrix * vec4(p, 1.0);
   gl_Position = projectionMatrix * view;
   // A little larger on a light page, where a dark speck this small would read as faint gray.
-  gl_PointSize = (1.4 + 1.4 * seed.z) * uPixelRatio * (0.7 + 0.3 * pulse) * (1.0 + 0.35 * uLightPage);
+  gl_PointSize = (1.4 + 1.4 * seed.z) * uSize * uPixelRatio * (0.7 + 0.3 * pulse) * (1.0 + 0.35 * uLightPage);
 }
 `;
 
 const FRAGMENT = /* glsl */ `
 uniform vec3 uColor;
+uniform float uBoost;
 uniform float uLightPage;
 varying float vAlpha;
 void main() {
@@ -73,14 +91,17 @@ void main() {
   a = min(1.0, a * a * vAlpha * (1.0 + 0.8 * uLightPage));
   vec3 core = mix(vec3(1.0), uColor * 0.6, uLightPage);
   // Premultiplied, so the motes show over the orb and over a light or dark page alike.
-  gl_FragColor = vec4(mix(uColor, core, 0.35 * (1.0 - r)) * a, a);
+  // Boosted past white inside glass, so they stand out against it.
+  gl_FragColor = vec4(mix(uColor, core, 0.35 * (1.0 - r)) * a * uBoost, a);
 }
 `;
 
 /**
  * The particle layer for a look: `surface` is its orbSurface GLSL, `color` its mote color, `tip`
  * how far (low, high) a point must stand above the surface around it to count as a wave tip, since
- * the looks' waves differ in depth, and `lightPage` 1 while the page is light (see FRAGMENT).
+ * the looks' waves differ in depth, and `lightPage` 1 while the page is light (see FRAGMENT). In
+ * `opts`: `gap`, how far off the surface a mote appears and how much farther it drifts over its life;
+ * `size` and `boost`, how much larger and brighter the motes are than usual.
  */
 export function buildParticles(
   surface: string,
@@ -89,7 +110,9 @@ export function buildParticles(
   pixelRatio: number,
   tip: [number, number],
   lightPage: { value: number },
+  opts: { gap?: [number, number]; size?: number; boost?: number } = {},
 ) {
+  const gap = opts.gap ?? [0.14, 0.16];
   const positions = new Float32Array(COUNT * 3);
   const seeds = new Float32Array(COUNT * 3);
   for (let i = 0; i < COUNT; i++) {
@@ -108,7 +131,7 @@ export function buildParticles(
   const material = new THREE.ShaderMaterial({
     vertexShader: vertex(surface),
     fragmentShader: FRAGMENT,
-    uniforms: { ...uniforms, uColor: { value: color }, uLightPage: lightPage, uPixelRatio: { value: pixelRatio }, uTip: { value: new THREE.Vector2(...tip) } },
+    uniforms: { ...uniforms, uColor: { value: color }, uLightPage: lightPage, uPixelRatio: { value: pixelRatio }, uTip: { value: new THREE.Vector2(...tip) }, uGap: { value: new THREE.Vector2(...gap) }, uSize: { value: opts.size ?? 1 }, uBoost: { value: opts.boost ?? 1 } },
     transparent: true,
     depthWrite: false,
     blending: THREE.CustomBlending,

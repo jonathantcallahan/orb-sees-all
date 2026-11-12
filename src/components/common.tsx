@@ -99,7 +99,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
               <div className="muted small">
                 {t.detail}
                 {t.detail && t.due && " · "}
-                {t.due && <span className="due timestamp">due {formatWhen(t.due)}</span>}
+                {t.due && <span className="due timestamp">Due {formatWhen(t.due)}</span>}
               </div>
             )}
           </div>

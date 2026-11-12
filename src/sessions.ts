@@ -31,10 +31,20 @@ export interface SessionLink {
    * step it finished when there was one, shown as chips beside that step.
    */
   artifacts?: { step?: number; stepTitle?: string; title: string; url: string }[];
-  /** Proposed changes the user applied, by key (see PendingAction): what each was and what came of it. */
+  /**
+   * Proposed changes that were made, by key (see PendingAction): applied by the user from a card,
+   * or by a task's chat itself as it worked. What each was and what came of it.
+   */
   applied?: Record<string, { summary: string; result: string }>;
   /** Keys of proposed changes the user turned down. */
   dismissedKeys?: string[];
+  /** Links the task's chat added to its task ("[orb] links"), shown with its other links. */
+  links?: TaskChatLink[];
+  /**
+   * The task chat's own notes on its task ("[orb] notes"): what it's found and where things stand,
+   * given back to it every turn (even in a new conversation) and not shown on the card.
+   */
+  notes?: string;
   /** Preferences the session handed over ("[orb] remember …") that are already saved as lessons. */
   remembered?: string[];
   /** The plan as last recorded as a correction, so each revision in the chat is logged once. */
@@ -455,6 +465,54 @@ export function parseSends(blocks: { header: string; body: string }[]): PendingS
 
 const ACTION = /^\[orb\]\s*action\b/i;
 
+/** A link a task's chat added to its task. */
+export interface TaskChatLink {
+  url: string;
+  title: string | null;
+}
+
+const LINK_URL = /https?:\/\/[^\s<>()\]]+/;
+/** What's around a link's title: list marks, separators, brackets. */
+const TITLE_EDGE = /^[\s\-*•|:–—<>()[\]]+|[\s\-*•|:–—<>()[\]]+$/g;
+
+/**
+ * The links a task's chat added to its task ("[orb] links" blocks): one a line, as "Title | url", a
+ * Markdown link, or a url with or without a title around it. Later ones add to earlier ones, each
+ * url once (a later title for it wins).
+ */
+export function parseTaskLinks(blocks: { header: string; body: string }[]): TaskChatLink[] {
+  const byUrl = new Map<string, string | null>();
+  for (const { header, body } of blocks) {
+    if (!/^\[orb\]\s*links\b/i.test(header)) continue;
+    for (const line of body.split("\n")) {
+      const found = line.match(LINK_URL);
+      if (!found) continue;
+      const url = found[0].replace(/[.,;:]+$/, "");
+      const title = line
+        .replace(found[0], "")
+        .replace(/\[([^\]]*)\]\(\s*\)/, "$1")
+        .replace(/^\s*\d+[.)]\s+/, "")
+        .replace(TITLE_EDGE, "")
+        .trim();
+      byUrl.set(url, title || byUrl.get(url) || null);
+    }
+  }
+  return [...byUrl].map(([url, title]) => ({ url, title }));
+}
+
+/** A task chat's notes on its task: its latest "[orb] notes" block, or null when it's written none. */
+export function latestNotes(blocks: { header: string; body: string }[]): string | null {
+  const last = blocks.filter((b) => /^\[orb\]\s*notes\b/i.test(b.header)).pop();
+  return last ? last.body.trim() || null : null;
+}
+
+/** The chat's links so far with new ones added, each url once (a new title for one wins). */
+export function withChatLinks(had: TaskChatLink[], added: TaskChatLink[]): TaskChatLink[] {
+  const byUrl = new Map(had.map((l) => [l.url, l.title] as const));
+  for (const l of added) byUrl.set(l.url, l.title ?? byUrl.get(l.url) ?? null);
+  return [...byUrl].map(([url, title]) => ({ url, title }));
+}
+
 /** Turns the session's "[orb] action / [orb] end" blocks into proposed changes, the same change once. */
 export function parseActions(blocks: { header: string; body: string }[]): PendingAction[] {
   const seen = new Set<string>();
@@ -519,9 +577,10 @@ export function rememberedLessons(lines: string[]): { scope: string; text: strin
 
 export function readableReply(text: string): string {
   return text
-    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event|ticket)[^\n]*\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
+    // (A task chat's links and notes are blocks only under a header on its own line; see opens_block.)
+    .replace(/^\s*`?\[orb\] (?:(?:send|plan|action|doc|event|ticket)[^\n]*|(?:links|notes):?[ \t]*)\n[\s\S]*?^\s*`?\[orb\] end`?\s*$/gim, "")
     // A block still being written (a reply streaming in) is hidden until it's complete.
-    .replace(/^\s*`?\[orb\] (?:send|plan|action|doc|event|ticket)[^\n]*(?:\n[\s\S]*)?$/im, "")
+    .replace(/^\s*`?\[orb\] (?:(?:send|plan|action|doc|event|ticket)[^\n]*|(?:links|notes):?[ \t]*)(?:\n[\s\S]*)?$/im, "")
     .split("\n")
     .filter((line) => !/^\s*[-`]*\s*\[orb\]/i.test(line))
     .join("\n")

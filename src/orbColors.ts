@@ -40,6 +40,20 @@ const PALETTES: Record<OrbLook, MoodPalette> = {
       [0.98, 0.72, 0.9],
     ],
   },
+  // Kitten's mist is her gem: royal blue when calm, through violet to magenta, with pale lavender
+  // and pink wisps like her star.
+  kitten: {
+    deep: [
+      [0.2, 0.2, 0.92],
+      [0.42, 0.22, 0.9],
+      [0.82, 0.24, 0.78],
+    ],
+    wisp: [
+      [0.74, 0.72, 1.0],
+      [0.86, 0.72, 1.0],
+      [1.0, 0.7, 0.92],
+    ],
+  },
   // Oren's mist is blue: clear sea blue, deepening toward indigo.
   film: {
     deep: [

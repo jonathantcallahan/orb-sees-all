@@ -1,6 +1,7 @@
 /**
- * Dragging tasks to reorder them, within Today and All tasks or from one to the other, with the
- * motion people expect from native apps:
+ * Dragging tasks to reorder them, within Today and All tasks or from one to the other (or into
+ * Today's Active pomodoro task, while a pomodoro runs), with the motion people expect from native
+ * apps:
  * - a press becomes a drag only after a few pixels, so clicks, selection and menus still work;
  * - the card lifts (a copy of its header scales up, tilts a hair and gains a deep shadow) and follows
  *   the pointer;
@@ -13,7 +14,11 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-export type DropZoneId = "today" | "rest";
+export type DropZoneId = "today" | "rest" | "pomodoro";
+
+/** Every list a card can be in or dropped into. */
+const ZONES: DropZoneId[] = ["pomodoro", "today", "rest"];
+const cardsInAll = (): Record<DropZoneId, Slot[]> => ({ pomodoro: cardsIn("pomodoro"), today: cardsIn("today"), rest: cardsIn("rest") });
 
 /**
  * Runs a state change that moves cards and animates every card from where it was to where it lands.
@@ -93,7 +98,7 @@ export function TaskDragProvider({
   const preview = useRef<HTMLDivElement>(null);
   const pointer = useRef({ x: 0, y: 0 });
   const pending = useRef<{ x: number; y: number; id: string; zone: DropZoneId; card: HTMLElement } | null>(null);
-  const slots = useRef<Record<DropZoneId, Slot[]>>({ today: [], rest: [] });
+  const slots = useRef<Record<DropZoneId, Slot[]>>({ pomodoro: [], today: [], rest: [] });
   const dragRef = useRef<Drag | null>(null);
   dragRef.current = drag;
 
@@ -122,10 +127,10 @@ export function TaskDragProvider({
    * doesn't feed back into where the pointer is.
    */
   const shift = (d: Drag, over: DropZoneId | null, y: number): string | null => {
-    const source = [...slots.current.today, ...slots.current.rest].find((s) => s.id === d.id);
+    const source = ZONES.flatMap((z) => slots.current[z]).find((s) => s.id === d.id);
     const size = (source ? source.bottom - source.top : 0) + gapOf(slots.current[d.from], d.id);
     let before: string | null = null;
-    for (const zone of ["today", "rest"] as DropZoneId[]) {
+    for (const zone of ZONES) {
       const list = slots.current[zone];
       const s = list.findIndex((x) => x.id === d.id);
       const others = list.filter((x) => x.id !== d.id);
@@ -141,7 +146,7 @@ export function TaskDragProvider({
         const dy = base(x) - x.top + (t >= 0 && k >= t ? size : 0);
         x.el.style.transform = dy ? `translateY(${dy}px)` : "";
       });
-      // A list taking a card from the other one grows by its size as the gap opens, so its box (Today's
+      // A list taking a card from another grows by its size as the gap opens, so its box (Today's
       // gray one) keeps holding the cards the gap pushed down.
       room(zone, zone === over && over !== d.from ? size : 0, true);
     }
@@ -149,13 +154,12 @@ export function TaskDragProvider({
   };
 
   const clearShifts = (animate: boolean) => {
-    for (const s of [...slots.current.today, ...slots.current.rest]) {
+    for (const s of ZONES.flatMap((z) => slots.current[z])) {
       if (!animate) s.el.style.transition = "none";
       s.el.style.transform = "";
       if (!animate) requestAnimationFrame(() => (s.el.style.transition = ""));
     }
-    room("today", 0, animate);
-    room("rest", 0, animate);
+    for (const zone of ZONES) room(zone, 0, animate);
   };
 
   const end = useCallback(
@@ -204,7 +208,7 @@ export function TaskDragProvider({
       const p = pending.current;
       if (p && !dragRef.current) {
         if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < DRAG_THRESHOLD) return;
-        slots.current = { today: cardsIn("today"), rest: cardsIn("rest") };
+        slots.current = cardsInAll();
         const origin = p.card.getBoundingClientRect();
         const header = (p.card.querySelector(".task-card-header") ?? p.card).cloneNode(true) as HTMLElement;
         document.body.classList.add("task-dragging");
@@ -277,7 +281,8 @@ export function TaskDragProvider({
 }
 
 /**
- * Room at the bottom of a list for a card on its way in (Today's box adds it to its padding in styles.css).
+ * Room at the bottom of a list for a card on its way in (Today's box and Active pomodoro task add it
+ * to their padding in styles.css, each its own; see @property --drop-room).
  * Without `animate` it goes at once: on a drop, the card itself takes its place in the same frame.
  */
 function room(zone: DropZoneId, px: number, animate: boolean) {
@@ -302,7 +307,7 @@ function gapOf(list: Slot[], id: string): number {
   return Number.isFinite(gap) ? gap : 10;
 }
 
-/** A place tasks can be dropped; it lights up while a task from the other list is over it. */
+/** A place tasks can be dropped; it lights up while a task from another list is over it. */
 export function DropZone({ zone, className, children }: { zone: DropZoneId; className?: string; children: ReactNode }) {
   const api = useContext(DragContext);
   const Tag = zone === "rest" ? "section" : "div";

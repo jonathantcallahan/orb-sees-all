@@ -6,6 +6,7 @@ import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
+import { NowPlayingBar } from "./components/NowPlaying";
 import { WindowButtons } from "./components/WindowButtons";
 import { SetupScreen } from "./components/SetupScreen";
 import { Onboarding } from "./components/Onboarding";
@@ -284,6 +285,8 @@ export default function App() {
         <BottomStatus running={running} />
         <UpdateButton />
       </nav>
+      {/* What's playing is only read on macOS. */}
+      {!isWindows && <NowPlayingBar look={orbLook} />}
 
       {/* The orb and calendar, a rule, a rail of icons for the three areas, then the open area in a
           panel with rounded top corners, flush with the bottom of the window. */}

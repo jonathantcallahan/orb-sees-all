@@ -235,7 +235,7 @@ describe("locked-down runs", () => {
     await runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.granolaRead] }, run);
     const args = run.mock.calls[0][1];
     expect(denied(args)).toEqual(expect.arrayContaining([SEND, ...WRITE_TOOLS]));
-    expect(denied(args)).toEqual(expect.arrayContaining(["mcp__claude_ai_Amplitude__run_amp", "mcp__claude_ai_Granola__update_private_notes", "mcp__mcp-jira__jira_add_worklog"]));
+    expect(denied(args)).toEqual(expect.arrayContaining(["mcp__claude_ai_Amplitude__run_amp", "mcp__Amplitude__run_amp", "mcp__claude_ai_Granola__update_private_notes", "mcp__mcp-jira__jira_add_worklog"]));
   });
 
   it("denies a send run every write tool but the one it sends with", async () => {
@@ -284,10 +284,40 @@ describe("time limits", () => {
   });
 });
 
+describe("web search", () => {
+  /** The values after a flag, up to the next flag. */
+  const listAfter = (args: string[], flag: string) => {
+    const rest = args.slice(args.indexOf(flag) + 1);
+    const next = rest.findIndex((a) => a.startsWith("--"));
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+
+  it("lets chats search the web but not fetch pages, and background runs do neither", async () => {
+    const { oneShotArgs, TOOLS } = await import("./claude");
+    const { sessionTools } = await import("./jobs");
+    const run = vi.fn<CliRunner>(async () => reply("ok"));
+    await runSessionTurn({ prompt: "p", tools: sessionTools(false) }, run);
+    const chat = run.mock.calls[0][1];
+    expect(listAfter(chat, "--allowedTools")).toContain("WebSearch");
+    expect(listAfter(chat, "--disallowedTools")).not.toContain("WebSearch");
+    expect(listAfter(chat, "--disallowedTools")).toContain("WebFetch");
+    const job = oneShotArgs({ tools: TOOLS.slackRead });
+    expect(listAfter(job, "--allowedTools")).not.toContain("WebSearch");
+    expect(listAfter(job, "--disallowedTools")).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
+  });
+});
+
 describe("Amplitude experiments and flags in chats", () => {
   it("gives chats the experiment and flag tools, and says to change one only when asked", async () => {
     const { SESSION_DISPLAY, TOOLS } = await import("./claude");
-    expect(TOOLS.amplitudeExperiments).toEqual(["mcp__claude_ai_Amplitude__use_amp_experiments", "mcp__claude_ai_Amplitude__use_amp_flags"]);
+    // Under the connector's name and that of an Amplitude server added to Claude Code itself.
+    expect(TOOLS.amplitudeExperiments).toEqual([
+      "mcp__claude_ai_Amplitude__use_amp_experiments",
+      "mcp__claude_ai_Amplitude__use_amp_flags",
+      "mcp__Amplitude__use_amp_experiments",
+      "mcp__Amplitude__use_amp_flags",
+    ]);
+    expect(TOOLS.amplitudeRead).toEqual(expect.arrayContaining(["mcp__claude_ai_Amplitude__query_amplitude_data", "mcp__Amplitude__query_amplitude_data", "mcp__Amplitude__get_amplitude_context"]));
     // Background jobs keep the read-only list.
     expect(TOOLS.amplitudeRead).not.toContain("mcp__claude_ai_Amplitude__use_amp_flags");
     expect(SESSION_DISPLAY).toContain("only do that when I've asked for that exact change in this chat");

@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Demian shows the song playing in Spotify or Music, with play, pause and skip, at the bottom of the window.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>The listening orb moves with the music you're playing. Demian only measures the sound as it plays; nothing is recorded or sent anywhere.</string>
 </dict>

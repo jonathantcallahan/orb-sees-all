@@ -528,9 +528,19 @@ export const getSessionScan = () => getRows<SessionScanDecision>("session_scan")
 export const saveSessionScanDecision = (sessionId: string, d: SessionScanDecision) => putRow("session_scan", sessionId, d);
 
 /** Changes part of a task's session link, keeping the rest as it is now (not as the caller last saw it). */
-export async function updateSessionLink(taskId: string, patch: Partial<SessionLink>) {
-  const current = (await getSessionLinks())[taskId];
-  if (current) await saveSessionLink(taskId, { ...current, ...patch });
+/**
+ * Changes a chat's link. Changes run one at a time, each on the link as the last one left it, so two
+ * at once (a turn ending, a click on a card) can't drop either's. `patch` may be worked out from the
+ * link as it is then, for a change that adds to what's there.
+ */
+let linkUpdates: Promise<unknown> = Promise.resolve();
+export function updateSessionLink(taskId: string, patch: Partial<SessionLink> | ((current: SessionLink) => Partial<SessionLink>)): Promise<void> {
+  const run = linkUpdates.then(async () => {
+    const current = (await getSessionLinks())[taskId];
+    if (current) await saveSessionLink(taskId, { ...current, ...(typeof patch === "function" ? patch(current) : patch) });
+  });
+  linkUpdates = run.catch(() => {});
+  return run;
 }
 
 /** Double checks of tasks, keyed by task id. */

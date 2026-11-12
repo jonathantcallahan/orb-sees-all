@@ -5,7 +5,7 @@ vi.mock("./db", () => ({}));
 vi.mock("./jobs", () => ({}));
 vi.mock("./claude", () => ({}));
 
-const { describeAction, findTask, taskChatChanges } = await import("./globalActions");
+const { describeAction, findTask, mergeTaskChanges, taskChatChanges } = await import("./globalActions");
 
 const project = (id: string) => (id === "C1" ? "Store" : id);
 const channel = (id: string) => id;
@@ -86,20 +86,39 @@ describe("changing an existing task from the chat", () => {
 });
 
 describe("a task's chat changing its task", () => {
-  it("keeps only moves and edits, made about the chat's own task", () => {
+  it("keeps only moves and edits of its own task, and leaves out any that name another", () => {
     const changes = taskChatChanges(
       [
         { key: "a", action: { type: "set_task_project", task_id: "slack:other", title: "Something else", project_id: "C1" } as const },
         { key: "b", action: { type: "set_task_status", task_id: "slack:3", status: "done" } as const },
         { key: "c", action: null },
         { key: "d", action: { type: "update_task", new_title: null, description: "Review the spec with design first." } as const },
+        { key: "e", action: { type: "set_task_project", task_id: "slack:3", project_id: "C2" } as const },
       ],
       "slack:3",
       "Review the spec",
     );
     expect(changes).toEqual([
-      { key: "a", action: { type: "set_task_project", task_id: "slack:3", title: "Review the spec", project_id: "C1" } },
       { key: "d", action: { type: "update_task", task_id: "slack:3", title: "Review the spec", new_title: null, description: "Review the spec with design first." } },
+      { key: "e", action: { type: "set_task_project", task_id: "slack:3", title: "Review the spec", project_id: "C2" } },
     ]);
+  });
+});
+
+describe("a turn's changes to its task", () => {
+  const edit = (key: string, new_title: string | null, description: string | null) => ({ key, action: { type: "update_task", new_title, description } as const });
+  const move = (key: string, project_id: string) => ({ key, action: { type: "set_task_project", project_id } as const });
+
+  it("merges its edits field by field, so a rename and a later description both stand, and keeps its last move", () => {
+    const { make, merged } = mergeTaskChanges([edit("a", "Fix the export", null), move("m1", "C1"), edit("b", null, "First."), edit("c", null, "Second."), move("m2", "C2")]);
+    expect(make).toEqual([
+      { key: "c", action: { type: "update_task", new_title: "Fix the export", description: "Second." } },
+      { key: "m2", action: { type: "set_task_project", project_id: "C2" } },
+    ]);
+    expect(merged.map((c) => c.key)).toEqual(["a", "m1", "b"]);
+  });
+
+  it("makes nothing when there's nothing", () => {
+    expect(mergeTaskChanges([])).toEqual({ make: [], merged: [] });
   });
 });

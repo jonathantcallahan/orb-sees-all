@@ -378,7 +378,7 @@ function DueDate({ task, onChange }: { task: CardTask; onChange: () => void }) {
   return (
     <span className="due-date">
       <span className="due-pick">
-        <span className="due timestamp">{task.due ? `due ${formatWhen(task.due)}` : "Add due date"}</span>
+        <span className="due timestamp">{task.due ? `Due ${formatWhen(task.due)}` : "Add due date"}</span>
         <input
           type="date"
           aria-label="Due date"
@@ -859,42 +859,45 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   // A ticket's project, type and epic, shown on the card.
   const field = (name: string) => text.match(new RegExp(`^${name}:\\s*(.+)$`, "im"))?.[1]?.trim();
   const ticketWhere = ticket ? [field("project"), field("type"), field("epic") && `in ${field("epic")}`].filter(Boolean).join(" · ") || undefined : undefined;
+  // What it is, the same way for every kind: an eyebrow saying what's ready, then what it is or where
+  // it goes, on one line (all of it on hover).
+  const eyebrow = problem ? "Can't send this yet" : doc ? "Ready to create a Google Doc" : event ? "Ready to create an event" : ticket ? "Ready to file a Jira ticket" : send.to.startsWith("http") ? "Ready to reply" : "Ready to send";
+  const title = creates ? send.to : `${where.charAt(0).toUpperCase()}${where.slice(1)}`;
   return (
     <div className="handoff small">
-      <div className="handoff-head">
-        <span className="handoff-label">
-          {problem ? "Can't send this yet" : doc ? `Ready to create a Google Doc: ${send.to}` : event ? `Ready to create an event: ${send.to}` : ticket ? `Ready to file a Jira ticket: ${send.to}` : send.to.startsWith("http") ? `Ready to reply in ${where}` : `Ready to send to ${where}`}
-        </span>
-        <span className="action-buttons">
-          {!sending && (
-            <button
-              className="cta-ghost"
-              title={creates ? "Don't create this one" : "Don't send this one"}
-              onClick={async () => {
-                const link = (await db.getSessionLinks())[taskId];
-                await db.updateSessionLink(taskId, { dismissedKeys: [...(link?.dismissedKeys ?? []), send.key], edits: withEdit(link?.edits, send.key, null, send.text) });
-                onChange();
-              }}
-            >
-              Not this
-            </button>
-          )}
-          {problem ? (
-            <button className="cta-primary" disabled={!!chatBusy} title="Asks the chat to hand it over again, saying exactly where it goes" onClick={askToFix}>
-              Ask to fix
-            </button>
-          ) : (
-            <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
-              {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
-            </button>
-          )}
-        </span>
-      </div>
+      <span className="handoff-eyebrow">{eyebrow}</span>
+      <span className="handoff-title" title={title}>
+        {title}
+      </span>
       {problem ? (
         <div className="handoff-preview error">{problem}</div>
       ) : (
         <div className="muted handoff-preview">{when ?? ticketWhere ?? text.split("\n").find((l) => l.trim())?.replace(/^#+\s*/, "")}</div>
       )}
+      {/* Its buttons in a row of their own, under a line across the card. */}
+      <div className="handoff-actions action-buttons">
+        {!sending && (
+          <button
+            className="cta-ghost"
+            title={creates ? "Don't create this one" : "Don't send this one"}
+            onClick={async () => {
+              await db.updateSessionLink(taskId, (link) => ({ dismissedKeys: [...(link.dismissedKeys ?? []), send.key], edits: withEdit(link.edits, send.key, null, send.text) }));
+              onChange();
+            }}
+          >
+            Not this
+          </button>
+        )}
+        {problem ? (
+          <button className="cta-primary" disabled={!!chatBusy} title="Asks the chat to hand it over again, saying exactly where it goes" onClick={askToFix}>
+            Ask to fix
+          </button>
+        ) : (
+          <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
+            {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
+          </button>
+        )}
+      </div>
       {open && !problem && (
         <ComposeModal
           heading={creates ? `Create "${send.to}"` : send.to.startsWith("http") ? `Reply in ${where}` : `Send to ${where}`}
@@ -2002,7 +2005,8 @@ export function TaskCard({
         }
         hideSteps={!!chatDock}
         ask={chatAsk}
-        // Moving the task to another project is the one change its chat proposes, as a card to apply.
+        // Its changes to its task are made when its turn ends (see applyTaskChatChanges); one that
+        // wasn't (its turn was stopped or failed, or it's from before) shows as a card to apply.
         extra={
           <TaskChangeCards
             taskId={task.id}
@@ -2145,6 +2149,8 @@ export function TaskCard({
       ...(plan?.plan.steps ?? []).map((st) => ({ url: st.link, title: null })),
       ...(check?.evidence ?? []).map((e) => ({ url: e.link, title: e.title })),
       ...(watch?.links ?? []),
+      // Links its chat added as it worked.
+      ...(sessionLink?.links ?? []),
     ],
     [description],
   );
@@ -2308,7 +2314,7 @@ export function TaskCard({
     <>
     <article
       ref={cardRef}
-      className={`card task-card${ownsDock ? " selected" : ""}${watch ? " watched" : ""}${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
+      className={`card task-card${watch ? " watched" : ""}${collapsed ? " collapsed" : ""}${animating ? " animating" : ""}${drag.className} status-${task.status}${task.done ? " done" : ""}`}
       {...drag.attrs}
       onClick={
         collapsed
@@ -2340,11 +2346,11 @@ export function TaskCard({
                   {watch?.meta ?? (task.project && <span className="task-project">{task.project.name}</span>)}
                   {SOURCE_LABEL[task.source] && <span className={`source ${task.source}`}>{SOURCE_LABEL[task.source]}</span>}
                   {task.requester && <span>{task.requester}</span>}
-                  {watch ? task.due && <span className="due timestamp">due {formatWhen(task.due)}</span> : <DueDate task={task} onChange={onChange} />}
+                  {watch ? task.due && <span className="due timestamp">Due {formatWhen(task.due)}</span> : <DueDate task={task} onChange={onChange} />}
                   {created && (
                     // Just the day (in your time zone), not the time.
                     <span className="timestamp" title={new Date(created).toLocaleString()}>
-                      created {formatWhen(localDate(new Date(created)))}
+                      Created {formatWhen(localDate(new Date(created)))}
                     </span>
                   )}
                 </div>

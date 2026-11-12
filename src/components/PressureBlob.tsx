@@ -4,7 +4,7 @@ import { orbMood, type Pressure } from "../tasks";
 import { PressureBars } from "./PressureBars";
 import { NO_RIPPLE } from "./orbEffects";
 import { ORB_AGITATE_EVENT, ORB_SHOCK_EVENT, ORB_SPIN_EVENT, TASK_DONE_EVENT } from "../orbEvents";
-import { buildParticles } from "./orbParticles";
+import { buildParticles, type OrbMotes } from "./orbParticles";
 import { isDark, type Theme } from "../theme";
 import { buildGlassOrb } from "./glassOrb";
 import { buildPorcelainOrb } from "./porcelainOrb";
@@ -14,6 +14,7 @@ import { buildOpalOrb } from "./opalOrb";
 import { buildAuraOrb } from "./auraOrb";
 import { buildFrostOrb } from "./frostOrb";
 import { buildPrismOrb } from "./prismOrb";
+import { buildKittenOrb } from "./kittenOrb";
 import { listenToMusic, MusicResponse } from "../orbMusic";
 
 /** Rotation speed in radians per second at stress 0 and 1. */
@@ -22,8 +23,8 @@ const SPIN = { calm: 0.05, stressed: 1.1 };
 /** How far the orb turns toward the cursor, in radians (about 35 degrees). */
 const FACE_ANGLE = 0.6;
 
-/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain), Oren (film), Penelope (resin), Edith (opal), Ephedra (aura), Artemis (frost, the listening orb) and Moss (prism). */
-export type OrbLook = "crystal" | "glass" | "porcelain" | "film" | "resin" | "opal" | "aura" | "frost" | "prism";
+/** The orb looks a user can pick in Settings: Demian (crystal), Roth (glass), Ophelia (porcelain), Oren (film), Penelope (resin), Edith (opal), Ephedra (aura), Artemis (frost, the listening orb), Moss (prism) and Kitten (a gem with a star in it). */
+export type OrbLook = "crystal" | "glass" | "porcelain" | "film" | "resin" | "opal" | "aura" | "frost" | "prism" | "kitten";
 
 /** Mote colors for each look while Orb works: bright on a dark page, deeper on a light one. */
 /** How far above its surroundings a point must stand to count as a wave tip, per look (their waves differ in depth). */
@@ -37,6 +38,8 @@ const TIP: Record<OrbLook, [number, number]> = {
   aura: [0.006, 0.03],
   frost: [0.006, 0.03],
   prism: [0.006, 0.03],
+  // Kitten's motes come off its cross (see kittenOrb's MOTES), whose points and ridges stand out less.
+  kitten: [0.002, 0.02],
 };
 
 // The light ones are deep enough to read as small dots on a light page (they used to be about 40%
@@ -51,6 +54,8 @@ const MOTE_COLORS: Record<OrbLook, { dark: [number, number, number]; light: [num
   aura: { dark: [1.0, 0.97, 0.85], light: [0.32, 0.36, 0.48] },
   frost: { dark: [0.85, 0.85, 1.0], light: [0.27, 0.27, 0.55] },
   prism: { dark: [0.6, 0.9, 0.95], light: [0.04, 0.3, 0.37] },
+  // Kitten's motes are inside its glass, against it rather than the page, so only `dark` is used.
+  kitten: { dark: [0.9, 0.75, 1.0], light: [0.3, 0.18, 0.62] },
 };
 
 /**
@@ -95,17 +100,21 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       uWorking: { value: 0 },
     };
     const orb =
-      look === "prism" ? buildPrismOrb(uniforms) : look === "frost" ? buildFrostOrb(uniforms, renderer) : look === "aura" ? buildAuraOrb(uniforms) : look === "opal" ? buildOpalOrb(uniforms, renderer) : look === "resin" ? buildResinOrb(uniforms) : look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
+      look === "kitten" ? buildKittenOrb(uniforms) : look === "prism" ? buildPrismOrb(uniforms) : look === "frost" ? buildFrostOrb(uniforms, renderer) : look === "aura" ? buildAuraOrb(uniforms) : look === "opal" ? buildOpalOrb(uniforms, renderer) : look === "resin" ? buildResinOrb(uniforms) : look === "film" ? buildOrenOrb(uniforms, renderer) : look === "porcelain" ? buildPorcelainOrb(uniforms, renderer) : look === "glass" ? buildGlassOrb(uniforms, renderer) : buildGlassOrb(uniforms, renderer, "clear");
     if ("environment" in orb) scene.environment = orb.environment as THREE.Texture;
     const blob = orb.group;
     // Motes off the wave tips while Orb works; they ride along as the orb turns.
     const moteColor = new THREE.Color();
     // On a light page the motes' bright centers would vanish into it, so they're deepened instead.
     const lightPage = { value: 0 };
-    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look], lightPage);
+    // A look may give off its motes from inside its glass (Kitten's, off its cross): seen through
+    // the glass, against it rather than the page.
+    const motes = (orb as { motes?: OrbMotes }).motes ?? null;
+    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look], lightPage, motes ?? {});
+    if (motes) particles.points.layers.set(motes.layer);
     blob.add(particles.points);
     const paintMotes = () => {
-      const dark = isDark((document.documentElement.dataset.theme as Theme) ?? "system");
+      const dark = motes !== null || isDark((document.documentElement.dataset.theme as Theme) ?? "system");
       moteColor.setRGB(...MOTE_COLORS[look][dark ? "dark" : "light"]);
       lightPage.value = dark ? 0 : 1;
     };
@@ -179,9 +188,10 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // Artemis turns slowly too, about a sixth of their pace, so the music, not the spin, moves her.
     // Moss, a standing crystal, turns at about a fifth of their pace.
     // Demian and Oren turn at half the molten pace, so they drift rather than spin.
+    // Kitten, a gem, turns a little faster than the molten pace: about once every three minutes when calm.
     const spinScale =
-      look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : look === "crystal" || look === "film" ? 0.3 : 0.6;
-    const upright = look === "opal" || look === "prism";
+      look === "kitten" ? 0.7 : look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : look === "crystal" || look === "film" ? 0.3 : 0.6;
+    const upright = look === "opal" || look === "prism" || look === "kitten";
 
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
@@ -232,8 +242,8 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       const burst = spinAge < 3 ? 6 * push * push * (3 - 2 * push) * Math.exp(-spinAge * 2.4) : 0;
       const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress + burst) * motion * spinScale;
       blob.rotation.y += dt * spin;
-      // Edith and Moss stand upright: they turn only about their long axis (and lean toward the
-      // cursor with the facing group, coming back upright when it leaves); the others also tumble.
+      // Edith, Moss and Kitten stand upright: they turn only about their long axis (and lean toward
+      // the cursor with the facing group, coming back upright when it leaves); the others also tumble.
       if (upright) blob.rotation.x -= blob.rotation.x * Math.min(dt * 3, 1);
       else blob.rotation.x += dt * spin * 0.35;
       // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
@@ -245,7 +255,9 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       // A look that moves with something besides the shared uniforms (Artemis's music) steps it here.
       if ("update" in orb) (orb.update as (dt: number) => void)(dt);
       if ("prerender" in orb) (orb.prerender as (r: THREE.WebGLRenderer, s: THREE.Scene, c: THREE.Camera) => void)(renderer, scene, camera);
-      renderer.render(scene, camera);
+      // A look with a finish of its own (Kitten's glow and grain) draws itself to the screen.
+      if ("render" in orb) (orb.render as (r: THREE.WebGLRenderer, s: THREE.Scene, c: THREE.Camera) => void)(renderer, scene, camera);
+      else renderer.render(scene, camera);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -331,6 +343,13 @@ function glowColors(look: OrbLook, level: number): string[] {
       [[90, 205, 235], [235, 70, 50]],
       [[250, 235, 60], [245, 155, 40]],
       [[230, 110, 160], [225, 50, 110]],
+    ],
+    // Kitten: her royal blue, the magenta of her facets and the mint of her rim, warming to
+    // violet, hot pink and rose under stress.
+    kitten: [
+      [[70, 60, 235], [150, 60, 230]],
+      [[210, 80, 230], [250, 70, 150]],
+      [[90, 230, 200], [240, 140, 200]],
     ],
     // Oren: sea blue and aqua when calm, deepening to indigo under stress.
     film: [

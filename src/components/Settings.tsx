@@ -33,10 +33,11 @@ function dmHint(every: SelfDmEvery, state: SelfDmState | null): string {
   return today && state.runs > 0 ? `${what} ${state.runs} checks today, $${state.usd.toFixed(2)}.` : what;
 }
 
-/** A small set of choices shown side by side, the picked one raised: for settings with two or three values. */
+/** A small set of choices shown side by side, the picked one raised: for a setting with a few values (the visualizers have more). */
 function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
-    <div className="segmented" role="radiogroup" aria-label={label}>
+    // A long row of choices (the visualizers) sits a little tighter, so it fits beside its label.
+    <div className={`segmented${options.length > 5 ? " many" : ""}`} role="radiogroup" aria-label={label}>
       {options.map((o) => (
         <button key={o.value} role="radio" aria-checked={o.value === value} className={o.value === value ? "on" : undefined} onClick={() => onChange(o.value)}>
           {o.label}

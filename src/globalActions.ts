@@ -1,8 +1,9 @@
 /**
- * Changes the global chat proposes to the planner itself (see GlobalAction), described for their
- * card and applied when the user clicks Apply. Each applies with the same db and job functions the
- * rest of the app uses, then starts the refresh that brings the board up to date; the refresh runs
- * on in the background.
+ * Changes a chat makes to the planner itself (see GlobalAction), described in a line. The global
+ * chat's are applied when the user clicks Apply on their card; a task chat's own changes to its task
+ * are made when its turn ends (see applyTaskChatChanges). Each applies with the same db and job
+ * functions the rest of the app uses, then starts the refresh that brings the board up to date; the
+ * refresh runs on in the background.
  */
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
@@ -98,15 +99,70 @@ async function taskFor(a: { task_id?: string | null; title?: string | null }): P
   return id;
 }
 
+/** A task chat's change to its task: moving it to another project, or changing its title or description. */
+const isTaskChange = (a: GlobalAction | null): a is Extract<GlobalAction, { type: "set_task_project" | "update_task" }> =>
+  a?.type === "set_task_project" || a?.type === "update_task";
+
 /**
- * The changes a task's chat proposed that it may make: moving its own task to another project, and
- * changing its title or description (update_task), and nothing else. Each is made about this task,
- * whatever task the chat named.
+ * The changes a task's chat made that it may make: moving its own task to another project, and
+ * changing its title or description, and nothing else. Each is made about this task. One that names
+ * another task is left out: a chat changes only its own task.
  */
 export function taskChatChanges<T extends { action: GlobalAction | null }>(actions: T[], taskId: string, title: string): T[] {
-  return actions.flatMap((item) =>
-    item.action?.type === "set_task_project" || item.action?.type === "update_task" ? [{ ...item, action: { ...item.action, task_id: taskId, title } }] : [],
-  );
+  return actions.flatMap((item) => (isTaskChange(item.action) && (!item.action.task_id || item.action.task_id === taskId) ? [{ ...item, action: { ...item.action, task_id: taskId, title } }] : []));
+}
+
+/**
+ * A turn's changes to its task, as the ones to make: its edits merged into one (a field it set later
+ * wins, and one it left null keeps what an earlier edit set, so a rename and then a new description
+ * both stand), and its last move. The rest come back as `merged`, made as part of those.
+ */
+export function mergeTaskChanges<T extends { key: string; action: GlobalAction | null }>(changes: T[]): { make: T[]; merged: T[] } {
+  const edits = changes.filter((c) => c.action?.type === "update_task");
+  const moves = changes.filter((c) => c.action?.type === "set_task_project");
+  const make: T[] = [];
+  if (edits.length) {
+    const last = edits[edits.length - 1];
+    const merged = edits.reduce<Record<string, unknown>>((sum, c) => {
+      const a = c.action as Extract<GlobalAction, { type: "update_task" }>;
+      return { ...sum, ...(a.new_title != null ? { new_title: a.new_title } : {}), ...(a.description != null ? { description: a.description } : {}) };
+    }, {});
+    make.push({ ...last, action: { ...(last.action as object), new_title: null, description: null, ...merged } as GlobalAction });
+  }
+  if (moves.length) make.push(moves[moves.length - 1]);
+  return { make, merged: changes.filter((c) => !make.some((m) => m.key === c.key)) };
+}
+
+/**
+ * Makes the changes a task's chat made to its own task in a turn, when the turn ends, so it keeps the
+ * task current as it works without a card for the user to click: its description, its title if the
+ * user added it, its project. What came of each is kept on the chat's link, which tells the chat on
+ * its next turn (see taskChangesNote) and hides their cards.
+ */
+export async function applyTaskChatChanges(taskId: string, actions: { key: string; action: GlobalAction | null }[]): Promise<void> {
+  const others = actions.filter((c) => isTaskChange(c.action) && c.action.task_id && c.action.task_id !== taskId);
+  const mine = taskChatChanges(actions, taskId, "");
+  if (!mine.length && !others.length) return;
+  const [tasks, projects] = await Promise.all([knownTasks(), db.listProjects()]);
+  const title = tasks.find((t) => t.id === taskId)?.title ?? "this task";
+  const { make, merged } = mergeTaskChanges(mine.map((c) => ({ ...c, action: { ...(c.action as object), title } as GlobalAction })));
+  const names = actionNames(projects);
+  // In a line: a new description is the task's own to read, not the chat's to hear again each turn.
+  const summary = (a: GlobalAction) => {
+    const line = describeAction(a, names.project, names.channel, names.item);
+    return line.length > 160 ? `${line.slice(0, 157)}…` : line;
+  };
+  const results: Record<string, { summary: string; result: string }> = {};
+  for (const item of others) results[item.key] = { summary: summary(item.action!), result: "Not made: a task's chat changes only its own task." };
+  for (const item of merged) results[item.key] = { summary: summary(item.action!), result: "Made together with your later change." };
+  for (const item of make) {
+    try {
+      results[item.key] = { summary: summary(item.action!), result: await applyAction(item.action!, undefined, summary(item.action!)) };
+    } catch (e) {
+      results[item.key] = { summary: summary(item.action!), result: `Couldn't make it: ${(e as Error).message}` };
+    }
+  }
+  await db.updateSessionLink(taskId, (link) => ({ applied: { ...(link.applied ?? {}), ...results } }));
 }
 
 /** A plan's steps in a line, for its card and for the task's chat. */

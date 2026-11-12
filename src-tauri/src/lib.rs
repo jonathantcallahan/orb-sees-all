@@ -1,4 +1,5 @@
 mod listen;
+mod media;
 mod runs;
 mod sessions;
 
@@ -892,6 +893,9 @@ pub fn run() {
             sessions::list_sessions,
             listen::start_listening,
             listen::stop_listening,
+            media::now_playing,
+            media::media_control,
+            media::open_player,
             cancel_run,
             cancel_all_runs,
             setup_login_command

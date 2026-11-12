@@ -18,6 +18,7 @@ import { createdAt, sortTasks, type TaskSort } from "../taskDates";
 import { useJobStatus } from "../useAppData";
 import { TaskCard, type CardTask } from "./TaskCard";
 import { DropZone, TaskDragProvider, type DropZoneId, type Flip } from "./taskDrag";
+import { setPomodoroTask, usePomodoroActive, usePomodoroTask } from "../pomodoro";
 
 function Group({
   title,
@@ -385,39 +386,49 @@ export function TaskColumn({
   const estimate = (t: (typeof planned)[number]) =>
     taskEstimate(plans.get(t.id)?.plan, t.source === "manual" ? assessments.get(t.id) : "assessment" in t ? t.assessment : null) ?? 0;
   const remaining = planned.filter((t) => !t.done).reduce((sum, t) => sum + estimate(t), 0);
+  // While a pomodoro runs, the task you're focusing on (dragged into Active pomodoro task) shows
+  // there instead of in Today's tasks; once it's done, or no longer planned for today, it goes back.
+  const pomodoroActive = usePomodoroActive();
+  // Null unless a series is running or paused.
+  const pomodoroTaskId = usePomodoroTask();
+  const focusTask = planned.find((t) => t.id === pomodoroTaskId && !t.done);
+  const todayList = focusTask ? planned.filter((t) => t.id !== focusTask.id) : planned;
+  const card = (t: (typeof planned)[number]) => (
+    <TaskCard
+      key={t.id}
+      task={t}
+      plan={plans.get(t.id)}
+      planning={running.includes(`plan:${t.id}`)}
+      manualAssessment={assessments.get(t.id)}
+      assessing={running.includes("assess")}
+      check={taskChecks[t.id]}
+      sessionLink={sessionLinks[t.id]}
+      manualPriority={priorityOverrides[t.id]}
+      openTasks={openTasks}
+      duplicateOf={duplicates.get(t.id)}
+      mergedIn={mergedFrom[t.id]}
+      // Finished tasks shrink to a one-line row (click to see the card again).
+      compact={t.done}
+      created={createdOf(t)}
+      unread={unread?.has(t.id)}
+      onSeen={onSeen && (() => onSeen(t.id))}
+      onChange={onChange}
+    />
+  );
   const todayGroup = (
-    <DropZone zone="today" className={`today-plan${planned.length ? "" : " empty"}`}>
+    <DropZone zone="today" className={`today-plan${planned.length || pomodoroActive ? "" : " empty"}`}>
+      {pomodoroActive && (
+        <DropZone zone="pomodoro" className={`pomodoro-task${focusTask ? "" : " empty"}`}>
+          <h4 className="section-title">Active pomodoro task</h4>
+          {focusTask ? card(focusTask) : <p className="muted small">Drag a task here to focus on it.</p>}
+        </DropZone>
+      )}
       <h4 className="section-title today-heading">
         Today's tasks
         {/* The time the open tasks still need. */}
         {remaining > 0 && <span className="today-total">{formatMinutes(remaining)}</span>}
       </h4>
-      {planned.length === 0 ? (
-        <p className="muted small">Drag tasks here to plan your day.</p>
-      ) : (
-        planned.map((t) => (
-          <TaskCard
-            key={t.id}
-            task={t}
-            plan={plans.get(t.id)}
-            planning={running.includes(`plan:${t.id}`)}
-            manualAssessment={assessments.get(t.id)}
-            assessing={running.includes("assess")}
-            check={taskChecks[t.id]}
-            sessionLink={sessionLinks[t.id]}
-            manualPriority={priorityOverrides[t.id]}
-            openTasks={openTasks}
-            duplicateOf={duplicates.get(t.id)}
-            mergedIn={mergedFrom[t.id]}
-            // Finished tasks shrink to a one-line row (click to see the card again).
-            compact={t.done}
-            created={createdOf(t)}
-            unread={unread?.has(t.id)}
-            onSeen={onSeen && (() => onSeen(t.id))}
-            onChange={onChange}
-          />
-        ))
-      )}
+      {todayList.length === 0 ? <p className="muted small">Drag tasks here to plan your day.</p> : todayList.map(card)}
     </DropZone>
   );
 
@@ -466,8 +477,21 @@ export function TaskColumn({
   );
 
   // Dropping a task puts it where you let go: in Today or All tasks, before the card it landed above.
-  // Dropping on Today plans it; dropping it in All tasks unplans it.
+  // Dropping on Today plans it; dropping it in All tasks unplans it. Dropping it on Active pomodoro
+  // task makes it the task you're focusing on (planning it for today if it wasn't), unless it's
+  // finished; dragging it out of there, into either list, takes it off.
   const moveTask = async (id: string, to: DropZoneId, before: string | null, flip: Flip) => {
+    if (to === "pomodoro") {
+      if ([...planned, ...allTasks].find((t) => t.id === id)?.done) return;
+      if (planned.some((t) => t.id === id)) return setPomodoroTask(id);
+      // Into Today first, in the same render, so the slot (which shows only Today's tasks) has it.
+      setPendingZone((cur) => ({ ...cur, [id]: "today" }));
+      setPomodoroTask(id);
+      await setTaskState(id, { todayOn: today });
+      onChange();
+      return;
+    }
+    if (id === pomodoroTaskId) setPomodoroTask(null);
     const list = to === "today" ? "today" : "all";
     const ids = (to === "today" ? planned : allTasks).map((t) => t.id);
     const next = reorder(ids, id, before);

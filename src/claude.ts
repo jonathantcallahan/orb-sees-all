@@ -8,7 +8,12 @@ const GMAIL = "mcp__claude_ai_Gmail__";
 const GCAL = "mcp__claude_ai_Google_Calendar__";
 const ZOOM = "mcp__claude_ai_Zoom_for_Claude__";
 const GRANOLA = "mcp__claude_ai_Granola__";
-const AMPLITUDE = "mcp__claude_ai_Amplitude__";
+/**
+ * Amplitude's tools, under both names they can have: the claude.ai connector's, and an Amplitude
+ * server added to Claude Code itself ("Amplitude"). With both set up, Claude Code keeps only the one
+ * added to it, so runs see "mcp__Amplitude__…" and every call by the connector's name is refused.
+ */
+const amplitude = (tools: string[]) => ["mcp__claude_ai_Amplitude__", "mcp__Amplitude__"].flatMap((server) => tools.map((t) => `${server}${t}`));
 
 export const TOOLS = {
   slackRead: [
@@ -51,7 +56,7 @@ export const TOOLS = {
    * queries. Nothing that creates, changes or shares (events, properties, dashboards, flags, cohorts,
    * comments), none of its UI widgets (render_*), and not run_amp, which can write.
    */
-  amplitudeRead: [
+  amplitudeRead: amplitude([
     "get_amplitude_context",
     "search_amp_entities",
     "search_amp_data_taxonomy",
@@ -64,13 +69,13 @@ export const TOOLS = {
     "get_amp_session_replay_info",
     "get_agent_results",
     "use_amplitude_ai_feedback",
-  ].map((t) => `${AMPLITUDE}${t}`),
+  ]),
   /**
    * Amplitude feature-flag experiments and flags: reading and analyzing them, and also creating,
    * changing, starting and rolling them out (one tool does both, by its action), so given only to a
    * task's chat, where the user is in the conversation, and only told to change one when asked.
    */
-  amplitudeExperiments: ["use_amp_experiments", "use_amp_flags"].map((t) => `${AMPLITUDE}${t}`),
+  amplitudeExperiments: amplitude(["use_amp_experiments", "use_amp_flags"]),
   /** Zoom meetings: their AI summaries, notes, transcripts and recordings, reading only. */
   zoomRead: [
     "search_meetings",
@@ -107,6 +112,13 @@ export const TOOLS = {
   docCreate: ["mcp__claude_ai_Google_Drive__create_file"],
   /** Creating a calendar event, used only for an invite the user reviewed and clicked Create on. */
   eventCreate: [`${GCAL}create_event`, `${GCAL}suggest_time`],
+  /**
+   * Searching the web, for chats (a task's, the Demian chat, a watched topic's), not background jobs.
+   * It reads search results and sends nothing but the query. Fetching pages (WebFetch) stays off
+   * everywhere: a run reads Slack and email, and a page's address is somewhere words planted in those
+   * could send what the run has read.
+   */
+  webSearch: ["WebSearch"],
   /** Filing a Jira ticket, used only for one the user reviewed and clicked Create on: create it, put it in its epic, link it. */
   ticketCreate: ["mcp__mcp-jira__jira_create_issue", "mcp__mcp-jira__jira_link_to_epic", "mcp__mcp-jira__jira_create_issue_link", "mcp__mcp-jira__jira_get_issue", "mcp__mcp-jira__jira_search"],
 };
@@ -126,15 +138,15 @@ const RUN_SETTINGS = JSON.stringify({
   permissions: { blockReadsOutsideWorkingDirectories: true },
 });
 
-// Belt and braces: built-in tools that could touch the machine are denied outright. So is U-Know,
-// a company knowledge-base connector, which runs no longer use.
+// Belt and braces: built-in tools that could touch the machine, or send what a run has read to an
+// address of its choosing (WebFetch), are denied outright. So is U-Know, a company knowledge-base
+// connector, which runs no longer use.
 const DISALLOWED = [
   "Bash",
   "Edit",
   "Write",
   "NotebookEdit",
   "WebFetch",
-  "WebSearch",
   "Agent",
   ...["ask_uknow", "ask_uknow_session", "list_knowledge_bases"].map((t) => `mcp__claude_ai_U-Know__${t}`),
   // The Atlassian (Rovo) connector reaches Jira Cloud, where the team's issues aren't yet: it would
@@ -239,10 +251,11 @@ export const WRITE_TOOLS = [
   // With these visible, a session asked for a doc tries to make it itself and stalls on the
   // permission instead of handing it to Orb.
   ...["create_file", "copy_file", "update_file", "share_file", "trash_file"].map((t) => `mcp__claude_ai_Google_Drive__${t}`),
-  // Amplitude: everything that creates, changes, shares or rolls out (taxonomy, dashboards, notebooks,
-  // cohorts, metrics, comments, sharing, and run_amp, which can write). Its experiment and flag tools
-  // also change what real users see, so they're here too; a chat gets them only on a turn you started.
-  ...[
+  // Amplitude: everything that creates, changes, shares or rolls out (taxonomy, transformations,
+  // dashboards, notebooks, cohorts, metrics, chart monitors and their alerts, comments, sharing, and
+  // run_amp, which can write). Its experiment and flag tools also change what real users see, so
+  // they're here too; a chat gets them only on a turn you started.
+  ...amplitude([
     "run_amp",
     "manage_amp_entities",
     "manage_amp_events",
@@ -258,18 +271,23 @@ export const WRITE_TOOLS = [
     "use_amplitude_cohorts",
     "use_amplitude_metrics",
     "use_amp_ai_visibility",
-  ].map((t) => `${AMPLITUDE}${t}`),
+    "use_amplitude_chart_monitors",
+    "update_event_transformations",
+    "update_property_transformations",
+    "delete_event_transformations",
+    "delete_property_transformations",
+  ]),
   // Granola is for reading meetings: nothing changes its notes or folders, writes summaries into it, or signs out of it.
   ...["add_note_to_folder", "create_folder", "remove_note_from_folder", "update_folder", "update_private_notes", "generate_summary", "sign_out"].map((t) => `${GRANOLA}${t}`),
 ];
 
 /**
- * What a run is denied: the built-in tools that could touch the machine, and every write tool it
- * wasn't given.
+ * What a run is denied: the built-in tools that could touch the machine, web search unless it's a
+ * chat (TOOLS.webSearch), and every write tool it wasn't given.
  */
 export function deniedTools(granted: string[]): string[] {
   const given = new Set(granted);
-  return [...DISALLOWED, ...WRITE_TOOLS.filter((t) => !given.has(t))];
+  return [...DISALLOWED, ...[...TOOLS.webSearch, ...WRITE_TOOLS].filter((t) => !given.has(t))];
 }
 
 /**
@@ -564,7 +582,7 @@ export const SESSION_DISPLAY = [
   "Keep it brief: say what you did or found, and what you need from me, if anything. Put links in as plain URLs.",
   "The [orb] progress lines and send blocks are the exception: keep writing them exactly as described. Orb hides them from the chat.",
   "You can't post to Slack or send anything yourself: this session's send tools are turned off, and Orb does the sending once I approve. When a Slack message is ready, even one I've told you to send, hand it to Orb as a block: a line `[orb] send step N to <#channel-name, @person for a DM (their Slack user ID, like @U0123ABCD, when you know it, else their full name), for a group DM each of its people the same way, comma-separated (@U0123ABCD, @U0456EFGH), or the permalink of the thread to reply in> (<where that is, in words: '#channel-name', 'DM with Ana' or 'group DM with Ana, Ben'>)`, then the message exactly as it should be posted, then a line `[orb] end`. Then write `[orb] step N waiting: review and send the message` and stop. Orb tells you once it's sent, with its link.",
-  "Don't try to save memories, notes or files (you can't write files here). When I state a lasting preference about how I work or how you should plan, write or prioritize (\"don't make tasks for hypothetical future work\"), hand it to Orb on its own line: `[orb] remember <scope>: <the preference, as an instruction>`, where scope is plans, writing, tasks, priority, projects or global. Orb keeps it and applies it to every later plan, refresh and session; tell me it's saved.",
+  "Don't try to save memories or files (you can't write files here; a task's notes go to Orb in an [orb] notes block). When I state a lasting preference about how I work or how you should plan, write or prioritize (\"don't make tasks for hypothetical future work\"), hand it to Orb on its own line: `[orb] remember <scope>: <the preference, as an instruction>`, where scope is plans, writing, tasks, priority, projects or global. Orb keeps it and applies it to every later plan, refresh and session; tell me it's saved.",
   "You can read only the folders this session was given: you can't add one (no /add-dir here), and don't suggest changing settings to get at others. When you need code you weren't given, write `[orb] code <owner/name on GitHub, the repo's name, or the checkout's folder>` on its own line, say in a sentence what you're getting, and stop. Orb adds it if it's a code checkout on this computer or a GitHub repo it can copy, then tells you to carry on.",
   "To find a conversation with someone in Slack, look up their user id first (slack_search_users), then search with `with:<@USERID>` (a name there doesn't match) and include DMs and group DMs (channel_types \"public_channel,private_channel,mpim,im\"). Try a few searches (by person, by channel, by a distinctive word) before saying you can't find something, and say what you searched.",
   "You can read my Google Calendar (list, search and open events, and find free time with suggest_time), so use it whenever a step depends on my schedule or a meeting; don't say you lack calendar access. You can't create, change or answer events yourself, but Orb can: when I want a meeting scheduled, find a time that works for everyone: get each attendee's email address (slack_search_users, then slack_read_user_profile, or from my email), then call suggest_time with all of them, me included, over the next few working days in working hours (or the window I asked for), and take the earliest slot it gives that's free for every one of them. Never guess a time or pick one from my calendar alone. Then hand the invite to Orb as a block: a line `[orb] event step N: <the event's title>` (or `[orb] event: <title>` when it isn't a plan step), then lines `when: <date, start and end time, e.g. 2026-11-04 14:00-14:30>`, `who: <attendees' email addresses, comma separated>` (look them up in Slack or my email if you need to; leave the line out for a hold on my own calendar), `meet: yes` for a video call, then a blank line and the description, then `[orb] end`. Tell me in a line that the time is free for everyone, or who you couldn't check. Then, if it's a plan step, write `[orb] step N waiting: review and create the invite`, and stop. Orb shows it to me to review, creates it and sends the invites, then tells you its link.",

@@ -4,9 +4,9 @@ import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { runClaude, runSessionTurn, TOOLS } from "../claude";
 import * as db from "../db";
 import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
-import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt } from "../openInClaude";
+import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt, sessionMarker } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
-import { codeRequests, connectSession, currentSessionSteps, listSessions, linkSession, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { codeRequests, connectSession, currentSessionSteps, latestNotes, listSessions, linkSession, parseActions, parseTaskLinks, withChatLinks, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
@@ -582,7 +582,8 @@ const WATCH_CHAT_CONTEXT = [
 
 /**
  * Given on every turn of a task's chat: the project it's filed under, the projects it could move
- * to, and how to propose the move (a card the user applies), plus what came of earlier ones.
+ * to, and how it changes its task as it works (made when its turn ends, see applyChatChanges), plus
+ * what came of its recent changes.
  */
 async function taskChangesNote(taskId: string, own: db.Project | null, link: SessionLink | undefined): Promise<string> {
   const tracked = (await db.listProjects()).filter((p) => p.state === "tracked");
@@ -591,10 +592,15 @@ async function taskChangesNote(taskId: string, own: db.Project | null, link: Ses
   const mine = taskId.startsWith("manual:");
   return [
     own ? `My planner files this task under the project "${projectName(own)}" [id ${own.channel_id}].` : "My planner doesn't file this task under any project.",
-    "Two kinds of change to this task can be proposed here, each as its own block, which my planner shows me as a card to apply. Propose one only when I ask for it, and nothing else of this kind.",
-    `- If I want to change what this task says, its ${mine ? "title or " : ""}description:\n[orb] action\n{"type": "update_task", ${mine ? '"new_title": "..." or null, ' : ""}"description": "..." or null}\n[orb] end\nnull leaves it as it is.${mine ? ` A new title: ${TITLE_RULE}` : " Its title comes from where the task was found, so only its description can change."}`,
+    "You keep this task current yourself as you work, with the blocks below. My planner takes them when your turn ends, with nothing for me to click, and tells you how a change went on your next turn. So don't ask me first or say you can't: do it, and say in a sentence what you changed.",
+    `- Its ${mine ? "title and " : ""}description say what the task is: what's asked, for whom, and what done looks like, in a few plain sentences. Rewrite the whole description when that changes, or when I ask, and never add a findings section, a log or a list of links to it:\n[orb] action\n{"type": "update_task", ${mine ? '"new_title": "..." or null, ' : ""}"description": "..." or null}\n[orb] end\nnull leaves it as it is.${mine ? ` A new title: ${TITLE_RULE}` : " Its title comes from where the task was found, so only its description can change."}`,
+    '- The tickets, PRs, threads and docs it involves go on its links, which I see on the task, as you find them: one a line, "Title | url", the title a few words naming the thing ("ABC-123 checkout redesign epic"). They add to its links; one already there isn\'t added again.\n[orb] links\nTitle | https://...\n[orb] end',
+    "- What you find as you work (findings, where things stand, what you've ruled out) goes in your notes on the task. I don't see them; they're given back to you every turn, even in a new conversation. Write them whole each time, short and current:\n[orb] notes\n...\n[orb] end",
+    "If its description ever has findings or a list of links in it, move them out: the links to its links, the findings to your notes, and the description rewritten without them.",
     `- If I say it belongs to a different project:\n[orb] action\n{"type": "set_task_project", "project_id": "<id from the list below>"}\n[orb] end\nUse an id from this list, and ask me if more than one could fit:\n${tracked.map((p) => `- ${projectName(p)} [id ${p.channel_id}]`).join("\n")}`,
-    applied.length ? `Changes you proposed that I applied: ${applied.map((a) => `${a.summary}. ${a.result}`).join(" ")}` : "",
+    link?.links?.length ? `Its links from you so far: ${link.links.map((l) => `${l.title ?? "(no title)"} | ${l.url}`).join("; ")}` : "",
+    link?.notes ? `Your notes on this task:\n${link.notes}` : "",
+    applied.length ? `Changes you made to this task, the latest last: ${applied.slice(-6).map((a) => `${a.summary}. ${a.result}`).join(" ")}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -874,9 +880,10 @@ const TICKET_REMINDER =
 const DOC_REMINDER =
   ORB_NOTE + " you can make Google Docs here, through me. Write the doc as a block, a line `[orb] doc: <title>` (or `[orb] doc step N: <title>` for a plan step), then its content in Markdown, then `[orb] end`. I show it to the user to review and create it in their Drive, then send you its link. Don't call any Drive or Docs tool, and don't say you can't make docs or that it needs a permission; if you said so earlier, that was wrong.)";
 
-// A task's chat also gets Amplitude's experiment and flag tools, which can change them too: the user
-// is in the conversation, and SESSION_DISPLAY says to change one only when they ask.
-const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead];
+// A chat also searches the web, which background jobs don't. A task's chat also gets Amplitude's
+// experiment and flag tools, which can change them too: the user is in the conversation, and
+// SESSION_DISPLAY says to change one only when they ask.
+const SESSION_TOOLS = [...TOOLS.slackRead, ...TOOLS.gmailRead, ...TOOLS.calendarRead, ...TOOLS.driveRead, ...TOOLS.jiraRead, ...TOOLS.zoomRead, ...TOOLS.amplitudeRead, ...TOOLS.webSearch];
 /**
  * A chat's tools on a turn you started (your message, or a button you pressed): the Amplitude
  * experiment and flag tools too, which can change what real users see. A turn Demian starts itself
@@ -988,6 +995,8 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         };
         // Asked for a doc: say plainly how, every time. A session that once decided it can't make
         // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
+        // What the chat had already written, so only this turn's changes to its task are made after it.
+        const blocksBefore = taskChat ? (await chatBlocks(taskId).catch(() => [])).length : 0;
         const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
         const turn = await runSessionTurn({ signal: stopper.signal, prompt: asked, tools: sessionTools(byUser), ...SESSION_MODEL, resume: link?.sessionId, cwd: link?.cwd, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
@@ -998,6 +1007,8 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         });
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
         if (turn.error) throw new Error(turn.error);
+        // The changes it made to its task this turn (its description, title, project, links, notes).
+        if (taskChat) await applyChatChanges(taskId, blocksBefore).catch(() => {});
         // Code it asked to read: added for its next turns, and it's told so it carries on. That turn
         // waits for this one to finish (see continueTaskSession), so it isn't awaited here.
         const note = await addRequestedCode(taskId).catch(() => null);
@@ -1010,6 +1021,42 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
       }
     }),
   ).finally(done);
+}
+
+/**
+ * The "[orb] …" blocks a task's chat has written so far, from its transcript. It's found by its
+ * marker if the card hasn't found it yet (it looks every few seconds while the card is shown).
+ */
+async function chatBlocks(taskId: string): Promise<{ header: string; body: string }[]> {
+  const link = (await db.getSessionLinks())[taskId];
+  if (!link) return [];
+  let path = link.path;
+  if (!path) {
+    const found = await invoke<{ path: string; sessionId: string } | null>("find_session", { marker: sessionMarker(taskId), sinceMs: link.startedAt });
+    if (!found) return [];
+    path = found.path;
+    await db.updateSessionLink(taskId, { path: found.path, sessionId: found.sessionId });
+  }
+  const { sends } = await invoke<{ sends: { header: string; body: string }[] }>("read_session_progress", { path });
+  return sends;
+}
+
+/**
+ * A task chat's changes to its task in the turn just ended (its blocks after the first `before`): the
+ * links it added and its notes, kept on its link, and its changes to the task itself, made (see
+ * applyTaskChatChanges). Only that turn's: a change from an earlier one that was never made (a
+ * stopped turn's, or one from before chats made their own changes) stays a card to apply.
+ */
+async function applyChatChanges(taskId: string, before: number): Promise<void> {
+  const fresh = (await chatBlocks(taskId)).slice(before);
+  if (!fresh.length) return;
+  const added = parseTaskLinks(fresh);
+  const notes = latestNotes(fresh);
+  if (added.length || notes !== null) {
+    await db.updateSessionLink(taskId, (link) => ({ ...(added.length ? { links: withChatLinks(link.links ?? [], added) } : {}), ...(notes !== null ? { notes } : {}) }));
+  }
+  const { applyTaskChatChanges } = await import("../globalActions");
+  await applyTaskChatChanges(taskId, parseActions(fresh));
 }
 
 /**

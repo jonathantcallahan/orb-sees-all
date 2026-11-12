@@ -524,3 +524,38 @@ describe("connecting a session you started yourself", () => {
     for (const id of Object.keys(links)) delete links[id];
   });
 });
+
+describe("a task chat's links and notes", () => {
+  const block = (header: string, body: string) => ({ header, body });
+
+  it("reads links written as Title | url, Markdown or a bare url, each url once", async () => {
+    const { parseTaskLinks } = await import("./sessions");
+    const links = parseTaskLinks([
+      block("[orb] links", "ABC-123 checkout redesign epic | https://jira.example.com/browse/ABC-123\n- [PR 12](https://github.com/o/r/pull/12)\nhttps://example.slack.com/archives/C1/p2."),
+      block("[orb] action", '{"type": "update_task", "description": "https://not-a-link.example.com"}'),
+      block("[orb] links", "1. The epic again | https://jira.example.com/browse/ABC-123"),
+    ]);
+    expect(links).toEqual([
+      { url: "https://jira.example.com/browse/ABC-123", title: "The epic again" },
+      { url: "https://github.com/o/r/pull/12", title: "PR 12" },
+      { url: "https://example.slack.com/archives/C1/p2", title: null },
+    ]);
+  });
+
+  it("keeps the latest notes, and adds new links to the ones it had", async () => {
+    const { latestNotes, withChatLinks } = await import("./sessions");
+    expect(latestNotes([block("[orb] notes", "Old."), block("[orb] links", "x"), block("[orb] notes", "  Reads from BigQuery.\n")])).toBe("Reads from BigQuery.");
+    expect(latestNotes([block("[orb] links", "x")])).toBeNull();
+    expect(withChatLinks([{ url: "https://a.example.com", title: "A" }], [{ url: "https://a.example.com", title: null }, { url: "https://b.example.com", title: "B" }])).toEqual([
+      { url: "https://a.example.com", title: "A" },
+      { url: "https://b.example.com", title: "B" },
+    ]);
+  });
+
+  it("hides them from the chat", async () => {
+    const { readableReply } = await import("./sessions");
+    expect(readableReply("Added the epic.\n[orb] links\nEpic | https://jira.example.com/browse/X-1\n[orb] end\n[orb] notes\nReads from BigQuery.\n[orb] end")).toBe("Added the epic.");
+    // A one-line note is just a line: it doesn't hide what follows.
+    expect(readableReply("[orb] notes: reads from BigQuery\nThe table is built upstream.\n[orb] send to #team\nHi\n[orb] end")).toBe("The table is built upstream.");
+  });
+});

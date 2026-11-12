@@ -382,10 +382,9 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
                 }
                 if trimmed.starts_with("[orb]") {
                     lines.push(trimmed.to_string());
-                    // Hand-offs ("[orb] send …"), plan updates ("[orb] plan") and proposed changes ("[orb] action")
-                    // carry a block of text up to "[orb] end".
+                    // Some carry a block of text up to "[orb] end" (see BLOCK_KINDS).
                     let lower = trimmed.to_ascii_lowercase();
-                    if lower.starts_with("[orb] send") || lower.starts_with("[orb] plan") || lower.starts_with("[orb] action") || lower.starts_with("[orb] doc") || lower.starts_with("[orb] event") || lower.starts_with("[orb] ticket") {
+                    if opens_block(&lower) {
                         open = Some((trimmed.to_string(), Vec::new()));
                     }
                 }
@@ -395,9 +394,30 @@ pub async fn read_session_progress(path: String) -> Result<SessionProgress, Stri
     Ok(SessionProgress { lines, sends, messages, blocked, modified_ms: modified_ms(&file_path) })
 }
 
+/// The "[orb] …" lines that open a block of text up to "[orb] end": hand-offs ("[orb] send …", and
+/// docs, events and tickets to create), plan updates ("[orb] plan"), proposed changes ("[orb]
+/// action"), and a task chat's links for its task and its notes on it ("[orb] links", "[orb] notes").
+const BLOCK_KINDS: [&str; 8] = ["send", "plan", "action", "doc", "event", "ticket", "links", "notes"];
+
+/// Whether an "[orb] …" line (lowercased) opens a block. Links and notes do only on a line of their
+/// own: "[orb] notes: …" written on one line must not take in all that follows up to some later end.
+fn opens_block(lower: &str) -> bool {
+    BLOCK_KINDS.iter().any(|kind| lower.starts_with(&format!("[orb] {kind}")))
+        && ["links", "notes"].iter().all(|kind| !lower.starts_with(&format!("[orb] {kind}")) || lower.trim_end_matches(':').trim_end() == format!("[orb] {kind}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opens_links_and_notes_only_on_a_line_of_their_own() {
+        assert!(opens_block("[orb] notes"));
+        assert!(opens_block("[orb] links:"));
+        assert!(!opens_block("[orb] notes: reads from bigquery"));
+        assert!(opens_block("[orb] send step 2 to #general"));
+        assert!(!opens_block("[orb] step 2 done"));
+    }
 
     #[test]
     fn finds_the_marked_session_and_reads_only_claudes_reports() {
@@ -407,7 +427,7 @@ mod tests {
         let user = r#"{"type":"user","message":{"role":"user","content":"Orb task: t-42\n\nWrite `[orb] step N done` when finished."}}"#;
         let reply = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading it now.\n[orb] step 1 started\n`[orb] step 1 done`"}]}}"#;
         let waiting = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[orb] step 2 waiting: need the export"}]}}"#;
-        let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end\n[orb] action\n{\"type\": \"add_note\", \"text\": \"Refunds is paused\"}\n[orb] end"}]}}"#;
+        let send = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here it is.\n[orb] send step 3 to #tmp-x\nHeads up, the filter is live.\n• Use `publisherId=`\n[orb] end\n[orb] action\n{\"type\": \"add_note\", \"text\": \"Refunds is paused\"}\n[orb] end\n[orb] links\nThe epic | https://jira.example.com/browse/X-1\n[orb] end\n[orb] notes\nReads from BigQuery.\n[orb] end"}]}}"#;
         let refused = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"/Users/me/storefront-ui/src is outside /Users/me/work; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories."}]}}"#;
         // What Claude Code adds in a session you run yourself isn't a message of yours; one you type
         // with a note attached (its content as blocks) is.
@@ -429,7 +449,7 @@ mod tests {
             let progress = read_session_progress(found.path).await.unwrap();
             assert_eq!(
                 progress.lines,
-                vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x", "[orb] action"]
+                vec!["[orb] step 1 started", "[orb] step 1 done", "[orb] step 2 waiting: need the export", "[orb] send step 3 to #tmp-x", "[orb] action", "[orb] links", "[orb] notes"]
             );
             assert_eq!(progress.messages[0].role, "user");
             assert_eq!(progress.messages[0].text, "Orb task: t-42\n\nWrite `[orb] step N done` when finished.");
@@ -446,6 +466,8 @@ mod tests {
                         body: "Heads up, the filter is live.\n• Use `publisherId=`".into()
                     },
                     SessionSend { header: "[orb] action".into(), body: r#"{"type": "add_note", "text": "Refunds is paused"}"#.into() },
+                    SessionSend { header: "[orb] links".into(), body: "The epic | https://jira.example.com/browse/X-1".into() },
+                    SessionSend { header: "[orb] notes".into(), body: "Reads from BigQuery.".into() },
                 ]
             );
             assert!(find_session("Orb task: t-99".into(), 0).await.unwrap().is_none());

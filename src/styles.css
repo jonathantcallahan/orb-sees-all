@@ -214,7 +214,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .due-clear:hover { color: var(--text); }
 .source.slack { color: #9b5de5; }
 .source.email { color: var(--accent); }
-.description { margin: 0; white-space: pre-wrap; position: relative; color: var(--muted); }
+/* Long words (links) break onto the next line rather than run past the card. */
+.description { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; position: relative; color: var(--muted); }
 .description.placeholder { cursor: text; font-style: italic; }
 .description:not(.placeholder) { cursor: default; }
 .follow-up-kind, .automation-kind { font-size: 11px; color: var(--muted); flex-shrink: 0; }
@@ -286,9 +287,9 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Project cards: badges, description, blockers, selection */
 .project { cursor: pointer; }
-/* Inset so the scrolling column can't clip the outline. A task whose chat is open in the dock
-   beside the list is marked the same way. */
-.project.selected, .task-card.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* The open project: the accent on the card's left side only, inset so the scrolling column can't
+   clip it, following its rounded corners. */
+.project.selected { border-left-color: var(--accent); box-shadow: inset 1px 0 0 var(--accent); }
 /* A whole-pixel line height keeps the badge a whole 18px tall: at 1.45 it's 17.94px, and on a
    half-pixel top WebKit rounds its top up and its bottom down, dropping its last row. */
 .badge { font-size: 11px; line-height: 16px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
@@ -390,8 +391,18 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The hint's own paragraph margins would leave extra space under it. */
 .today-plan.empty > p { margin: 0; }
 .today-plan.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 10%, transparent); }
-/* Room for a card being dragged in (taskDrag.tsx sets --drop-room), opening as the cards make way for it. */
+/* Room for a card being dragged in (taskDrag.tsx sets --drop-room), opening as the cards make way for it.
+   Each list's own: Active pomodoro task, inside Today's box, mustn't take on the room opened in Today
+   (it would grow too, push Today's cards from under the pointer and snap the drag back to itself). */
+@property --drop-room { syntax: "<length>"; inherits: false; initial-value: 0px; }
 .today-plan, .today-plan.empty { padding-bottom: calc(10px + var(--drop-room, 0px)); transition: border-color 0.15s, background 0.15s, padding-bottom 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* While a pomodoro runs: the task you're focusing on, above Today's tasks in their gray box. Empty, a
+   dashed slot to drag one into; it lights up while one is over it, and opens room for it. */
+.pomodoro-task { display: flex; flex-direction: column; gap: 7px; margin-bottom: 6px; border: 1px dashed transparent; border-radius: 10px; transition: border-color 0.15s, background 0.15s, padding-bottom 200ms cubic-bezier(0.2, 0.8, 0.2, 1); padding-bottom: var(--drop-room, 0px); }
+.pomodoro-task.empty { border-color: var(--border); padding: 8px; padding-bottom: calc(8px + var(--drop-room, 0px)); }
+.pomodoro-task.empty > p { margin: 0; }
+.pomodoro-task.drop { border-color: var(--muted); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pomodoro-task:not(.empty).drop { padding: 6px; padding-bottom: calc(6px + var(--drop-room, 0px)); margin: -6px -6px 0; }
 .column.drop { box-shadow: inset 0 0 0 1px var(--border); border-radius: 12px; transition: box-shadow 0.15s; }
 
 /* Tasks outside Today: one row until clicked */
@@ -509,7 +520,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .prep-dot.done { background: currentColor; }
 /* The pomodoro timer, at the right of the calendar's heading, on its line: the series' square,
    then the time left in the timestamps' gray, 8px on. Pointing at the square says Focus or Break,
-   and pointing at the time shows Pause and Restart, each in a small card under it. */
+   and pointing at the time shows its menu (Pause, Restart timer, Restart series, Stop) in a small
+   card above it. */
 .pomodoro {
   position: relative; display: flex; align-items: center; gap: 8px; height: 21px; font-size: 12px; flex-shrink: 0;
   --pom-tint: var(--accent);
@@ -517,14 +529,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .pomodoro.break { --pom-tint: var(--green); }
 /* The time left in the timestamps' gray (it's a .timestamp too), shimmering as it runs (see
    .text-shimmer). */
-/* It opens Pause and Restart, like the refresh button opens its menu: the same pointing hand, and
-   not selectable as text. The square beside it, which only names the block, keeps the arrow. */
+/* It opens its menu, like the refresh button opens its own: the same pointing hand, and not
+   selectable as text. The square beside it, which only names the block, keeps the arrow. */
 .pomodoro-time { font-variant-numeric: tabular-nums; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .pomodoro-square { cursor: default; user-select: none; -webkit-user-select: none; }
-/* The small cards by the square (Focus or Break, under it) and the time (Pause and Restart, over
-   it), each shown while you point at what it's by (or, for the buttons, tab into them). An
-   invisible strip bridges the gap between the buttons' card and the time, so the pointer can reach
-   it. */
+/* The small cards by the square (Focus or Break, under it) and the time (its menu, over it), each
+   shown while you point at what it's by (or, for the buttons, tab into them). An invisible strip
+   bridges the gap between the buttons' card and the time, so the pointer can reach it. */
 .pomodoro-time-wrap, .pomodoro-square { position: relative; display: inline-flex; }
 .pomodoro-tip {
   position: absolute; top: calc(100% + 6px); left: 50%; z-index: 3; display: flex; gap: 10px; padding: 4px 10px;
@@ -533,10 +544,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 .pomodoro-tip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 8px; }
 :is(.pomodoro-time-wrap, .pomodoro-square):is(:hover, :focus-within) > .pomodoro-tip { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
-/* Pause and Restart: a menu like Refresh's (see .menu-card), opening the way it does, above and to
-   the right, its options lined up with the time. Narrower than Refresh's, so it stays inside the
-   column (which clips past the rail), over the rule. The strip bridging the gap is under it. */
-.pomodoro-time-wrap > .pomodoro-tip { top: auto; bottom: calc(100% + 8px); left: -12px; transform: translateY(3px); }
+/* Its menu (Pause, Restart timer, Restart series, Stop): like Refresh's (see .menu-card), opening
+   above the time, but to the left, its right edge by the time's, so it stays inside the column
+   (which clips past the rail), over the rule. The strip bridging the gap is under it. */
+.pomodoro-time-wrap > .pomodoro-tip { top: auto; bottom: calc(100% + 8px); left: auto; right: -12px; transform: translateY(3px); }
 .pomodoro-time-wrap > .pomodoro-tip::after { bottom: auto; top: 100%; height: 10px; }
 .pomodoro-tip.menu-card { flex-direction: column; gap: 2px; padding: 6px 4px; min-width: 96px; }
 .pomodoro-time-wrap:is(:hover, :focus-within) > .pomodoro-tip { transform: none; }
@@ -1248,8 +1259,13 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .session-error { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .handoff { align-self: stretch; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); }
 .handoff-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.handoff-label { font-weight: 600; }
+/* A handed-over message, doc, event or ticket: what's ready as an eyebrow, then what it is on one
+   line, cut short if it's long, then its detail, and its buttons in a row under a line that runs
+   across the whole card (out through its padding). */
+.handoff-eyebrow { color: var(--muted); font-size: 11px; }
+.handoff-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .handoff-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-actions { justify-content: flex-end; margin: 4px -10px 0; padding: 8px 10px 0; border-top: 1px solid var(--border); }
 /* Claude's words, as paragraphs with list items bulleted. */
 .chat-para { display: flex; flex-direction: column; gap: 2px; }
 .chat-line { display: block; }
@@ -1492,6 +1508,7 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   height: 20px; padding: 0 10px; border: none; border-radius: 999px; background: transparent;
   font-size: 11px; color: var(--muted); transition: color 0.15s, background 0.15s, box-shadow 0.15s;
 }
+.segmented.many button { padding: 0 7px; }
 .segmented button:hover { color: var(--text); }
 .segmented button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06); }
 .segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1545,8 +1562,40 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .app-tools .timestamp { margin-left: 2px; }
 /* Always shown here, unlike the column refresh buttons that appear on hover. */
 .app-tools .refresh { visibility: visible; }
+/* The song playing on the Mac, at the bottom right across from Settings: its player's icon, its
+   artist (fainter) and title and its time in the status text's gray, then previous, play/pause and
+   next in a glass pill like Settings. */
+.now-playing {
+  position: fixed; right: 16px; bottom: 16px; z-index: 6; display: flex; align-items: center; gap: 8px;
+  max-width: min(46vw, 420px); font-size: 12px; color: var(--muted);
+}
+.now-playing-title, .now-playing-artist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The artist, before the title and fainter. Short of room the title gives way; the artist only
+   past 40% of the bar. */
+.now-playing-artist { flex-shrink: 0; max-width: 40%; color: color-mix(in srgb, var(--muted) 55%, transparent); }
+.now-playing-time { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* The player's icon, first: it opens the player. */
+.now-playing-app {
+  flex-shrink: 0; display: grid; place-items: center; padding: 0; border: none; border-radius: 4px;
+  background: none; color: inherit; transition: color 0.15s;
+}
+button.now-playing-app:hover { color: var(--text); }
+/* The icons are small; each button reaches a few px past its icon, so it's easy to hit. */
+button.now-playing-app, .now-playing-controls button { position: relative; }
+button.now-playing-app::after, .now-playing-controls button::after { content: ""; position: absolute; inset: -5px -1px; }
+button.now-playing-app:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.now-playing-controls.glass-button { flex-shrink: 0; display: inline-flex; align-items: stretch; padding: 2px 4px; cursor: default; }
+/* A line of text's height, so the pill stands exactly as tall as Settings. */
+.now-playing-controls::before { content: "\200b"; width: 0; }
+.now-playing-controls.glass-button:hover { color: var(--muted); background: var(--glass-fill); }
+.now-playing-controls button {
+  display: grid; place-items: center; width: 22px; padding: 0; border: none; border-radius: 999px;
+  background: none; color: inherit; cursor: pointer; transition: color 0.15s;
+}
+.now-playing-controls button:hover { color: var(--text); }
+.now-playing-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* A small menu card of options, one per line, each lit gray under the pointer: Refresh's menu, and
-   the pomodoro timer's Pause and Restart. */
+   the pomodoro timer's. */
 .menu-card { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 4px; min-width: 150px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); }
 .menu-card .link-button { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; color: var(--text); text-align: left; }
 .menu-card .link-button:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); text-decoration: none; }

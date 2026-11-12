@@ -37,7 +37,7 @@ export function ActionRow({
     try {
       const outcome = await applyAction(item.action, said, summary);
       // The session hears about it with your next message (see globalContext), so applying costs no turn.
-      await db.updateSessionLink(chatKey, { applied: { ...(link?.applied ?? {}), [item.key]: { summary, result: outcome } } });
+      await db.updateSessionLink(chatKey, (current) => ({ applied: { ...(current.applied ?? {}), [item.key]: { summary, result: outcome } } }));
       onChange();
     } catch (e) {
       setError((e as Error).message);
@@ -55,7 +55,7 @@ export function ActionRow({
               className="cta-ghost"
               disabled={busy}
               onClick={async () => {
-                await db.updateSessionLink(chatKey, { dismissedKeys: [...(link?.dismissedKeys ?? []), item.key] });
+                await db.updateSessionLink(chatKey, (current) => ({ dismissedKeys: [...(current.dismissedKeys ?? []), item.key] }));
                 onChange();
               }}
             >
@@ -73,9 +73,9 @@ export function ActionRow({
 }
 
 /**
- * A task chat's proposals to change its task (move it to another project, or change its title or
- * description), the changes a task's chat makes: each as a card to apply, always about this task
- * whatever the chat named.
+ * A task chat's changes to its task (moving it to another project, or changing its title or
+ * description) that weren't made when its turn ended: from a turn that was stopped or failed, or
+ * from before chats made their own changes. Each is a card to apply, always about this task.
  */
 export function TaskChangeCards({ taskId, title, actions, link, said, onChange }: { taskId: string; title: string; actions: PendingAction[]; link: SessionLink | undefined; said?: string; onChange: () => void }) {
   const [projects, setProjects] = useState<db.Project[]>([]);

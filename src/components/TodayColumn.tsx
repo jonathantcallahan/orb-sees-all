@@ -10,7 +10,7 @@ import { stateOf, type Pressure, type TaskState } from "../tasks";
 import { Spinner } from "./common";
 import { PressureBlob, type OrbLook } from "./PressureBlob";
 import { useJobStatus } from "../useAppData";
-import { formatRemaining, restartPomodoro, SESSIONS, togglePomodoroPause, usePomodoro, usePomodoroSettings } from "../pomodoro";
+import { formatRemaining, restartPomodoro, restartPomodoroBlock, SESSIONS, stopPomodoro, togglePomodoroPause, usePomodoro, usePomodoroActive, usePomodoroFocusDone, usePomodoroSettings, usePomodoroStopped } from "../pomodoro";
 
 /** Pixels per minute on the day grid (72px an hour). */
 /**
@@ -165,12 +165,15 @@ function DayGrid({
   events: all,
   states,
   pomodoroOn,
+  pomodoroActive,
   onChange,
 }: {
   events: CalendarEvent[];
   states: Map<string, TaskState>;
-  /** The pomodoro timer is on: its current block is drawn under the meetings. */
+  /** The pomodoro timer is on in Settings: today's finished focus sessions are drawn under the meetings. */
   pomodoroOn: boolean;
+  /** A series is running (or paused), not stopped: its current block is drawn too. */
+  pomodoroActive: boolean;
   onChange: () => void;
 }) {
   // The time here, not in the column, so only the calendar redraws as it moves.
@@ -180,7 +183,8 @@ function DayGrid({
   // The grid is the whole day, midnight to midnight, in its own scroll box under the header. It rests
   // an hour before now (see dayRange), so only the last hour of the past shows, and can be scrolled
   // up to earlier in the day or down to midnight; see useRestingScroll. While the pomodoro timer is
-  // on, it takes room from the column, so the calendar rests only half an hour back.
+  // on, it takes room from the column, so the calendar rests only half an hour back (stopped too,
+  // so stopping it doesn't move the calendar).
   const range = { startHour: 0, endHour: 24 };
   // Both on whole pixels, and from the same time, so as the day goes on the calendar and the now
   // line step together, one pixel at a time, and never shimmy against each other.
@@ -216,7 +220,8 @@ function DayGrid({
         </div>
       ))}
       <div className="events">
-        {pomodoroOn && <PomodoroBlock range={range} />}
+        {pomodoroOn && <FocusDone range={range} />}
+        {pomodoroActive && <PomodoroBlock range={range} />}
         {placed.map(({ event: ev, top, height, column, columns }) => {
           const past = new Date(ev.end) < now;
           const current = !past && new Date(ev.start) <= now;
@@ -290,30 +295,62 @@ function DayGrid({
   );
 }
 
-/**
- * The pomodoro's current block on the calendar, from when it began to when it will end, under the
- * meetings: no title, just a field of small dots (see PomodoroField), steady down to now and
- * pulsing after, so it doesn't read as a meeting.
- */
-function PomodoroBlock({ range }: { range: { startHour: number; endHour: number } }) {
-  // The timer ticks every second; only the block redraws for it, not the calendar around it.
-  const block = usePomodoro();
-  if (!block) return null;
-  // Placed on today, the day the calendar shows: a block running past midnight runs off its bottom.
+type DayRange = { startHour: number; endHour: number };
+
+/** Minutes from the top of the calendar to time \`t\`, kept on today (the day it shows). */
+function minutesInDay(t: number, range: DayRange): number {
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
-  const minutesIn = (t: number) => Math.min(Math.max((t - midnight.getTime()) / 60_000 - range.startHour * 60, 0), (range.endHour - range.startHour) * 60);
-  const top = minutesIn(block.start);
-  const bottom = minutesIn(block.end);
+  return Math.min(Math.max((t - midnight.getTime()) / 60_000 - range.startHour * 60, 0), (range.endHour - range.startHour) * 60);
+}
+
+/** Where a block from \`from\` to \`to\` sits on the calendar, in px, or null when it isn't on today. */
+function blockPlace(from: number, to: number, range: DayRange) {
+  const top = minutesInDay(from, range);
+  const bottom = minutesInDay(to, range);
   if (bottom <= top) return null;
+  return { top, style: { top: wholePx(top * PX_PER_MIN) + EVENT_INSET_TOP, height: Math.max(wholePx((bottom - top) * PX_PER_MIN) - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 4) } };
+}
+
+/**
+ * The pomodoro's current block on the calendar, its full length up to when it will end, under the
+ * meetings: no title, just a field of small dots (see PomodoroField), steady down to now and
+ * pulsing after, so it doesn't read as a meeting. Hidden while paused; carried on, its start has
+ * moved later by the pause rather than the block stretching over it. A block running past midnight
+ * runs off its bottom.
+ */
+function PomodoroBlock({ range }: { range: DayRange }) {
+  // The timer ticks every second; only the block redraws for it, not the calendar around it.
+  const block = usePomodoro();
+  const place = block && blockPlace(block.start, block.end, range);
+  if (!block || block.paused || !place) return null;
   return (
-    <div
-      className={`pomodoro-block ${block.phase}`}
-      style={{ top: wholePx(top * PX_PER_MIN) + EVENT_INSET_TOP, height: Math.max(wholePx((bottom - top) * PX_PER_MIN) - EVENT_INSET_TOP - EVENT_INSET_BOTTOM, 4) }}
-      aria-hidden
-    >
-      <PomodoroField doneY={() => minutesIn(Date.now()) * PX_PER_MIN - wholePx(top * PX_PER_MIN) - EVENT_INSET_TOP} paused={block.paused} />
+    <div className={`pomodoro-block ${block.phase}`} style={place.style} aria-hidden>
+      <PomodoroField doneY={() => minutesInDay(Date.now(), range) * PX_PER_MIN - wholePx(place.top * PX_PER_MIN) - EVENT_INSET_TOP} />
     </div>
+  );
+}
+
+/**
+ * Today's finished focus sessions on the calendar, under the meetings: steady fields of dots, like
+ * the done part of the current block. They stay when the series is stopped or started over.
+ */
+function FocusDone({ range }: { range: DayRange }) {
+  const done = usePomodoroFocusDone();
+  return (
+    <>
+      {done.map(([from, to]) => {
+        const place = blockPlace(from, to, range);
+        return (
+          place && (
+            <div key={from} className="pomodoro-block focus" style={place.style} aria-hidden>
+              {/* Done all the way down. */}
+              <PomodoroField doneY={() => 1e6} still />
+            </div>
+          )
+        );
+      })}
+    </>
   );
 }
 
@@ -342,16 +379,14 @@ const smooth = (a: number, b: number, x: number) => {
  * little on its own slow beat (smoothed with its neighbors', so nothing ripples sideways) and
  * blends into the pulsing dots, so the front looks fluid as it moves down. Only whole dots are
  * drawn: none where a meeting covers the field, even in part, so none shows cut by a meeting's edge
- * or through a meeting that's over (drawn half see-through). Paused, or with reduced motion,
- * everything holds still. Drawn on a canvas, as each dot's size changes on its own; its
+ * or through a meeting that's over (drawn half see-through). A finished block (`still`), or any
+ * with reduced motion, holds still. Drawn on a canvas, as each dot's size changes on its own; its
  * color comes from the CSS (see .pomodoro-field). \`doneY\` is how far down the block now is, in px.
  */
-function PomodoroField({ doneY, paused }: { doneY: () => number; paused: boolean }) {
+function PomodoroField({ doneY, still = false }: { doneY: () => number; still?: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const latest = useRef({ doneY, paused });
-  latest.current = { doneY, paused };
-  /** Starts the drawing loop over now, at the right pace (see the effect below). */
-  const restart = useRef(() => {});
+  const latest = useRef(doneY);
+  latest.current = doneY;
   useEffect(() => {
     const el = canvas.current!;
     const ctx = el.getContext("2d")!;
@@ -366,10 +401,10 @@ function PomodoroField({ doneY, paused }: { doneY: () => number; paused: boolean
     let clock = 0;
     let last = performance.now();
     // Draws the field as it is now. The pulsing only moves on while the timer runs.
+    const steady = still || reduce;
     const paint = (now: number) => {
-      const { doneY, paused } = latest.current;
-      const still = paused || reduce;
-      if (!still) clock += Math.min(now - last, 100) / 1000;
+      const doneY = latest.current;
+      if (!steady) clock += Math.min(now - last, 100) / 1000;
       last = now;
       // The color follows the CSS (gray at rest, in color under the pointer), and the meetings can
       // move: both are checked a few times a second.
@@ -425,15 +460,10 @@ function PomodoroField({ doneY, paused }: { doneY: () => number; paused: boolean
     // far less work than every frame; standing still, once a second is enough for the edge.
     const loop = (now: number) => {
       paint(now);
-      wait = window.setTimeout(() => (frame = requestAnimationFrame(loop)), latest.current.paused || reduce ? 1000 : PULSE_FRAME_MS);
+      wait = window.setTimeout(() => (frame = requestAnimationFrame(loop)), steady ? 1000 : PULSE_FRAME_MS);
     };
-    restart.current = () => {
-      cancelAnimationFrame(frame);
-      window.clearTimeout(wait);
-      frame = requestAnimationFrame(loop);
-    };
-    // The block grows every second while paused and moves on Restart: drawn again at once at its new
-    // size, before it's shown, or the old drawing would show stretched until the next one.
+    // The block moves and changes size on Restart timer: drawn again at once at its new size, or the
+    // old drawing would show stretched until the next one.
     const resized = new ResizeObserver(() => paint(performance.now()));
     resized.observe(el);
     loop(performance.now());
@@ -442,9 +472,7 @@ function PomodoroField({ doneY, paused }: { doneY: () => number; paused: boolean
       window.clearTimeout(wait);
       resized.disconnect();
     };
-  }, []);
-  // Paused or carrying on: the loop changes pace straight away, not at its next once-a-second turn.
-  useEffect(() => restart.current(), [paused]);
+  }, [still]);
   return <canvas ref={canvas} className="pomodoro-field" aria-hidden />;
 }
 
@@ -479,7 +507,7 @@ function SeriesSquare({ session, focus, phase }: { session: number; focus: boole
   ];
   return (
     <span className="pomodoro-square">
-      <svg ref={svg} className="pomodoro-series" width="15" height="15" viewBox="0 0 15 15" role="img" aria-label={`${phase}, session ${session + 1} of ${SESSIONS}`}>
+      <svg ref={svg} className="pomodoro-series" width="15" height="15" viewBox="0 0 15 15" role="img" aria-label={session < 0 ? "Pomodoro stopped" : `${phase}, session ${session + 1} of ${SESSIONS}`}>
         <clipPath id={clip}>
           <rect x="0.5" y="0.5" width="14" height="14" rx="3" />
         </clipPath>
@@ -499,14 +527,33 @@ function SeriesSquare({ session, focus, phase }: { session: number; focus: boole
 }
 
 /**
- * The pomodoro timer, at the right of the calendar's heading: a square for the series (a quarter for each focus
- * session, filled as they're done; pointing at it says Focus or Break), then the time left in the
- * timestamps' gray. Pointing at the time shows Pause (Resume while paused) and Restart in a small
- * menu under it, like Refresh's.
+ * The pomodoro timer, at the right of the calendar's heading: a square for the series (a quarter for
+ * each focus session, filled as they're done; pointing at it says Focus or Break), then the time left
+ * in the timestamps' gray. Pointing at the time shows a small menu above it, like Refresh's: Pause (Resume
+ * while paused), Restart timer (the block it's in, from its full length), Restart series (from the
+ * first focus session) and Stop. Stopped, it reads 00:00 with an empty square and nothing on the
+ * calendar, and its menu offers Start.
  */
 function PomodoroTimer() {
   // Ticking every second here, not in the column, so only the timer redraws.
   const timer = usePomodoro();
+  const stopped = usePomodoroStopped();
+  if (stopped)
+    return (
+      <div className="pomodoro">
+        <SeriesSquare session={-1} focus={false} phase="Stopped" />
+        <span className="pomodoro-time-wrap">
+          <span className="pomodoro-time timestamp" role="timer" aria-label="Pomodoro timer stopped">
+            00:00
+          </span>
+          <span className="card menu-card pomodoro-tip small" role="menu" aria-label="Pomodoro timer">
+            <button role="menuitem" className="link-button small" onClick={restartPomodoro}>
+              Start
+            </button>
+          </span>
+        </span>
+      </div>
+    );
   if (!timer) return null;
   const phase = timer.phase === "focus" ? "Focus" : "Break";
   return (
@@ -520,8 +567,14 @@ function PomodoroTimer() {
           <button role="menuitem" className="link-button small" onClick={togglePomodoroPause}>
             {timer.paused ? "Resume" : "Pause"}
           </button>
+          <button role="menuitem" className="link-button small" onClick={restartPomodoroBlock}>
+            Restart timer
+          </button>
           <button role="menuitem" className="link-button small" onClick={restartPomodoro}>
-            Restart
+            Restart series
+          </button>
+          <button role="menuitem" className="link-button small" onClick={stopPomodoro}>
+            Stop
           </button>
         </span>
       </span>
@@ -627,6 +680,8 @@ export function TodayColumn({
   // The day's name changes at midnight; checking each minute is enough.
   const today = useNow(60_000);
   const pomodoroOn = usePomodoroSettings().on;
+  // Running or paused: stopped, its current block leaves the calendar (what's done stays).
+  const pomodoroActive = usePomodoroActive();
   const calendarStatus = useJobStatus("calendar");
   const events = calendar?.day.events ?? [];
 
@@ -652,7 +707,7 @@ export function TodayColumn({
 
       {!calendar && <p className="muted small">{busy ? "Reading your calendar…" : "No calendar loaded for today yet."}</p>}
       {calendar && events.length === 0 && <p className="muted small">No meetings today.</p>}
-      {calendar && <DayGrid events={events} states={taskStates} pomodoroOn={pomodoroOn} onChange={onChange} />}
+      {calendar && <DayGrid events={events} states={taskStates} pomodoroOn={pomodoroOn} pomodoroActive={pomodoroActive} onChange={onChange} />}
 
     </section>
   );
