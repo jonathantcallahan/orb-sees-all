@@ -11,6 +11,21 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.6.14",
+    date: "2026-11-12",
+    notes: [
+      "A pomodoro timer above the calendar, turned on in Settings: focus sessions with a break after each (25 and 5 minutes unless you change them), and a square for the four sessions of a series. The current block shows on the calendar. Pause, Stop, Restart timer and Restart series; a paused block leaves the calendar until you carry on.",
+      "Drag a task from Today into the pomodoro's slot to show what you're focusing on, and drag it back out when you're done.",
+      "The song playing on your Mac shows at the bottom right, from TIDAL, Spotify, Music or any other player: the player's icon (click it to open the player), the artist and title, how far in it is, and previous, play/pause and next. Not on Windows.",
+      "A Refresh menu in the bottom bar refreshes everything, or just the calendar, tasks, daily briefing or watched topics.",
+      "Connect a Claude session to a task from the card's Claude menu, or open the task in Claude. Each refresh connects your recent sessions to the tasks they're the work of, or makes tasks for unfinished work, and the card says so, with Disconnect or Not a task.",
+      "Task chats change their own task as they work: its title, description and project, its links, and notes on what they've found that they read again each turn, while the description stays about what the task is. They can also search the web, and use Amplitude however you've connected it.",
+      "A message, doc, event or ticket ready for you to review says what it is above its title (\"Ready to file a Jira ticket\"), with its buttons in a row below.",
+      "Move to inbox on updates. Only project cards are outlined when selected. Badges lose their tooltips, except Recommended, and setting a status clears Human. Opening another task closes the open chat.",
+      "Fixes: long descriptions running out of their card, and \"due\" and \"created\" in lowercase.",
+    ],
+  },
+  {
     version: "0.6.13",
     date: "2026-11-09",
     notes: [
