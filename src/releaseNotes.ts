@@ -11,6 +11,22 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.7.0",
+    date: "2026-11-20",
+    notes: [
+      "Turn each area beside the calendar on or off in Settings: Updates, Tasks, Projects and Watched topics. What an area holds is kept while it's off. Watched topics now starts off, so turn it on in Settings to see your topics again.",
+      "Projects needs Jira and GitHub. If either isn't connected when you update, Projects is turned off and your projects are kept; turn it on in Settings once both are set up.",
+      "Projects no longer need a Slack channel: a project can come from its Jira epics, and you link and unlink epics the way you do channels. Finding projects also suggests them from your open epics.",
+      "A project's record: what it's for, its people and their roles, its status, and Work, which shows its epics with their stories and tasks, each requirement under the issue that delivers it, and the pull requests and branches tied to its tickets. Full screen adds a timeline, dependencies and changes to apply in Jira. The ship date comes from the epics, the requirements doc or the channels, and you can correct it.",
+      "Chat about a project under its details and apply the changes it proposes. Draft a TDD from a project's epics, channels and docs, in its own chat before the doc is created.",
+      "Project cards fit on one line: the name, due date and status, with the priority and your role when you point at the card. Click the priority to set it. Type and Role filters are under More filters.",
+      "A project with no requirements doc says so, with Link a doc and Draft a TDD. A person's card shows their title under their name, and what they're working on below.",
+      "Messages that only need a reply go to the inbox again, instead of your task list.",
+      "The Why? after a change opens right under the cursor, ready to type in. Space dismisses it and L asks less often.",
+      "Working and Human badges keep their color when you're not pointing at the card. Chats ask before using a tool that auto mode handed back.",
+    ],
+  },
+  {
     version: "0.6.14",
     date: "2026-11-12",
     notes: [
