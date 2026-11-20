@@ -1,9 +1,11 @@
 /**
- * A project's tracking feed: its Jira epics and, for its GitHub repos, recent pull requests and open
- * branches, each with its status, newest activity first. GitHub is read locally with the gh CLI (no
- * Claude call); epics come from project refreshes, which search Jira.
+ * A project's tracking feed: its Jira epics and its pull requests and branches, each with its status,
+ * newest activity first. Its code is only what's tied to its work: the pull requests and branches in
+ * its repos that name one of its tickets, and the ones its plan links (see CodeScope). GitHub is read
+ * locally with the gh CLI (no Claude call); epics come from project refreshes, which search Jira.
  */
 import { runCli, type CliRunner } from "../cli";
+import { codeLink, keysIn } from "../plan";
 import type { ProjectEpic } from "../schema";
 
 export interface TrackedItem {
@@ -127,26 +129,83 @@ export function branchItem(repo: string, base: string, ref: GqlRef): TrackedItem
   };
 }
 
-/** Recent pull requests (any state) and open branches (not the default, not merged or closed) in a repo. */
-async function repoItems(run: CliRunner, repo: string): Promise<TrackedItem[]> {
-  const [owner, name] = repo.split("/");
-  const { repository: head } = await graphql<{ repository: { defaultBranchRef: { name: string } | null } }>(
+/**
+ * What a project's code is: the Jira keys of its work (a pull request or branch naming one is its
+ * code) and the pull request and branch links its plan has (see PathItem.code and suggested_code).
+ */
+export interface CodeScope {
+  keys: string[];
+  links: string[];
+}
+
+/** How many of a repo's latest pull requests and branches are looked through for the project's keys. */
+const LATEST = 100;
+/** Keys per GitHub search: its queries take at most five ORs. */
+const SEARCH_KEYS = 5;
+
+async function defaultBranch(run: CliRunner, owner: string, name: string): Promise<string> {
+  const { repository } = await graphql<{ repository: { defaultBranchRef: { name: string } | null } }>(
     run,
     "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name}}}",
     { owner, name },
   );
-  const base = head.defaultBranchRef?.name ?? "main";
-  const { repository } = await graphql<{ repository: { pullRequests: { nodes: GqlPr[] }; refs: { nodes: GqlRef[] } } }>(
+  return repository.defaultBranchRef?.name ?? "main";
+}
+
+async function branchRef(run: CliRunner, owner: string, name: string, base: string, branch: string): Promise<GqlRef | null> {
+  const { repository } = await graphql<{ repository: { ref: GqlRef | null } }>(
     run,
-    `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(first:8,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${PR_FIELDS}}} refs(refPrefix:"refs/heads/",first:12,orderBy:{field:TAG_COMMIT_DATE,direction:DESC}){nodes{${REF_FIELDS(base)}}}}}`,
+    `query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){${REF_FIELDS(base)}}}}`,
+    { owner, name, ref: `refs/heads/${branch}` },
+  );
+  return repository.ref;
+}
+
+/**
+ * A repo's pull requests (any state) and its branches with none (not the default) that name one of
+ * `keys`: in its latest ones, in its title or branch name, and in a search of its pull request titles
+ * for older ones.
+ */
+async function repoItems(run: CliRunner, repo: string, keys: Set<string>): Promise<TrackedItem[]> {
+  if (!keys.size) return [];
+  const [owner, name] = repo.split("/");
+  const names = (text: string) => keysIn(text).some((k) => keys.has(k));
+  const base = await defaultBranch(run, owner, name);
+  // Light lists first (GitHub times out on full details of this many); full details only for the ones that match.
+  type Light = { number: number; title: string; headRefName: string };
+  const { repository } = await graphql<{ repository: { pullRequests: { nodes: Light[] }; refs: { nodes: Pick<GqlRef, "name" | "associatedPullRequests">[] } } }>(
+    run,
+    `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(first:${LATEST},orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title headRefName}} refs(refPrefix:"refs/heads/",first:${LATEST},orderBy:{field:TAG_COMMIT_DATE,direction:DESC}){nodes{name associatedPullRequests(first:1){nodes{number state}}}}}}`,
     { owner, name },
   );
-  const prs = repository.pullRequests.nodes.map((pr) => prItem(repo, pr));
-  const branches = repository.refs.nodes
-    .filter((ref) => ref.name !== base && !["MERGED", "CLOSED"].includes(ref.associatedPullRequests.nodes[0]?.state ?? ""))
-    .slice(0, 6)
-    .map((ref) => branchItem(repo, base, ref));
-  return [...prs, ...branches];
+  const numbers = new Set(repository.pullRequests.nodes.filter((pr) => names(`${pr.title} ${pr.headRefName}`)).map((pr) => pr.number));
+  const all = [...keys];
+  for (let i = 0; i < all.length; i += SEARCH_KEYS) {
+    const q = `repo:${repo} is:pr in:title ${all.slice(i, i + SEARCH_KEYS).join(" OR ")}`;
+    // Issues match too, and come back empty. A search GitHub refuses (it limits how many run a minute) leaves the latest ones.
+    const { search } = await graphql<{ search: { nodes: Partial<Light>[] } }>(run, `query($q:String!){search(query:$q,type:ISSUE,first:20){nodes{... on PullRequest{number title headRefName}}}}`, { q }).catch(
+      () => ({ search: { nodes: [] } }),
+    );
+    for (const pr of search.nodes) if (typeof pr.number === "number" && names(`${pr.title} ${pr.headRefName}`)) numbers.add(pr.number);
+  }
+  // A branch with a pull request shows as its pull request.
+  const named = repository.refs.nodes.filter((ref) => ref.name !== base && names(ref.name) && !ref.associatedPullRequests.nodes.length);
+  const [prs, branches] = await Promise.all([
+    Promise.all([...numbers].map(async (n) => prItem(repo, (await graphqlPr(run, owner, name, n)).repository.pullRequest))),
+    Promise.all(named.map((ref) => branchRef(run, owner, name, base, ref.name))),
+  ]);
+  return [...prs, ...branches.flatMap((ref) => (ref ? [branchItem(repo, base, ref)] : []))];
+}
+
+/** A pull request or branch the plan links, read on its own. */
+async function linkedItem(run: CliRunner, url: string): Promise<TrackedItem | null> {
+  const l = codeLink(url);
+  if (!l) return null;
+  const [owner, name] = l.repo.split("/");
+  if (l.kind === "pr") return prItem(l.repo, (await graphqlPr(run, owner, name, Number(l.name.slice(1)))).repository.pullRequest);
+  const base = await defaultBranch(run, owner, name);
+  const ref = await branchRef(run, owner, name, base, l.name);
+  return ref ? branchItem(l.repo, base, ref) : null;
 }
 
 export function epicItem(e: ProjectEpic): TrackedItem {
@@ -166,18 +225,33 @@ export function epicItem(e: ProjectEpic): TrackedItem {
 /** Newest activity first; items with no date last. */
 export const byRecency = (a: TrackedItem, b: TrackedItem) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
 
-/** Builds a project's whole feed: its epics, plus every repo's PRs and branches. */
-export async function collectTracking(repos: string[], epics: ProjectEpic[], run: CliRunner = runCli): Promise<ProjectTracking> {
+/**
+ * Builds a project's whole feed: its epics, plus its code (see CodeScope): what names its keys in
+ * its repos, and what its plan links, wherever that is. Nothing else in its repos.
+ */
+export async function collectTracking(repos: string[], epics: ProjectEpic[], scope: CodeScope, run: CliRunner = runCli): Promise<ProjectTracking> {
   const errors: string[] = [];
+  const keys = new Set([...scope.keys, ...epics.flatMap((e) => [e.key, ...(e.issues ?? [])])].map((k) => k.trim().toUpperCase()).filter(Boolean));
   const lists = await Promise.all(
     repos.map((repo) =>
-      repoItems(run, repo).catch((e: Error) => {
+      repoItems(run, repo, keys).catch((e: Error) => {
         errors.push(`${repo}: ${e.message}`);
         return [];
       }),
     ),
   );
-  return { items: [...epics.map(epicItem), ...lists.flat()].sort(byRecency), epics, repos, checkedAt: now(), errors };
+  const found = new Map(lists.flat().map((i) => [i.id, i]));
+  const links = [...new Map(scope.links.flatMap((url) => { const l = codeLink(url); return l && !found.has(l.id) ? [[l.id, url] as const] : []; })).values()];
+  const linked = await Promise.all(
+    links.map((url) =>
+      linkedItem(run, url).catch((e: Error) => {
+        errors.push(`${url}: ${e.message}`);
+        return null;
+      }),
+    ),
+  );
+  for (const i of linked) if (i) found.set(i.id, i);
+  return { items: [...epics.map(epicItem), ...found.values()].sort(byRecency), epics, repos, checkedAt: now(), errors };
 }
 
 /** Looks at one PR or branch again. (Epics are rechecked through Jira; see recheckEpic in jobs.) */
@@ -191,12 +265,8 @@ export async function recheckGithubItem(item: TrackedItem, run: CliRunner = runC
   if (item.kind === "branch") {
     const branch = item.id.slice(`branch:${item.repo}:`.length);
     const base = item.detail?.match(/behind (\S+)/)?.[1] ?? "main";
-    const { repository } = await graphql<{ repository: { ref: GqlRef | null } }>(
-      run,
-      `query($owner:String!,$name:String!,$ref:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){${REF_FIELDS(base)}}}}`,
-      { owner, name, ref: `refs/heads/${branch}` },
-    );
-    return repository.ref ? branchItem(item.repo, base, repository.ref) : null;
+    const ref = await branchRef(run, owner, name, base, branch);
+    return ref ? branchItem(item.repo, base, ref) : null;
   }
   return null;
 }

@@ -8,13 +8,15 @@ import * as db from "../db";
 import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
 import { useListeningStatus, type ListeningState } from "../orbMusic";
-import { activeChannels, channelLabel, projectName } from "../projects";
+import { activeChannels, activeEpics, channelLabel, projectName } from "../projects";
+import { areaOn, projectConnectors, projectConnectorsReady, projectConnectorsRecent, projectsGate, saveProjectConnectors, setAreaOn, useAreasOn, useProjectConnectors, type Area } from "../features";
+import { checkProjectConnectors } from "../setup";
 import { clampMinutes, POMODORO_MAX_MIN, setPomodoroSettings, usePomodoroSettings } from "../pomodoro";
 import { ago } from "../tasks";
 import { localDate } from "../scheduler";
 import { parseSelfDmState, SELF_DM_DEFAULT, selfDmEvery, type SelfDmEvery, type SelfDmState } from "../selfDm";
 import type { Theme } from "../theme";
-import { CloseIcon, InfoTip, Reveal, Spinner } from "./common";
+import { CloseIcon, InfoTip, Reveal, Segmented, Spinner } from "./common";
 import type { OrbLook } from "./PressureBlob";
 
 const lines = (text: string) =>
@@ -23,33 +25,45 @@ const lines = (text: string) =>
     .map((l) => l.trim())
     .filter(Boolean);
 
+/** Settings' switch for each area beside the calendar (see features), in the rail's order. */
+const AREA_ROWS: { area: Area; label: string; hint: string }[] = [
+  {
+    area: "updates",
+    label: "Updates",
+    hint: "The daily briefing, news and your inbox of messages waiting on a reply. Turned off, there's no briefing or news, and messages waiting on a reply go on your task list.",
+  },
+  { area: "tasks", label: "Tasks", hint: "Your task list, found in Slack, email and your projects, and the tasks you add. Turning it off hides the list; your tasks are kept." },
+  {
+    area: "projects",
+    label: "Projects",
+    hint: "Your projects, with their people, plans, requirements and pull requests. Turned off, projects aren't found or refreshed, and refreshes find tasks in every Slack channel instead. Your projects are kept for when you turn it on.",
+  },
+  {
+    area: "watched",
+    label: "Watched topics",
+    hint: "Things to keep an eye on, with what to do if something happens or doesn't by a date. Demian checks them every refresh. Turning it off hides them and stops the checks; the topics are kept.",
+  },
+];
+
 /** What the DM setting does, and today's checks and their cost once there are some. */
-function dmHint(every: SelfDmEvery, state: SelfDmState | null): string {
-  const what =
-    "Send yourself a Slack message with #demian in it and Demian does what it says: adds a task, watches a topic, creates or changes a project, adds context to a project or task, and anything else its chat can do. It replies in the message's thread with what it did. Nothing else in your DM is read.";
+function dmHint(every: SelfDmEvery, state: SelfDmState | null, areas: Area[]): string {
+  const [projects, tasks] = [areas.includes("projects"), areas.includes("tasks")];
+  const does = [
+    tasks && "adds a task",
+    areas.includes("watched") && "watches a topic",
+    projects && "creates or changes a project",
+    (projects || tasks) && `adds context to a ${projects && tasks ? "project or task" : projects ? "project" : "task"}`,
+  ].filter(Boolean);
+  const what = `Send yourself a Slack message with #demian in it and Demian does what it says: ${does.length ? `${does.join(", ")}, and anything else` : "anything"} its chat can do. It replies in the message's thread with what it did. Nothing else in your DM is read.`;
   if (every === "off" || !state) return what;
   if (state.lastError) return `${what} Last check failed: ${state.lastError}`;
   const today = state.day === localDate(new Date());
   return today && state.runs > 0 ? `${what} ${state.runs} checks today, $${state.usd.toFixed(2)}.` : what;
 }
 
-/** A small set of choices shown side by side, the picked one raised: for a setting with a few values (the visualizers have more). */
-function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
-  return (
-    // A long row of choices (the visualizers) sits a little tighter, so it fits beside its label.
-    <div className={`segmented${options.length > 5 ? " many" : ""}`} role="radiogroup" aria-label={label}>
-      {options.map((o) => (
-        <button key={o.value} role="radio" aria-checked={o.value === value} className={o.value === value ? "on" : undefined} onClick={() => onChange(o.value)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** An on/off switch: a checkbox drawn as a sliding toggle. */
-function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
-  return <input type="checkbox" role="switch" className="switch" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />;
+function Switch({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (on: boolean) => void; disabled?: boolean }) {
+  return <input type="checkbox" role="switch" className="switch" aria-label={label} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />;
 }
 
 /** A length in whole minutes, saved once you leave the field or press Return. */
@@ -211,7 +225,7 @@ function listeningHint(listening: ListeningState): ReactNode {
   );
 }
 
-function SettingRow({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+function SettingRow({ label, hint, note, children }: { label: string; hint?: ReactNode; note?: ReactNode; children: ReactNode }) {
   return (
     <div className="setting-row">
       <div className="setting-text">
@@ -219,6 +233,8 @@ function SettingRow({ label, hint, children }: { label: string; hint?: ReactNode
           {label}
           {hint && <InfoTip label={`About ${label}`}>{hint}</InfoTip>}
         </span>
+        {/* A line of gray text under the label, always shown (the hint is on hover). */}
+        {note && <span className="setting-note">{note}</span>}
       </div>
       <div className="setting-control">{children}</div>
     </div>
@@ -278,6 +294,36 @@ function ProjectRow({ project, others, onSaved }: { project: db.Project; others:
                 <CloseIcon size={7} />
               </button>
             )}
+          </span>
+        ))}
+        {project.shared_channels.map((c) => (
+          <span key={c.channel_id} className="chip" title="Shared with the project that owns it">
+            {channelLabel(c)} (shared)
+            <button
+              className="chip-remove"
+              aria-label={`Stop reading ${channelLabel(c)} in this project`}
+              onClick={async () => {
+                await db.unshareChannel(project.channel_id, c.channel_id);
+                onSaved();
+              }}
+            >
+              <CloseIcon size={7} />
+            </button>
+          </span>
+        ))}
+        {activeEpics(project).map((e) => (
+          <span key={e.epic_key} className="chip" title={e.title}>
+            {e.epic_key}
+            <button
+              className="chip-remove"
+              aria-label={`Unlink ${e.epic_key} from this project`}
+              onClick={async () => {
+                await db.unlinkEpic(project.channel_id, e.epic_key);
+                onSaved();
+              }}
+            >
+              <CloseIcon size={7} />
+            </button>
           </span>
         ))}
       </div>
@@ -358,6 +404,35 @@ export function Settings({
 }) {
   const listening = useListeningStatus();
   const pomodoro = usePomodoroSettings();
+  const areas = useAreasOn();
+  const connectors = useProjectConnectors();
+  // With Projects off (as Settings opens, or once you turn it off), check Jira and GitHub, so its
+  // switch can be turned on as soon as they're set up (it's left off until they are). A check from
+  // the last few minutes stands: each costs a turn. Check setup checks again whenever you ask.
+  const needsCheck = () => !areaOn("projects") && !projectConnectorsReady() && !projectConnectorsRecent(projectConnectors());
+  const [checkingConnectors, setCheckingConnectors] = useState(needsCheck);
+  const [connectorCheckFailed, setConnectorCheckFailed] = useState(false);
+  const projectsShown = areas.includes("projects");
+  useEffect(() => {
+    if (!needsCheck()) {
+      setCheckingConnectors(false);
+      return;
+    }
+    let live = true;
+    setCheckingConnectors(true);
+    setConnectorCheckFailed(false);
+    checkProjectConnectors()
+      .then((c) => {
+        if (!live) return;
+        if (c) saveProjectConnectors(c);
+        else setConnectorCheckFailed(true);
+      })
+      .catch(() => live && setConnectorCheckFailed(true))
+      .finally(() => live && setCheckingConnectors(false));
+    return () => {
+      live = false;
+    };
+  }, [projectsShown]);
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
@@ -466,6 +541,39 @@ export function Settings({
           </section>
 
           <section className="settings-section">
+            <h4>Features</h4>
+            <div className="settings-group">
+              {AREA_ROWS.map(({ area, label, hint }) => {
+                const on = areas.includes(area);
+                // Projects needs Jira and GitHub: it can't be turned on until both are set up.
+                const gate = area === "projects" ? projectsGate({ on, connectors, checking: checkingConnectors, checkFailed: connectorCheckFailed }) : null;
+                const blocked = !!gate?.blocked;
+                const note =
+                  area !== "projects" ? undefined : (
+                    <>
+                      Requires connection to Jira and GitHub.
+                      {gate?.why && ` ${gate.why}`}
+                      {blocked && !checkingConnectors && (
+                        <>
+                          {" "}
+                          <button className="link-button small" onClick={onOpenSetup}>
+                            Check setup
+                          </button>
+                        </>
+                      )}
+                    </>
+                  );
+                return (
+                  <SettingRow key={area} label={label} hint={hint} note={note}>
+                    {/* The last area on stays on. */}
+                    <Switch label={label} checked={on} disabled={blocked || (on && areas.length === 1)} onChange={(v) => setAreaOn(area, v)} />
+                  </SettingRow>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="settings-section">
             <h4>Pomodoro</h4>
             <div className="settings-group">
               <SettingRow label="Pomodoro timer" hint="A focus timer above the calendar: a focus session, then a break, over and over. The block you're in shows on the calendar.">
@@ -497,7 +605,7 @@ export function Settings({
                   ]}
                 />
               </SettingRow>
-              <SettingRow label="Tasks from your Slack DM" hint={dmHint(dmEvery, dmState)}>
+              <SettingRow label="Tasks from your Slack DM" hint={dmHint(dmEvery, dmState, areas)}>
                 <Segmented
                   label="Tasks from your Slack DM"
                   value={dmEvery}
@@ -587,6 +695,8 @@ export function Settings({
 
           <ReleaseNotes />
 
+          {/* Only while Projects is on. */}
+          {areas.includes("projects") && (
           <section className="settings-section">
             <div className="settings-section-head">
               <h4>Projects</h4>
@@ -601,16 +711,16 @@ export function Settings({
                 }}
               >
                 {discovering ? (
-                  <span title="Finding channels…" aria-label="Finding channels">
+                  <span title="Finding projects…" aria-label="Finding projects">
                     <Spinner />
                   </span>
                 ) : (
-                  "Find project channels"
+                  "Find projects"
                 )}
               </button>
             </div>
             <div className="settings-group">
-              {shown.length === 0 && <div className="setting-row muted small">No projects yet. Find project channels to look for your #tmp channels.</div>}
+              {shown.length === 0 && <div className="setting-row muted small">No projects yet. Find projects to look for your #tmp channels and your Jira epics.</div>}
               {shown.map((p) => (
                 <ProjectRow
                   key={`${p.channel_id}:${p.hidden}:${p.local_repos}:${p.gh_repos}`}
@@ -621,6 +731,7 @@ export function Settings({
               ))}
             </div>
           </section>
+          )}
 
           <section className="settings-section">
             <button className="settings-section-head settings-toggle" onClick={() => setShowLog(!showLog)} aria-expanded={showLog}>

@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 
 /**
  * The app's one layout: the orb and calendar, then one area at a time (Updates, Tasks, Projects
- * or Watched topics), picked from a rail of icons. The open area is kept in localStorage, so it
- * shows from the first frame.
+ * or Watched topics, each of which can be turned off; see features), picked from a rail of icons, or
+ * with no rail when only one is on. The open area is kept in localStorage, so it shows from the first
+ * frame.
  */
 export type DetailTab = "updates" | "tasks" | "projects" | "watched";
 
@@ -21,7 +22,9 @@ export function showDetailTab(tab: DetailTab) {
 export function useDetailTab(): [DetailTab, (tab: DetailTab) => void] {
   const [tab, setTab] = useState<DetailTab>(() => {
     const t = localStorage.getItem(TAB_KEY);
-    return t === "tasks" || t === "projects" || t === "watched" ? t : "updates";
+    // An area that's off shows the first one on instead (see App), and the one kept here comes back
+    // when it's on again.
+    return t === "tasks" || t === "projects" || t === "watched" || t === "updates" ? t : "updates";
   });
   useEffect(() => localStorage.setItem(TAB_KEY, tab), [tab]);
   useEffect(() => {

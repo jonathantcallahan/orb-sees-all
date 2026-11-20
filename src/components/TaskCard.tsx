@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, useMemo } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
 import { adoptAsTaskNote, claudeSessionUrl, resumeSessionUrl, sessionPrompt, taskChatPrompt } from "../openInClaude";
@@ -7,7 +7,9 @@ import { clearAssessment, clearTaskCheck, hideMergedNote, markCorrectionApplied,
 import { assessPendingTasks, checkTask, continueTaskSession, planTask, recheckSessionSteps, sendHandoff, startTaskChat, stopTaskSession, STOPPED_BY_YOU } from "../jobs";
 import type { Assessment, Automation, FollowUp, ManualAssessment, Priority, ProjectPriority } from "../schema";
 import { ago, formatMinutes, sinceWhen, statusForBlockedSteps, taskEstimate, taskPriority, type EffectivePriority, type TaskStatus } from "../tasks";
-import { useJobStatus } from "../useAppData";
+import { useChatAsks, useJobStatus, useNoAutoMode } from "../useAppData";
+import { AskRow } from "./AskRow";
+import { chatPieces } from "../chatLinks";
 import { formatWhen, localDate } from "../scheduler";
 import { TaskChangeCards } from "./ActionRow";
 import { CloseIcon, ComposeModal, ExternalLink, HoverTip, RefreshButton, Reveal, ScrambleText, Spinner, SPINNER_FRAMES, StepCircle, UnreadDot, useScrambled } from "./common";
@@ -358,7 +360,7 @@ function PriorityBadge({
  * :focus-visible, so without this its focus ring would stay after you pick from it with the mouse.
  * Spread `props` on the select and add `pointer-focus` to the badge when `pointer` is set.
  */
-function usePointerFocus() {
+export function usePointerFocus() {
   const [pointer, setPointer] = useState(false);
   return {
     pointer,
@@ -946,8 +948,26 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   );
 }
 
-/** Text with markdown marks (bold, italics, code) dropped: the card shows Claude's words plainly. */
-const plain = (text: string) => text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\W)[*_]([^*_\n]+)[*_](?=\W|$)/g, "$1$2").replace(/`([^`]+)`/g, "$1");
+/** Chat text with its links opening in the browser, and a file Claude names shown by its name (its path on hover). */
+function ChatWords({ text, strip = true }: { text: string; strip?: boolean }) {
+  return (
+    <>
+      {chatPieces(text, strip).map((p, i) =>
+        p.href ? (
+          <ExternalLink key={i} href={p.href} className="chat-link" title={p.href}>
+            {p.text}
+          </ExternalLink>
+        ) : p.title ? (
+          <span key={i} className="chat-ref" title={p.title}>
+            {p.text}
+          </span>
+        ) : (
+          <Fragment key={i}>{p.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 /**
  * Claude's message as plain paragraphs. Sessions are asked to write plain text, but older ones
@@ -961,10 +981,9 @@ function ClaudeText({ text }: { text: string }) {
         <div key={i} className="chat-para">
           {block.split("\n").map((line, j) => {
             const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
-            const words = plain(item ? item[1] : line.replace(/^#{1,6}\s+/, ""));
             return (
               <span key={j} className={`chat-line${item ? " chat-item" : ""}`}>
-                {words}
+                <ChatWords text={item ? item[1] : line.replace(/^#{1,6}\s+/, "")} />
               </span>
             );
           })}
@@ -1299,6 +1318,8 @@ export function SessionChat({
   extra,
   empty,
   placeholder,
+  top,
+  className,
   onSend,
   onClose,
   onChange,
@@ -1327,6 +1348,10 @@ export function SessionChat({
   empty?: ReactNode;
   /** The reply box's placeholder; several cycle through as examples. */
   placeholder?: string | string[];
+  /** Between the title and the conversation, taking its share of the height (a TDD draft's doc). */
+  top?: ReactNode;
+  /** More classes for the chat's box. */
+  className?: string;
   /** Sends your message another way than continuing the session (the global chat's first message starts it). */
   onSend?: (message: string) => void;
   onClose: () => void;
@@ -1343,6 +1368,9 @@ export function SessionChat({
   // Whether the session has started on this turn yet (until then, it's queued: still busy).
   const [turnStarted, setTurnStarted] = useState(false);
   const live = useJobStatus(`live:${taskId}`);
+  // What Claude Code is asking before it uses a tool; the turn waits on each.
+  const asks = useChatAsks(taskId);
+  const noAuto = useNoAutoMode(taskId);
   // The last live text, kept after the turn ends until the transcript's copy lands.
   const [held, setHeld] = useState<string | null>(null);
   useEffect(() => {
@@ -1421,7 +1449,7 @@ export function SessionChat({
         {shown.map((m, i) =>
           m.role === "user" ? (
             <div key={i} className="chat-turn you">
-              {m.text}
+              <ChatWords text={m.text} strip={false} />
             </div>
           ) : (
             <div key={i} className="chat-turn claude">
@@ -1434,9 +1462,14 @@ export function SessionChat({
             <ClaudeText text={liveText} />
           </div>
         )}
+        {/* What Claude Code asks before using a tool, under the reply so far; the turn waits on it. */}
+        {asks.length > 0 && noAuto && <div className="muted small ask-note">Auto mode isn't available, so Claude asks before using anything it wasn't given.</div>}
+        {asks.map((a) => (
+          <AskRow key={a.id} chatKey={taskId} ask={a} />
+        ))}
         {/* Under Claude's reply as it forms, as in a Claude session: its working glyph. What it's
             doing shows in the reply box, and the box's Stop ends the turn. */}
-        {busy && (
+        {busy && !asks.length && (
           <div className="chat-working" aria-hidden>
             <ClaudeSpark />
           </div>
@@ -1451,7 +1484,7 @@ export function SessionChat({
             autoFocus
             disabled={busy}
             placeholder={placeholder}
-            status={working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"}
+            status={asks.length ? "Waiting for your OK…" : working ? `${working[0].toUpperCase()}${working.slice(1)}…` : "Thinking…"}
             // Ends this turn, and everything it started; Carry on picks it up again.
             onStop={() => stopTaskSession(taskId)}
           />
@@ -1463,7 +1496,7 @@ export function SessionChat({
   // In a chat dock (the Detail view's Updates area) it draws inline, filling the dock; elsewhere it's
   // a window over everything.
   const panel = (
-      <div className={`modal chat-modal${plain ? " plain" : ""}${split ? " split" : ""}${docked ? " docked" : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`modal chat-modal${plain ? " plain" : ""}${split ? " split" : ""}${docked ? " docked" : ""}${className ? ` ${className}` : ""}`} role="dialog" aria-label={`Conversation about ${title}`} onClick={(e) => e.stopPropagation()}>
         {split ? (
           <>
             <div className="chat-modal-top">{head}</div>
@@ -1501,7 +1534,9 @@ export function SessionChat({
               {head}
               {askBox}
             </div>
-            {conversation}
+            {top}
+            {/* Under something on top, the conversation and its reply box share one box, so CSS can size them together. */}
+            {top ? <div className="chat-body">{conversation}</div> : conversation}
           </>
         )}
       </div>
@@ -1538,9 +1573,16 @@ function SessionPanel({
   onOpenChat: () => void;
   onChange: () => void;
 }) {
+  // Claude Code is asking before it uses a tool, and the turn waits: the chat is where to answer.
+  const asking = useChatAsks(taskId).length > 0;
   return (
     <>
-      {working && (
+      {working && asking && (
+        <span className="small session-working">
+          <ClaudeSpark /> Claude is waiting for your OK in the chat.
+        </span>
+      )}
+      {working && !asking && (
         <span className="muted small session-working">
           <ClaudeSpark /> Claude is working: <ScrambleText text={`${working}…`} />
         </span>
@@ -1562,7 +1604,7 @@ function SessionPanel({
       )}
       {/* Open in chat is always here: to answer it, to review what it wrote, or to have it re-check its
           steps against the conversation. The step it's waiting on says Human. */}
-      <button className={needsInput && !working && !chatOpen ? "cta-primary" : "cta-ghost"} disabled={chatOpen} onClick={onOpenChat}>
+      <button className={((needsInput && !working) || asking) && !chatOpen ? "cta-primary" : "cta-ghost"} disabled={chatOpen} onClick={onOpenChat}>
         Open in chat
       </button>
     </>

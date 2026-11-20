@@ -72,9 +72,12 @@ export function updateFacts(d: UnreadInput): { facts: Map<string, string[]>; min
   for (const p of d.projects) {
     const status = projectStatus(p);
     mine.add(p.channel_id);
+    // Its ship date moving is news too (one you set yourself isn't).
+    const ship = p.snapshot?.path?.ship?.date;
     facts.set(p.channel_id, [
       ...(status ? [`p:${status}`] : []),
       ...(p.snapshot?.recent_updates ?? []).map((u) => `u:${u.link ?? u.date ?? hash(u.summary)}`),
+      ...(ship && ship !== p.ship_choice?.date ? [`s:${ship}`] : []),
     ]);
   }
   for (const t of d.watched) {

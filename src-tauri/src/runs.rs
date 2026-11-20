@@ -4,8 +4,8 @@
 //! is signalled; on Windows its process tree is ended.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
-use std::process::{Child, ExitStatus};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, ChildStdin, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -23,7 +23,14 @@ pub struct Limits {
 struct Entry {
     pid: u32,
     stop: Arc<AtomicBool>,
+    /// Set while the run waits on the user (a permission ask in a chat): the idle limit is off.
+    waiting: Arc<AtomicBool>,
+    /// The run's stdin, for a run that's written to as it goes (see supervise_open); None once closed.
+    input: Option<Input>,
 }
+
+/// A run's stdin, kept open so the app can write to it while it runs.
+type Input = Arc<Mutex<Option<ChildStdin>>>;
 
 /// The runs in flight, so the app can stop one, and stop them all when it quits.
 #[derive(Default)]
@@ -34,10 +41,37 @@ impl Runs {
         self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn add(&self, id: &str, pid: u32) -> Arc<AtomicBool> {
+    fn add(&self, id: &str, pid: u32, input: Option<Input>) -> (Arc<AtomicBool>, Arc<AtomicBool>) {
         let stop = Arc::new(AtomicBool::new(false));
-        self.entries().insert(id.to_string(), Entry { pid, stop: stop.clone() });
-        stop
+        let waiting = Arc::new(AtomicBool::new(false));
+        self.entries().insert(id.to_string(), Entry { pid, stop: stop.clone(), waiting: waiting.clone(), input });
+        (stop, waiting)
+    }
+
+    /// Writes `text` to a run's stdin (see supervise_open), after anything written before it.
+    pub fn write(&self, id: &str, text: &str) -> Result<(), String> {
+        let input = self.entries().get(id).and_then(|e| e.input.clone()).ok_or_else(|| format!("No run {id} to write to"))?;
+        let mut pipe = input.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let pipe = pipe.as_mut().ok_or_else(|| format!("Run {id} no longer takes input"))?;
+        pipe.write_all(text.as_bytes()).and_then(|_| pipe.flush()).map_err(|e| e.to_string())
+    }
+
+    /// Closes a run's stdin, which ends a run that reads until it's closed. False when there's none.
+    pub fn close_input(&self, id: &str) -> bool {
+        let Some(input) = self.entries().get(id).and_then(|e| e.input.clone()) else { return false };
+        let closed = input.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take().is_some();
+        closed
+    }
+
+    /// Marks a run as waiting on the user, or not. While it waits, it isn't stopped for going quiet.
+    pub fn set_waiting(&self, id: &str, waiting: bool) -> bool {
+        match self.entries().get(id) {
+            Some(entry) => {
+                entry.waiting.store(waiting, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        }
     }
 
     fn remove(&self, id: &str) {
@@ -136,15 +170,38 @@ fn minutes(secs: u64) -> String {
 
 /// Waits for a started run under `id`, passing each line it prints to `on_line`, and stops it
 /// (whole process tree) when it goes past `limits` or is cancelled. Err says why it was stopped.
-pub fn supervise(runs: &Runs, id: &str, mut child: Child, limits: Limits, mut on_line: impl FnMut(&str)) -> Result<Finished, String> {
+pub fn supervise(runs: &Runs, id: &str, child: Child, limits: Limits, on_line: impl FnMut(&str)) -> Result<Finished, String> {
+    supervised(runs, id, child, None, limits, on_line)
+}
+
+/// Like supervise, for a run that's written to as it goes (a chat answering Claude Code's
+/// permission asks): `first` goes on its stdin, which then stays open for Runs::write until
+/// Runs::close_input. The child must have been started with a piped stdin.
+pub fn supervise_open(runs: &Runs, id: &str, mut child: Child, first: String, limits: Limits, on_line: impl FnMut(&str)) -> Result<Finished, String> {
+    // Written on its own thread, so a long first message can't deadlock with output the child is
+    // writing meanwhile. The pipe is handed over for later writes only once it's written, so nothing
+    // can go ahead of it (a write before then fails as if the run took no input).
+    let input: Input = Arc::new(Mutex::new(None));
+    let holder = input.clone();
+    let pipe = child.stdin.take();
+    std::thread::spawn(move || {
+        let Some(mut pipe) = pipe else { return };
+        if pipe.write_all(first.as_bytes()).and_then(|_| pipe.flush()).is_ok() {
+            *holder.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(pipe);
+        }
+    });
+    supervised(runs, id, child, Some(input), limits, on_line)
+}
+
+fn supervised(runs: &Runs, id: &str, mut child: Child, input: Option<Input>, limits: Limits, mut on_line: impl FnMut(&str)) -> Result<Finished, String> {
     let pid = child.id();
-    let stop = runs.add(id, pid);
-    let result = watch(&mut child, pid, &stop, limits, &mut on_line);
+    let (stop, waiting) = runs.add(id, pid, input);
+    let result = watch(&mut child, pid, &stop, &waiting, limits, &mut on_line);
     runs.remove(id);
     result
 }
 
-fn watch(child: &mut Child, pid: u32, stop: &AtomicBool, limits: Limits, on_line: &mut impl FnMut(&str)) -> Result<Finished, String> {
+fn watch(child: &mut Child, pid: u32, stop: &AtomicBool, waiting: &AtomicBool, limits: Limits, on_line: &mut impl FnMut(&str)) -> Result<Finished, String> {
     // Output is read on threads of their own, so the wait below never blocks on a pipe.
     let (line_tx, lines) = mpsc::channel::<String>();
     if let Some(stdout) = child.stdout.take() {
@@ -213,6 +270,10 @@ fn watch(child: &mut Child, pid: u32, stop: &AtomicBool, limits: Limits, on_line
         }
         if stop.load(Ordering::SeqCst) {
             break Some("Stopped".to_string());
+        }
+        // Quiet while it waits on the user doesn't count: the idle clock starts once it's answered.
+        if waiting.load(Ordering::SeqCst) {
+            last_line = Instant::now();
         }
         if let Some(idle) = limits.idle_secs {
             if last_line.elapsed() > Duration::from_secs(idle) {
@@ -327,6 +388,37 @@ mod tests {
         runs.kill_all();
         assert!(handle.join().unwrap().is_err());
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn writes_to_an_open_run_as_it_goes_and_ends_it_by_closing_its_input() {
+        let runs = Arc::new(Runs::default());
+        let child = Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0).spawn().unwrap();
+        let writer = runs.clone();
+        let handle = std::thread::spawn(move || {
+            while writer.write("g", "second\n").is_err() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(writer.close_input("g"));
+        });
+        let done = supervise_open(&runs, "g", child, "first\n".into(), Limits { idle_secs: Some(5), total_secs: Some(10) }, |_| {}).unwrap();
+        handle.join().unwrap();
+        assert_eq!(done.stdout, "first\nsecond\n");
+        assert!(runs.write("g", "late\n").is_err());
+    }
+
+    #[test]
+    fn a_run_waiting_on_the_user_isnt_stopped_for_going_quiet() {
+        let runs = Arc::new(Runs::default());
+        let marker = runs.clone();
+        let handle = std::thread::spawn(move || {
+            while !marker.set_waiting("h", true) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let done = supervise(&runs, "h", start("sleep 2; echo done"), Limits { idle_secs: Some(1), total_secs: Some(10) }, |_| {}).unwrap();
+        handle.join().unwrap();
+        assert_eq!(done.stdout, "done\n");
     }
 
     #[test]

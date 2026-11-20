@@ -11,7 +11,7 @@ Everything the app stores stays on your machine. It's a SQLite database in `~/Li
 - A Mac (Apple silicon or Intel), or Windows 10 or later
 - A Claude account with a Pro, Max, Team or Enterprise plan
 - [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), signed in with that account. The app walks you through installing it.
-- Optional: the [GitHub CLI](https://cli.github.com) (`gh`), signed in, if you want PR status on project cards
+- Optional: the [GitHub CLI](https://cli.github.com) (`gh`), signed in. Projects needs it, along with the Atlassian Rovo connector
 
 ## 1. Install Demian
 
@@ -79,8 +79,9 @@ On first launch, Demian walks you through three steps, checking each as you go. 
    | Google Docs, Sheets and Slides | Reading files linked in your work | Optional |
    | Claude Docs | Reading docs people share from Claude | Optional |
    | Zoom | Meeting summaries | Optional |
+   | Atlassian Rovo | Jira tickets and epics, filing the tickets you approve, and requirements docs in Confluence | Optional; Projects needs it |
 
-   Jira isn't a claude.ai connector. It's read through an MCP server named `mcp-jira` that your team sets up in Claude Code (`claude mcp add mcp-jira …`, using whatever Jira MCP server your company runs). It may need your company's VPN. Without it, Claude simply has no Jira.
+   Without Atlassian Rovo, Claude simply has no Jira or Confluence. Demian reads them only through JQL and CQL searches: Rovo's own search, which spends your organization's Rovo credits, is turned off in its runs.
 
 Then Demian learns your role from your work and starts the first refresh. You can run the checks again any time from **Settings → Check setup**.
 
@@ -107,9 +108,10 @@ To change things later:
 
    That takes a few minutes. Later refreshes only read what's new.
 3. **Projects:**
-   - Channels named `#tmp-*` go straight onto the board. Other channels that look like projects show up as suggestions at the bottom of the Projects column; choose **Track** or **Ignore**.
+   - Projects needs Atlassian Rovo and `gh`. Without both it's off, and Settings → **Features** turns it on once they're set up. The same switches turn Updates, Tasks and Watched topics on or off.
+   - Channels named `#tmp-*` go straight onto the board, and a project can also come from its Jira epics. Other channels and epics that look like projects are kept as suggestions: Settings → **Projects** lists them, and the Demian chat can track one.
    - Settings → **Projects** lists each project's channels. You can unlink a channel or merge two projects there.
-   - You can also map a project to local repos and GitHub repos to see branch and PR state on its card.
+   - A project's pull requests and branches are the ones on GitHub that name its Jira tickets, read with `gh`.
 
 Each refresh is a Claude Code run, and it counts toward your claude.ai plan's usage. Settings shows the cost of recent refreshes.
 

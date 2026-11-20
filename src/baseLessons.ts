@@ -60,3 +60,10 @@ export function baseSection(kind: "plan" | "tasks"): string {
   const what = kind === "plan" ? "plans and the messages in them" : "the task list";
   return `\nHow to get ${what} right (the user's own lessons below win where they differ):\n${rules.map((r) => `- ${r}`).join("\n")}\n`;
 }
+
+/**
+ * How to reach Jira and Confluence through the Rovo connector: every tool takes the Atlassian site,
+ * and links from before the move to the cloud site name the same issues and pages there.
+ */
+export const ATLASSIAN_RULE =
+  'Jira and Confluence are on the company\'s Atlassian cloud site. Every Jira and Confluence tool takes a cloudId: use the host of a Jira or Confluence link you already have when it\'s an atlassian.net one (e.g. "yourcompany.atlassian.net"); otherwise call getAccessibleAtlassianResources once and use the url of the site it lists. Links to an older Jira or Confluence (a self-hosted one, or another atlassian.net site than the one the tools reach) point at the same issue, by its key, and the same page, by its title, on the cloud site: look an issue up by its key, and a page with searchConfluenceUsingCql (title ~ "<the page\'s title>", in the link\'s space key when it has one), never by the old link\'s page id, which changed. Link to issues and pages by the webUrl the tools return.';

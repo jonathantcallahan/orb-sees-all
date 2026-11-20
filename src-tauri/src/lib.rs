@@ -216,6 +216,9 @@ fn resolve(program: &str, path: &std::ffi::OsString) -> Option<Program> {
 struct CliInput {
     stdin: Option<String>,
     append_system_prompt: Option<String>,
+    /// Keep stdin open after `stdin` is written, for write_run_stdin (run_cli_stream only).
+    #[serde(default)]
+    keep_stdin_open: bool,
 }
 
 /// Writes the system prompt to a temp file in the work folder and adds the flag that reads it;
@@ -329,7 +332,7 @@ async fn run_cli_stream(
 
     let input = input.unwrap_or_default();
     let prompt_file = with_system_prompt(&work_dir(&app, None)?, &mut args, input.append_system_prompt)?;
-    let has_stdin = input.stdin.is_some();
+    let has_stdin = input.stdin.is_some() || input.keep_stdin_open;
     tauri::async_runtime::spawn_blocking(move || {
         let _prompt_file = prompt_file;
         let mut child = command(&exe, &args, &dir, &path, has_stdin)
@@ -337,12 +340,19 @@ async fn run_cli_stream(
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Couldn't start {program} in {}: {e}", dir.display()))?;
-        feed_stdin(&mut child, input.stdin);
         let emitter = app.clone();
-        runs::supervise(&app.state::<runs::Runs>(), &stream_id, child, limits.unwrap_or(STREAM_LIMITS), |line| {
-            let _ = emitter.emit("cli-line", CliLine { stream_id: stream_id.clone(), line: line.to_string() });
-        })
-        .map(finished)
+        let line_id = stream_id.clone();
+        let on_line = move |line: &str| {
+            let _ = emitter.emit("cli-line", CliLine { stream_id: line_id.clone(), line: line.to_string() });
+        };
+        let runs = app.state::<runs::Runs>();
+        let limits = limits.unwrap_or(STREAM_LIMITS);
+        if input.keep_stdin_open {
+            runs::supervise_open(&runs, &stream_id, child, input.stdin.unwrap_or_default(), limits, on_line).map(finished)
+        } else {
+            feed_stdin(&mut child, input.stdin);
+            runs::supervise(&runs, &stream_id, child, limits, on_line).map(finished)
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -352,6 +362,24 @@ async fn run_cli_stream(
 #[tauri::command]
 fn cancel_run(runs: tauri::State<'_, runs::Runs>, id: String) -> bool {
     runs.cancel(&id)
+}
+
+/// Writes to a running run_cli_stream's stdin, one started with `keepStdinOpen`.
+#[tauri::command]
+fn write_run_stdin(runs: tauri::State<'_, runs::Runs>, id: String, text: String) -> Result<(), String> {
+    runs.write(&id, &text)
+}
+
+/// Closes a run's stdin (see write_run_stdin). False when it has none open.
+#[tauri::command]
+fn close_run_stdin(runs: tauri::State<'_, runs::Runs>, id: String) -> bool {
+    runs.close_input(&id)
+}
+
+/// Marks a run as waiting on the user, so it isn't stopped for going quiet meanwhile.
+#[tauri::command]
+fn set_run_waiting(runs: tauri::State<'_, runs::Runs>, id: String, waiting: bool) -> bool {
+    runs.set_waiting(&id, waiting)
 }
 
 /// Stops every run at once, before the app relaunches for an update.
@@ -652,6 +680,49 @@ mod checkout_root_tests {
     }
 }
 
+/// Where a draft lives while a chat works on it with the user: `<work>/drafts/<name>.md`, inside
+/// the folder chats run in. `name` is the app's own key for it (a project id), kept to letters,
+/// digits, `-` and `_` so it can't point anywhere else.
+fn draft_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    let safe: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if safe.is_empty() {
+        return Err("No draft name".into());
+    }
+    let dir = work_dir(app, None)?.join("drafts");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(format!("{safe}.md")))
+}
+
+/// Writes a draft's file for its chat, and says where it is. Left alone when it already holds
+/// `text`: Claude Code won't edit a file that changed since it last read it.
+#[tauri::command]
+fn write_draft(app: AppHandle, name: String, text: String) -> Result<String, String> {
+    let path = draft_file(&app, &name)?;
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// A draft's file as its chat left it, or None when there's none.
+#[tauri::command]
+fn read_draft(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(draft_file(&app, &name)?) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Removes a draft's file, once the draft is created or thrown away.
+#[tauri::command]
+fn remove_draft(app: AppHandle, name: String) -> Result<(), String> {
+    match std::fs::remove_file(draft_file(&app, &name)?) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    }
+}
+
 /// The folders that exist, of the ones given (project repos the user mapped may have moved).
 #[tauri::command]
 fn existing_dirs(paths: Vec<String>) -> Vec<String> {
@@ -886,6 +957,9 @@ pub fn run() {
             open_setup_terminal,
             mirror_repo,
             existing_dirs,
+            write_draft,
+            read_draft,
+            remove_draft,
             find_checkouts,
             checkout_root,
             sessions::find_session,
@@ -897,6 +971,9 @@ pub fn run() {
             media::media_control,
             media::open_player,
             cancel_run,
+            write_run_stdin,
+            close_run_stdin,
+            set_run_waiting,
             cancel_all_runs,
             setup_login_command
         ])
@@ -942,6 +1019,9 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 hide_window_buttons(&window);
             }
+            // After setup, so the window doesn't wait on it.
+            #[cfg(target_os = "macos")]
+            let _ = app.handle().run_on_main_thread(set_round_icon);
 
             // System prompts left by runs the app didn't outlive (a crash, a forced quit): no run is
             // going yet, so any in the work folder are stale.
@@ -1001,6 +1081,31 @@ fn hide_window_buttons(window: &tauri::WebviewWindow) {
             button.setHidden(true);
         }
     }
+}
+
+/// Gives the app its round Ephedra icon. macOS 26 and later put an app's own icon on a gray rounded
+/// square unless it's that shape, but show a custom icon (the kind pasted in Get Info) as drawn, so
+/// the app sets one on itself, as Steam does. On every launch: an update replaces the whole app, and
+/// an install over it can leave an older custom icon behind.
+#[cfg(target_os = "macos")]
+fn set_round_icon() {
+    use objc2::AllocAnyThread;
+    use objc2_app_kit::{NSImage, NSWorkspace, NSWorkspaceIconCreationOptions};
+    use objc2_foundation::{NSData, NSString};
+    // The app around the running program (Demian.app/Contents/MacOS/Demian). In development the
+    // program isn't in one.
+    let Some(app) = std::env::current_exe().ok().and_then(|exe| exe.ancestors().nth(3).map(Path::to_path_buf)) else { return };
+    if !app.extension().is_some_and(|ext| ext == "app") {
+        return;
+    }
+    let data = NSData::with_bytes(include_bytes!("../icons/round.png"));
+    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else { return };
+    // Fails quietly where the app can't be written to; it keeps its usual icon.
+    NSWorkspace::sharedWorkspace().setIcon_forFile_options(
+        Some(&image),
+        &NSString::from_str(&app.to_string_lossy()),
+        NSWorkspaceIconCreationOptions::empty(),
+    );
 }
 
 #[cfg(test)]

@@ -339,7 +339,7 @@ describe("calendar layout", () => {
 describe("readingContext", () => {
   const project = (over: object) => ({
     channel_id: "C1", name: "tmp-asset-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [],
-    last_refreshed_at: "2026-10-29T07:00:00Z", snapshot: null, profile: null, repo_state: null, last_error: null, focus: null, status_override: null, ...over,
+    last_refreshed_at: "2026-10-29T07:00:00Z", snapshot: null, profile: null, last_error: null, focus: null, status_override: null, kind_choice: null, docs: null, requirements: null, epics: [], shared_channels: [], ship_choice: null, ...over,
   });
   const snapshot = (level: "P0" | "P1" | "P2" | "P3", status: "on_track" | "at_risk" | "blocked" | "idle" = "on_track") => ({
     name: "x", description: "", status, status_reason: "late codes",
@@ -541,26 +541,38 @@ describe("project filters", () => {
 
   it("requires every filter that's set", () => {
     expect(matchesProjectFilter(p, NO_PROJECT_FILTER)).toBe(true);
-    expect(matchesProjectFilter(p, { statuses: ["at_risk"], priorities: ["P0"], roles: ["accountable", "responsible"] })).toBe(true);
+    expect(matchesProjectFilter(p, { kinds: [], statuses: ["at_risk"], priorities: ["P0"], roles: ["accountable", "responsible"] })).toBe(true);
     expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, roles: ["informed"] })).toBe(false);
     expect(matchesProjectFilter(p, { ...NO_PROJECT_FILTER, priorities: ["P1"] })).toBe(false);
+  });
+
+  it("shows projects, workstreams or both, and leaves out ones not yet read as either when filtering by type", () => {
+    const project = { ...p, kind: "project" as const };
+    const workstream = { ...p, kind: "workstream" as const };
+    const unread = { ...p, kind: null };
+    const only = (kinds: ("project" | "workstream")[]) => ({ ...NO_PROJECT_FILTER, kinds });
+    expect([project, workstream, unread].map((x) => matchesProjectFilter(x, NO_PROJECT_FILTER))).toEqual([true, true, true]);
+    expect([project, workstream, unread].map((x) => matchesProjectFilter(x, only(["project"])))).toEqual([true, false, false]);
+    expect([project, workstream, unread].map((x) => matchesProjectFilter(x, only(["workstream"])))).toEqual([false, true, false]);
+    expect([project, workstream, unread].map((x) => matchesProjectFilter(x, only(["project", "workstream"])))).toEqual([true, true, false]);
+    expect(matchesProjectFilter(workstream, { ...only(["workstream"]), statuses: ["blocked"] })).toBe(false);
   });
 });
 
 describe("open in Claude", () => {
-  const task = { title: "Coveo bestseller tweak", description: "Rebalance daily vs weekly.", link: "https://slack.com/p1", projectName: "Search" };
+  const task = { title: "Search bestseller tweak", description: "Rebalance daily vs weekly.", link: "https://slack.com/p1", projectName: "Search" };
   const plan = {
-    approach: "Draft a ticket for Romen.",
-    steps: [{ title: "Read CPS-6931", detail: "for the current weights", link: "https://jira/CPS-6931" }, { title: "Draft the ticket", detail: null, link: null }],
+    approach: "Draft a ticket for Raj.",
+    steps: [{ title: "Read PAY-6931", detail: "for the current weights", link: "https://jira/PAY-6931" }, { title: "Draft the ticket", detail: null, link: null }],
     open_questions: ["Cap at top 20 or top 50?"],
     sources: [{ title: "Sep 29 thread", link: "https://slack.com/p2" }],
   };
 
   it("includes the task and the plan, and asks to start with step 1", () => {
     const p = sessionPrompt(task, plan);
-    expect(p).toContain("Task: Coveo bestseller tweak");
+    expect(p).toContain("Task: Search bestseller tweak");
     expect(p).toContain("Project: Search");
-    expect(p).toContain("1. Read CPS-6931 (for the current weights https://jira/CPS-6931)");
+    expect(p).toContain("1. Read PAY-6931 (for the current weights https://jira/PAY-6931)");
     expect(p).toContain("2. Draft the ticket");
     expect(p).toContain("- Cap at top 20 or top 50?");
     expect(p).toMatch(/starting with step 1/);

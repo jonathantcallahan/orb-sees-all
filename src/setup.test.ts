@@ -11,7 +11,7 @@ describe("setup checks", () => {
         mcp_servers: [
           { name: "claude.ai Slack", status: "connected" },
           { name: "claude.ai Gmail", status: "needs-auth" },
-          { name: "mcp-jira", status: "failed" },
+          { name: "claude.ai Atlassian Rovo", status: "failed" },
           { name: "claude.ai U-Know", status: "connected" },
         ],
       }),
@@ -100,7 +100,7 @@ describe("setup checks", () => {
   });
 
   it("flags a login with no claude.ai connectors at all", async () => {
-    const init = JSON.stringify({ type: "system", subtype: "init", mcp_servers: [{ name: "mcp-jira", status: "connected" }] });
+    const init = JSON.stringify({ type: "system", subtype: "init", mcp_servers: [{ name: "Amplitude", status: "connected" }] });
     const report = await runSetupChecks(
       () => {},
       async (_program, args) =>

@@ -225,8 +225,7 @@ export function OnboardingGuide({
 
   const all = connectors ?? [];
   const needed = all.filter((c) => c.required);
-  const optional = all.filter((c) => !c.required && (c.id !== "jira" || c.state === "connected"));
-  const jira = all.find((c) => c.id === "jira");
+  const optional = all.filter((c) => !c.required);
   // The preview shows the connectors still to add, so it matches what they'll look for.
   const toAdd = [...needed, ...optional].filter((c) => c.state !== "connected");
   return (
@@ -268,15 +267,6 @@ export function OnboardingGuide({
               <ConnectorItem key={c.id} c={c} />
             ))}
           </ul>
-          {jira && jira.state !== "connected" && (
-            <span className="onboarding-tip" tabIndex={0}>
-              What about Jira?
-              <span className="onboarding-tip-bubble" role="tooltip">
-                Jira isn't a claude.ai connector. It comes from an MCP server named <code>mcp-jira</code> that your team sets up in Claude Code. If
-                you have it and it won't connect, you may need to be on your company's VPN.
-              </span>
-            </span>
-          )}
         </div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
 import { actionLine, WATCH_CHAT } from "./watched";
 import { SAME_WORK_RULE, STEP_RULE, TITLE_RULE } from "./baseLessons";
 import type { TaskPlan } from "./schema";
@@ -239,9 +240,11 @@ export function watchChatPrompt(t: {
  * The changes Demian can make to itself, as the JSON a chat (or a #demian message) proposes; one list,
  * so the global chat and the DM can't drift apart. See GlobalAction and globalActions.ts.
  */
-export const GLOBAL_ACTION_DOCS = [
-  '- {"type": "create_project", "name": "Store assets", "channels": [{"channel_id": "C123", "name": "store-assets"}], "reason": "why it\'s a project"}: a project the planner is missing. Find its channels in Slack first; the first is its main channel.',
-  '- {"type": "split_project", "project_id": "C111", "new_name": "Store assets", "channel_ids": ["C222"], "reason": "..."}: moves those channels out of a project into a new one. A project\'s own id (its main channel) can\'t move.',
+/** The changes the Demian chat can propose, one per line after the first (see globalActionDocs). */
+const ACTION_DOC_LINES = [
+  "A project is the planner's own record of a body of work: its purpose, people, path to ship, context and tasks. Its Slack channels and Jira epics are only sources it reads. Any of them can be linked to it, moved to another project, shared by several projects, or unlinked, its first or main channel included, and the project and its record stay. A project id is just an id (\"p:…\", or for older projects a channel id or \"jira:…\"), never a channel to read.",
+  '- {"type": "create_project", "name": "Store assets", "channels": [{"channel_id": "C123", "name": "store-assets"}], "epics": ["ABC-123"], "reason": "why it\'s a project"}: a project the planner is missing. Find its Slack channels and its Jira epics first (either can be empty: a project can have only epics, only channels, or neither yet); the first channel is its main one, where reminders go.',
+  '- {"type": "split_project", "project_id": "p:1a2b3c", "new_name": "Store assets", "channel_ids": ["C222"], "epic_keys": ["ABC-12"], "shared_channel_ids": ["C333"], "reason": "..."}: splits part of a project off into a new one. The channels and epics listed move to it (any of them, its main channel too); shared channels stay with this project and both read them, which is how two projects that grew up in one channel come apart. Each list can be empty, but something must move or be shared. Both records note the split.',
   '- {"type": "merge_projects", "from_id": "C111", "into_id": "C222"}',
   '- {"type": "rename_project", "project_id": "C111", "name": "..."}',
   '- {"type": "set_project_tracking", "project_id": "C111", "tracked": true}: put a project on the board or take it off.',
@@ -249,9 +252,13 @@ export const GLOBAL_ACTION_DOCS = [
   '- {"type": "add_project_repos", "project_id": "C111", "github": ["owner/name"], "local": ["/Users/me/code/repo"]}: where a project\'s code lives, so plans and chats can read it. Offer it when a question needs the code and the project has no repos listed.',
   '- {"type": "remove_project_context", "project_id": "C111", "entries": ["the entry, as listed"]}: takes entries out of a project\'s context; refreshes leave them out.',
   '- {"type": "set_project_status", "project_id": "C111", "status": "blocked" | "at_risk" | "on_track" | "idle" | "auto", "reason": "why, in my words"}: sets the status the board shows; refreshes keep to it unless something clearly changes. "auto" hands it back to refreshes.',
+  '- {"type": "set_project_kind", "project_id": "C111", "kind": "project" | "workstream" | "auto"}: a project is a body of work with a beginning and an end, and needs a requirements doc; a workstream is an ongoing initiative. "auto" hands it back to refreshes.',
+  '- {"type": "set_project_doc", "project_id": "C111", "link": "https://docs.google.com/document/d/…", "title": "the doc\'s title"}: links the doc that sets out a project\'s requirements (a TDD or a detailed PRD); its requirements are read and their progress tracked. A null link removes it.',
   '- {"type": "resolve_project_item", "project_id": "C111", "item_id": "<id of an open blocker or active item>", "what": "<what it is>"}: marks it done, as its Mark done does.',
   '- {"type": "check_project_item", "project_id": "C111", "item_id": "...", "what": "..."}: has Claude double-check whether a blocker or active item is still real, as its Double check does.',
-  '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s linked channels (not its main one).',
+  '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s channels (its main one too; another takes over), or one it shares with another project.',
+  '- {"type": "link_project_epic", "project_id": "C111", "epic_key": "ABC-123"}: links a Jira epic to a project, so its issues are read as the project\'s plan of record; an epic linked to another project moves to this one.',
+  '- {"type": "unlink_project_epic", "project_id": "C111", "epic_key": "ABC-123"}: unlinks an epic from a project; refreshes and discovery leave it alone after.',
   '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
   '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
   '- {"type": "add_task", "title": "...", "project_id": "C111" or null, "description": "<what you found, with links>" or null, "today": true or null, "status": "in_progress" or null, "priority": "high" or null}: a new task of my own. A new task has no id until it\'s applied, so set Today, status and priority here, in the same card, rather than in separate ones. Its title: ' + TITLE_RULE + ' Before adding one, look through my open tasks for the same piece of work. ' + SAME_WORK_RULE + ' If there is one, use add_task_context, plan_today or set_task_status on it instead of adding a second.',
@@ -264,7 +271,60 @@ export const GLOBAL_ACTION_DOCS = [
   '- {"type": "set_task_status", "task_id": "...", "title": "...", "status": "todo" | "in_progress" | "waiting" | "blocked" | "done"}: "blocked" when it can\'t move until someone else acts (an answer, an approval); "waiting" when it\'s waiting on me.',
   '- {"type": "set_task_priority", "task_id": "...", "title": "...", "priority": "critical" | "high" | "medium" | "low"}',
   '- {"type": "refresh", "what": "all" | "project" | "briefing" | "calendar" | "tasks", "project_id": "C111" or null}: rereads something.',
-].join("\n");
+];
+
+/** The changes about projects, left out while Projects is off (see features). */
+export const PROJECT_ACTIONS: ReadonlySet<string> = new Set([
+  "create_project",
+  "split_project",
+  "merge_projects",
+  "rename_project",
+  "set_project_tracking",
+  "add_project_context",
+  "add_project_repos",
+  "remove_project_context",
+  "set_project_status",
+  "set_project_kind",
+  "set_project_doc",
+  "resolve_project_item",
+  "check_project_item",
+  "unlink_channel",
+  "link_project_epic",
+  "unlink_project_epic",
+  "set_task_project",
+]);
+
+/**
+ * The changes to tasks, left out while Tasks is off (see features): there's no list to put them in.
+ * set_task_project is about projects too.
+ */
+export const TASK_ACTIONS: ReadonlySet<string> = new Set(["add_task", "add_task_context", "update_task", "plan_today", "set_task_plan", "set_task_status", "set_task_priority", "set_task_project"]);
+
+/**
+ * Refresh's change, offering only what's on to reread: a project's in Projects, the briefing's in
+ * Updates, and "tasks" reads Slack and email for Tasks and for Updates' inbox and news.
+ */
+function refreshDoc(projects: boolean, updates: boolean, tasks: boolean): string {
+  const what = ["all", ...(projects ? ["project"] : []), ...(updates ? ["briefing"] : []), "calendar", ...(tasks || updates ? ["tasks"] : [])].map((w) => `"${w}"`).join(" | ");
+  return `- {"type": "refresh", "what": ${what}${projects ? ', "project_id": "C111" or null' : ""}}: rereads something.`;
+}
+
+/**
+ * The changes the Demian chat (and a #demian message) can propose: all of them, except watching a
+ * topic while Watched topics is off, anything about projects while Projects is off, and changes to
+ * tasks while Tasks is off (see features).
+ */
+export function globalActionDocs(watched = watchedTopicsOn(), projects = projectsOn(), updates = updatesOn(), tasks = tasksOn()): string {
+  return ACTION_DOC_LINES.filter((line) => {
+    const type = /"type": "([a-z_]+)"/.exec(line)?.[1];
+    if (type === "watch_topic") return watched;
+    if (!tasks && type && TASK_ACTIONS.has(type)) return false;
+    // Projects off: the changes about projects, and what a project is (the one line that isn't a change).
+    return projects || (!!type && !PROJECT_ACTIONS.has(type));
+  })
+    .map((line) => (line.includes('"type": "refresh"') ? refreshDoc(projects, updates, tasks) : line))
+    .join("\n");
+}
 
 /**
  * How the Demian chat changes existing tasks. In its opening prompt and, with the list of changes,
@@ -278,10 +338,45 @@ export const GLOBAL_TASK_RULES = [
   "This chat has no plan or steps of its own, so don't write [orb] plan or [orb] step lines here. A task's plan changes through set_task_plan.",
 ].join("\n");
 
+/** The task rules while Tasks is on; while it's off, that there's no task list to change. */
+export function globalTaskRules(tasks = tasksOn()): string {
+  return tasks
+    ? GLOBAL_TASK_RULES
+    : "Tasks is off in my planner, so there's no task list: don't propose adding or changing tasks. If I ask for one, say Tasks is off and can be turned on in Settings.";
+}
+
 /**
  * The opening of a global chat: the user's first message, and how Claude helps them fix the planner
  * itself. Changes go to the planner as "[orb] action" blocks, which the user applies one by one.
  */
+/**
+ * Which version of the changes the Demian chat can propose: a short hash of their docs, so a chat
+ * begun with an older list is given the current one (see runTaskSession).
+ */
+export function actionDocsVersion(): string {
+  const text = `${globalActionDocs()}\n${globalTaskRules()}`;
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Whether a Demian chat began with an older list of the changes it can propose (or before the
+ * planner noted which list it began with), so each of its turns needs the current one.
+ */
+export function hasOldActionDocs(link: { openedDocs?: string } | undefined): boolean {
+  return link?.openedDocs !== actionDocsVersion();
+}
+
+/** The changes the Demian chat can propose, given to a chat that began with an older list. */
+export function updatedActionDocs(): string {
+  return [
+    "The changes you can propose have changed since this chat began. This list replaces the one in the chat's first message: go by it alone. Don't rely on what the old list said a change can or can't do, or on anything said earlier in this chat about what the planner can't do; check it against this list again.",
+    globalActionDocs(),
+    globalTaskRules(),
+  ].join("\n");
+}
+
 export function globalChatPrompt(key: string, firstMessage: string): string {
   return [
     sessionMarker(key),
@@ -294,8 +389,31 @@ export function globalChatPrompt(key: string, firstMessage: string): string {
     '{"type": "...", ...}',
     "[orb] end",
     "The changes you can propose, as JSON:",
-    GLOBAL_ACTION_DOCS,
-    GLOBAL_TASK_RULES,
+    globalActionDocs(),
+    globalTaskRules(),
+    "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
+    `My message: ${firstMessage}`,
+  ].join("\n");
+}
+
+/**
+ * The opening prompt of a project's chat (see projectChat.ts): the Demian chat, centered on one
+ * project, which its record (told each turn) lets it answer about and change.
+ */
+export function projectChatPrompt(key: string, project: { name: string; id: string }, firstMessage: string): string {
+  return [
+    sessionMarker(key),
+    "",
+    `You're the assistant inside my day planner, Demian. I'm talking to you about one of my projects, ${project.name} [id ${project.id}]: what it's for, where it stands, its people, its plan of work, and the work itself.`,
+    "Each turn, my planner tells you the project's record as it shows it now (its purpose, status, people, plan of work with the requirements and pull requests under what they're for, milestones, decisions and links), along with everything else it shows. Answer from that first. Read Slack, email, the calendar, Jira, Drive and the project's code when you need more, but keep it brief.",
+    "You can't change the planner yourself. Propose each change as its own block, which the planner shows me as a card to apply or turn down:",
+    "[orb] action",
+    '{"type": "...", ...}',
+    "[orb] end",
+    "The changes you can propose, as JSON:",
+    globalActionDocs(),
+    globalTaskRules(),
+    "Changes in Jira itself (creating epics, stories and tasks, or moving them) are made from the project's Work, full screen, where I review each one: point me there instead of proposing them.",
     "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
     `My message: ${firstMessage}`,
   ].join("\n");
@@ -335,6 +453,53 @@ export function replyPrompt(r: ReplyTopic): string {
     r.source === "slack"
       ? `When I'm happy with it, hand it to my planner to send as a reply in the thread: a line \`[orb] send to ${r.link ?? "<the message's permalink>"}\`, the reply exactly as it should be posted, then a line \`[orb] end\`. Don't send anything yourself.`
       : "When I'm happy with it, give me the final text on its own so I can copy it into my reply. Don't send anything.",
+  ].join("\n");
+}
+
+/** What the TDD chat is told about the project whose draft it works on. */
+export interface TddChatTopic {
+  /** The chat's key (see tddChatKey). */
+  key: string;
+  name: string;
+  purpose: string | null;
+  epics: { key: string; title: string }[];
+  channels: { channel_id: string; name: string }[];
+  /** What the draft was written from. */
+  sources: { title: string; link: string }[];
+}
+
+/**
+ * How the TDD chat works on the draft, said with every turn whose file or rules changed (it's the
+ * planner's part of the chat's context): the file to edit, and only that file.
+ */
+export function tddChatNote(path: string): string {
+  return [
+    `The TDD draft is the Markdown file ${path}. It's the only file you may change.`,
+    "Make the changes I ask for in that file with Edit (Write only to rewrite it whole), keeping its layout and plain style and leaving alone what I didn't ask about. Read it again before you edit: I sometimes change it myself between messages.",
+    "Check facts against the sources, not memory: the epics' tickets in Jira, the project's Slack channels, docs in Drive and meetings in Granola. Never invent APIs, tables, numbers, dates or owners; what isn't decided goes in as \"Open question: …\", naming who would know, and every fact you add links its source.",
+    "After a change, reply in a sentence or two saying what you changed and where. Don't paste the doc or its sections into the chat: I see the file. When I only ask a question, answer it without editing.",
+    "Don't create the doc in Drive, write an [orb] doc block, or post, send or change anything anywhere else: I create the doc from my planner once I'm happy with it.",
+  ].join("\n");
+}
+
+/**
+ * The opening prompt of a TDD draft's chat, started by the user's first message: Claude works on
+ * the draft's file with them (see tddChatNote, which its context carries).
+ */
+export function tddChatPrompt(t: TddChatTopic, firstMessage: string): string {
+  return [
+    sessionMarker(t.key),
+    "",
+    `You drafted a technical design doc (TDD) for my project "${t.name}". I'm reviewing it before I create it in my Google Drive, where it becomes the project's requirements doc, and I'd like your help changing it. Read the draft's file (named below) before anything else.`,
+    "",
+    ...(t.purpose ? [`Purpose: ${t.purpose}`] : []),
+    t.epics.length ? `Jira epics: ${t.epics.map((e) => `${e.key} "${e.title}"`).join(", ")}` : "It has no Jira epics linked.",
+    t.channels.length ? `Slack channels: ${t.channels.map((c) => `#${c.name} (${c.channel_id})`).join(", ")}` : "It has no Slack channel: search Slack for its name.",
+    ...(t.sources.length ? ["The draft was written from:", ...t.sources.map((s) => `- ${s.title}: ${s.link}`)] : []),
+    "",
+    "Reply in plain sentences, without headings.",
+    // Shown in the chat as just these words (see readableMessages).
+    `My message: ${firstMessage.trim()}`,
   ].join("\n");
 }
 

@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { orbMood, type Pressure } from "../tasks";
 import { PressureBars } from "./PressureBars";
 import { NO_RIPPLE } from "./orbEffects";
+import { pointNearestTip } from "./orbPointing";
 import { ORB_AGITATE_EVENT, ORB_SHOCK_EVENT, ORB_SPIN_EVENT, TASK_DONE_EVENT } from "../orbEvents";
 import { buildParticles, type OrbMotes } from "./orbParticles";
 import { isDark, type Theme } from "../theme";
@@ -124,6 +125,10 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     facing.add(blob);
     scene.add(facing);
     const toward = { x: 0, y: 0 };
+    // How fully the orb is following the cursor, 0 to 1. It holds its spin while it follows, so it
+    // keeps facing the cursor instead of turning away from it.
+    let attention = 0;
+    let held = 0;
     // Where the cursor is relative to the orb's center, in orb-box units, wherever it is: the spikes aim at it.
     const cursor = { x: 0, y: 1 };
     const onPointer = (e: PointerEvent) => {
@@ -136,10 +141,12 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       cursor.y = dy;
       // Full attention inside the box, fading out by twice its size.
       const near = Math.max(0, Math.min(1, 2 - Math.hypot(dx, dy)));
+      attention = near;
       toward.x = Math.max(-1, Math.min(1, dx)) * near;
       toward.y = Math.max(-1, Math.min(1, dy)) * near;
     };
     const onLeave = () => {
+      attention = 0;
       toward.x = 0;
       toward.y = 0;
     };
@@ -188,10 +195,16 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // Artemis turns slowly too, about a sixth of their pace, so the music, not the spin, moves her.
     // Moss, a standing crystal, turns at about a fifth of their pace.
     // Demian and Oren turn at half the molten pace, so they drift rather than spin.
-    // Kitten, a gem, turns a little faster than the molten pace: about once every three minutes when calm.
+    // Kitten, a gem, turns at a little over half the molten pace: about once every six minutes when calm.
     const spinScale =
-      look === "kitten" ? 0.7 : look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : look === "crystal" || look === "film" ? 0.3 : 0.6;
+      look === "kitten" ? 0.35 : look === "resin" ? 0.2 : look === "opal" ? 0.06 : look === "frost" ? 0.1 : look === "prism" ? 0.12 : look === "crystal" || look === "film" ? 0.3 : 0.6;
     const upright = look === "opal" || look === "prism" || look === "kitten";
+    // Upright looks turn about their long axis first, so their spin stays in rotation.y however they
+    // tip, and standing back up is taking rotation.x and .z back to 0.
+    if (upright) blob.rotation.order = "YXZ";
+    // Kitten, while it follows the cursor, points the nearest point of the cross inside it at it.
+    const pointsTip = look === "kitten";
+    const pointed = new THREE.Quaternion();
 
     const resize = () => {
       const { width, height } = el.getBoundingClientRect();
@@ -240,16 +253,30 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
       spinAge = Math.min(spinAge + dt, 3);
       const push = Math.min(spinAge / 0.08, 1);
       const burst = spinAge < 3 ? 6 * push * push * (3 - 2 * push) * Math.exp(-spinAge * 2.4) : 0;
-      const spin = (SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress + burst) * motion * spinScale;
+      // While it follows the cursor its spin eases to a stop, and picks up again once the cursor
+      // leaves. A spin-up still goes through.
+      held += (attention - held) * Math.min(dt * 3, 1);
+      const spin = ((SPIN.calm + (SPIN.stressed - SPIN.calm) * stress * stress) * (1 - held) + burst) * motion * spinScale;
       blob.rotation.y += dt * spin;
       // Edith, Moss and Kitten stand upright: they turn only about their long axis (and lean toward
       // the cursor with the facing group, coming back upright when it leaves); the others also tumble.
-      if (upright) blob.rotation.x -= blob.rotation.x * Math.min(dt * 3, 1);
-      else blob.rotation.x += dt * spin * 0.35;
+      // Kitten tips over to point at the cursor while it follows it, and stands back up after.
+      const pointing = pointsTip && motion === 1 ? held : 0;
+      if (upright) {
+        const back = Math.min(dt * 3, 1) * (1 - pointing);
+        blob.rotation.x -= blob.rotation.x * back;
+        blob.rotation.z -= blob.rotation.z * back;
+      } else blob.rotation.x += dt * spin * 0.35;
       // Turn toward the cursor (up to about 35 degrees), easing so it follows rather than snaps.
       const ease = Math.min(dt * 4, 1);
       facing.rotation.y += (toward.x * FACE_ANGLE * motion - facing.rotation.y) * ease;
       facing.rotation.x += (toward.y * FACE_ANGLE * motion - facing.rotation.x) * ease;
+      if (pointing > 0.001) {
+        // At the cursor's direction from the orb's center, as the spikes aim (the scene's space is
+        // the view's), eased like the lean so it follows rather than snaps.
+        aim.set(cursor.x, -cursor.y, 0.6).normalize();
+        blob.quaternion.slerp(pointNearestTip(facing.quaternion, blob.quaternion, aim, pointed), ease * pointing);
+      }
       // A look that sees part of itself through another part (Edith's stone through her glass)
       // draws that part first.
       // A look that moves with something besides the shared uniforms (Artemis's music) steps it here.

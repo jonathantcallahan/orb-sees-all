@@ -53,7 +53,7 @@ describe("refresh prompts", () => {
     const index = [{ id: "own:1", title: "Send Q3 numbers" }];
     const now = new Date(2026, 9, 30);
     const project = (i?: typeof index) =>
-      projectPrompt({ index: i, channels: [{ channel_id: "C1", name: "tmp-x" }], userId: "U1", previous: null, profile: null, lastRefreshedAt: null, repoState: null, now });
+      projectPrompt({ index: i, channels: [{ channel_id: "C1", name: "tmp-x" }], userId: "U1", previous: null, profile: null, lastRefreshedAt: null, now });
     const adhoc = (i?: typeof index) => adhocPrompt({ index: i, userId: "U1", previous: [], previousReplies: [], projectChannels: ["tmp-x"], lastRefreshedAt: null, now });
     for (const make of [project, adhoc]) {
       expect(make(index)).toContain('{"id":"own:1","title":"Send Q3 numbers"}');

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { emptySelfDmState, SELF_DM_DEFAULT, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll } from "./selfDm";
-import { selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt } from "./prompts";
+import { describe, expect, it, vi } from "vitest";
+import { setAreaOn } from "./features";
+import { afterMissedRead, emptySelfDmState, parseSelfDmState, SELF_DM_DEFAULT, SELF_DM_MISSES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmState } from "./selfDm";
+import { SelfDmPoll } from "./schema";
+import { SELF_DM_READ_TOOL, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt } from "./prompts";
+import { TOOLS } from "./claude";
 
 const now = new Date("2026-11-04T17:00:00Z");
 const nowS = now.getTime() / 1000;
@@ -42,6 +45,25 @@ describe("instructions from the user's own DM", () => {
     expect(messages.map((m) => m.text)).toEqual(["Book the venue #demian"]);
   });
 
+  it("takes the tag as Slack links it once there's a #demian channel, and hands it on as typed", () => {
+    const forwarded = "\nForwarded message from Sam (https://example.slack.com/archives/C1/p1): Are there submission requirements for NuGet?";
+    const { messages } = takeFromPoll(
+      emptySelfDmState(),
+      {
+        latest_ts: ts(10),
+        messages: [
+          msg(ts(100), `<#C0DEMIAN42|demian> look into this${forwarded}`),
+          msg(ts(90), "<#C0DEMIAN42|Demian> book the venue"),
+          msg(ts(80), "<#C0123ABCD|general> book the venue"),
+          msg(ts(70), " <#C0DEMIAN42|demian> "),
+        ],
+      },
+      ts(600),
+      now,
+    );
+    expect(messages.map((m) => m.text)).toEqual([`#demian look into this${forwarded}`, "#demian book the venue"]);
+  });
+
   it("moves the cursor to the newest message read, even when nothing was tagged", () => {
     const { state } = takeFromPoll(emptySelfDmState(), { latest_ts: ts(5), messages: [] }, ts(600), now, 0.004);
     expect(state.cursor).toBe(ts(5));
@@ -56,8 +78,35 @@ describe("instructions from the user's own DM", () => {
   });
 
   it("starts a fresh count of failed tries once a check gets through", () => {
-    const { state } = takeFromPoll({ ...emptySelfDmState(), tries: 2 }, { latest_ts: ts(5), messages: [] }, ts(600), now);
+    const { state } = takeFromPoll({ ...emptySelfDmState(), tries: 2, misses: 2 }, { latest_ts: ts(5), messages: [] }, ts(600), now);
     expect(state.tries).toBe(0);
+    expect(state.misses).toBe(0);
+  });
+
+  it("logs a check that couldn't read the DM only once the reads keep failing, and once per error", () => {
+    // A Slack connector still connecting, or the network just back: the next check usually gets through.
+    let state: SelfDmState = { ...emptySelfDmState(), cursor: ts(600) };
+    const errors: (string | null)[] = [];
+    for (const error of ["Slack wasn't reachable", "Slack wasn't reachable", "Slack wasn't reachable", "Slack wasn't reachable", "ENOTFOUND"]) {
+      const missed = afterMissedRead(state, error);
+      errors.push(missed.log);
+      state = missed.state;
+    }
+    expect(SELF_DM_MISSES).toBe(3);
+    expect(errors).toEqual([null, null, "Slack wasn't reachable", null, "ENOTFOUND"]);
+    // It reads from the same place next time, and Settings calls it failing only once it's logged.
+    expect(state.cursor).toBe(ts(600));
+    expect(afterMissedRead(emptySelfDmState(), "x").state.lastError).toBeNull();
+    expect(state.lastError).toBe("ENOTFOUND");
+  });
+
+  it("reads a state saved before misses were counted", () => {
+    expect(parseSelfDmState('{"cursor":"1","tries":1}').misses).toBe(0);
+  });
+
+  it("reads a reply that says Slack wasn't reachable", () => {
+    expect(SelfDmPoll.parse({ unreachable: "The Slack connector never connected", latest_ts: null, messages: [] }).unreachable).toMatch(/never connected/);
+    expect(SelfDmPoll.parse({ latest_ts: null, messages: [] }).unreachable).toBeUndefined();
   });
 
   it("ticks a message when anything was done, with a line per change, failures included", () => {
@@ -82,20 +131,47 @@ describe("instructions from the user's own DM", () => {
     expect(p).toContain('channel_id "U123"');
     expect(p).toContain('oldest "1793000000.000100"');
     expect(p).toContain("ONLY if its own text contains the tag #demian");
+    expect(p).toContain("<#C0123ABCD|demian>: that is the same tag");
+    expect(p).toContain("When it forwards another message, include that too");
     // The read only reads: messages are answered separately, once Demian has acted on them.
     expect(p).not.toContain("slack_add_reaction");
     expect(p).not.toContain("slack_send_message");
     expect(p).toContain("call it again with that cursor");
   });
 
+  it("names the one Slack tool it may use, and says to wait for the connector rather than guess", () => {
+    const p = selfDmPrompt("U123", "1793000000.000100");
+    expect(TOOLS.selfDmRead).toEqual([SELF_DM_READ_TOOL]);
+    expect(p).toContain(`Call ${SELF_DM_READ_TOOL} with`);
+    expect(p).toContain("never another server's Slack tool");
+    expect(p).toContain(`ToolSearch ("select:${SELF_DM_READ_TOOL}")`);
+    expect(p).toContain('"unreachable": string|null');
+  });
+
   it("works out the changes with the planner's ids and the same changes as the chat, checking for a task already there", () => {
     const p = selfDmActionsPrompt([msg("1793000000.000100", "Book the venue #demian")], "What my planner shows right now: …");
     expect(p).toContain('"type": "add_task"');
-    expect(p).toContain('"type": "watch_topic"');
     expect(p).toContain('"type": "add_task_context"');
     expect(p).toContain("What my planner shows right now");
     expect(p).toContain("don't add a second one");
     expect(p).toContain('"ts":"1793000000.000100"');
+  });
+
+  it("leaves watching a topic out while Watched topics is off (the default), and has it once it's on", () => {
+    const ask = () => selfDmActionsPrompt([msg("1793000000.000100", "Watch for legal's sign-off by Friday #demian")], "What my planner shows right now: …");
+    expect(ask()).not.toContain('"type": "watch_topic"');
+    expect(ask()).not.toContain("is watch_topic");
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => stored.set(k, v), removeItem: (k: string) => stored.delete(k) });
+    try {
+      setAreaOn("watched", true);
+      expect(ask()).toContain('"type": "watch_topic"');
+      expect(ask()).toContain("is watch_topic");
+      setAreaOn("watched", false);
+      expect(ask()).not.toContain('"type": "watch_topic"');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("answers only in the user's own DM, posting the text as written", () => {

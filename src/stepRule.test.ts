@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { STEP_RULE } from "./baseLessons";
 import { SESSION_DISPLAY } from "./claude";
-import { GLOBAL_ACTION_DOCS, taskChatPrompt } from "./openInClaude";
+import { globalActionDocs, taskChatPrompt } from "./openInClaude";
 import { adhocPrompt, planPrompt, recheckStepsPrompt } from "./prompts";
 
 describe("one rule for how long a step is", () => {
@@ -14,7 +14,7 @@ describe("one rule for how long a step is", () => {
       taskChatPrompt({ id: "manual:a", title: "x" }, "", [{ title: "Draft the Jira ticket", by: "claude" }]),
       SESSION_DISPLAY,
       // The Demian chat's set_task_plan.
-      GLOBAL_ACTION_DOCS,
+      globalActionDocs(),
       recheckStepsPrompt({ task: "x", steps: [{ title: "Draft the Jira ticket", by: "claude", state: "todo" }], conversation: [] }),
     ];
     for (const p of prompts) expect(p).toContain(STEP_RULE);

@@ -60,21 +60,23 @@ export function RefreshButton({
   onClick,
   title,
   status,
+  tip,
 }: {
   busy: boolean;
   onClick: () => void;
   title: string;
   /** What the refresh is doing, for screen readers while it runs (the spinner alone is shown, with no tooltip). */
   status?: string;
+  /** Shown as a tooltip on hover in place of the title, such as when it last refreshed; none while it runs. */
+  tip?: ReactNode;
 }) {
   const label = busy && status ? `${status}…` : title;
-  return (
-    <span className="refresh-wrap">
-      <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={busy ? undefined : title} aria-label={label}>
-        {busy ? <Spinner /> : "↻"}
-      </button>
-    </span>
+  const button = (
+    <button className={`icon-button refresh${busy ? " busy" : ""}`} onClick={onClick} disabled={busy} title={busy || tip ? undefined : title} aria-label={label}>
+      {busy ? <Spinner /> : "↻"}
+    </button>
   );
+  return <span className="refresh-wrap">{tip && !busy ? <HoverTip text={tip}>{button}</HoverTip> : button}</span>;
 }
 
 export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onChange: () => void; empty?: string }) {
@@ -125,12 +127,6 @@ export function updatedText(at: string): string {
   const d = new Date(at);
   const today = d.toDateString() === new Date().toDateString();
   return d.toLocaleString([], today ? { hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-export function Updated({ at }: { at: string | null | undefined }) {
-  if (!at) return <span className="timestamp small updated-stamp">never refreshed</span>;
-  const today = new Date(at).toDateString() === new Date().toDateString();
-  return <span className={`timestamp small updated-stamp${today ? "" : " stale"}`}>updated {updatedText(at)}</span>;
 }
 
 /** Claude Code's working indicator: a star that grows through these glyphs and back. */
@@ -426,29 +422,42 @@ export function StepCircle({ state, human = false }: { state?: StepState; human?
  * Shows `text` in a small card under its child while it's hovered (the webview doesn't show native
  * title tooltips). With no text, renders the child alone.
  */
-export function HoverTip({ text, whenClipped = false, children }: { text: string | null; whenClipped?: boolean; children: ReactNode }) {
+export function HoverTip({ text, whenClipped = false, children }: { text: ReactNode; whenClipped?: boolean; children: ReactNode }) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   if (!text) return <>{children}</>;
   return (
     <span
       className="hover-tip-anchor"
       onMouseEnter={(e) => {
-        // `whenClipped`: only when the text in it (.clip-text) is cut short, since otherwise it's all there.
+        // `whenClipped`: only when the text in it (.clip-text) is cut short, on one line or after two,
+        // since otherwise it's all there.
         const clip = e.currentTarget.querySelector<HTMLElement>(".clip-text");
-        if (whenClipped && (!clip || clip.scrollWidth <= clip.clientWidth)) return;
+        if (whenClipped && (!clip || (clip.scrollWidth <= clip.clientWidth && clip.scrollHeight - clip.clientHeight <= 1))) return;
         setAnchor(e.currentTarget.getBoundingClientRect());
       }}
       onMouseLeave={() => setAnchor(null)}
     >
       {children}
-      {anchor &&
-        createPortal(
-          <div className="card meeting-card hover-tip small" role="tooltip" style={{ left: anchor.left, top: anchor.bottom + 6 }}>
-            {text}
-          </div>,
-          document.body,
-        )}
+      {anchor && createPortal(<TipBox anchor={anchor} text={text} />, document.body)}
     </span>
+  );
+}
+
+/**
+ * HoverTip's card, under its anchor and starting at its left edge, moved left as far as it needs to
+ * stay inside the window (by 8px), so one near the right edge isn't squeezed narrow against it.
+ */
+function TipBox({ anchor, text }: { anchor: DOMRect; text: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [left, setLeft] = useState(anchor.left);
+  useLayoutEffect(() => {
+    const width = ref.current?.offsetWidth ?? 0;
+    setLeft(Math.max(8, Math.min(anchor.left, window.innerWidth - width - 8)));
+  }, [anchor, text]);
+  return (
+    <div ref={ref} className="card meeting-card hover-tip small" role="tooltip" style={{ left, top: anchor.bottom + 6 }}>
+      {text}
+    </div>
   );
 }
 
@@ -572,5 +581,19 @@ export function BadgeSelect<T extends string>({
           document.body,
         )}
     </>
+  );
+}
+
+/** A small set of choices shown side by side, the picked one raised: for a setting with a few values (the visualizers have more). */
+export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    // A long row of choices (the visualizers) sits a little tighter, so it fits beside its label.
+    <div className={`segmented${options.length > 5 ? " many" : ""}`} role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.value} role="radio" aria-checked={o.value === value} className={o.value === value ? "on" : undefined} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }

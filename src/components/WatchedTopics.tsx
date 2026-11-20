@@ -44,7 +44,8 @@ export function WatchedTopics({
   /** Status, done and dismissed (Unwatch) for each topic, kept as a task's are. */
   states: Map<string, TaskState>;
   running: string[];
-  onViewTask: (taskId: string) => void;
+  /** Opens a task in Tasks; not given while Tasks is off, when no task is created or linked. */
+  onViewTask?: (taskId: string) => void;
   onChange: () => void;
 }) {
   const shown = orderTopics(topics, (id) => stateOf(states, id));
@@ -123,7 +124,7 @@ function TopicCard({
   checking: boolean;
   /** Demian is still filling it in from what the user wrote. */
   filling: boolean;
-  onViewTask: (id: string) => void;
+  onViewTask?: (id: string) => void;
   onChange: () => void;
 }) {
   const project = projects.find((p) => p.id === t.projectId) ?? null;
@@ -240,7 +241,7 @@ function ActionLine({ outcome: o }: { outcome: WatchedOutcome }) {
 }
 
 /** The end of a conditional action's line: Create and open task when it's ready, else where it stands (nothing while it waits). */
-function ActionEnd({ topic, outcome: o, onViewTask, onChange }: { topic: WatchedTopic; outcome: WatchedOutcome; onViewTask: (id: string) => void; onChange: () => void }) {
+function ActionEnd({ topic, outcome: o, onViewTask, onChange }: { topic: WatchedTopic; outcome: WatchedOutcome; onViewTask?: (id: string) => void; onChange: () => void }) {
   const state = outcomeState(o);
   const [creating, setCreating] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -256,20 +257,22 @@ function ActionEnd({ topic, outcome: o, onViewTask, onChange }: { topic: Watched
       }
       await db.setOutcomeTask(topic.id, o.id, created.current);
       onChange();
-      onViewTask(created.current);
+      onViewTask?.(created.current);
     } catch {
       setFailed(true);
     } finally {
       setCreating(false);
     }
   };
+  // With Tasks off there's no list to put the action's task on: its line says what to do.
+  if (state === "ready" && !onViewTask) return null;
   if (state === "ready")
     return (
       <button className={`cta-primary${failed ? " error" : ""}`} disabled={creating} onClick={create}>
         {failed ? "Couldn't create it. Try again" : "Create and open task"}
       </button>
     );
-  if (state === "acted" && o.taskId)
+  if (state === "acted" && o.taskId && onViewTask)
     return (
       <button className="link-button small" onClick={() => onViewTask(o.taskId!)}>
         View task

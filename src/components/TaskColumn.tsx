@@ -6,8 +6,8 @@ import { assessPendingTasks } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
 import { applyOrder, applyTaskState, formatMinutes, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
-import { projectName } from "../projects";
-import { CloseIcon, Kbd, Spinner, Updated } from "./common";
+import { projectName, projectPriority } from "../projects";
+import { CloseIcon, Kbd, Spinner } from "./common";
 import { getSetting, setSetting, setTaskState, type StoredTaskCheck } from "../db";
 import type { SessionLink } from "../sessions";
 import { canonicalId, foldTasks, type Aliases, type Folded } from "../registry";
@@ -19,6 +19,7 @@ import { useJobStatus } from "../useAppData";
 import { TaskCard, type CardTask } from "./TaskCard";
 import { DropZone, TaskDragProvider, type DropZoneId, type Flip } from "./taskDrag";
 import { setPomodoroTask, usePomodoroActive, usePomodoroTask } from "../pomodoro";
+import { useProjectsOn } from "../features";
 
 function Group({
   title,
@@ -215,6 +216,7 @@ export function TaskColumn({
   onChange: () => void;
 }) {
   const [draft, setDraft] = useState("");
+  const withProjects = useProjectsOn();
   // ⌘N (Ctrl+N on Windows) jumps to Add a task from anywhere.
   const addTask = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -281,7 +283,7 @@ export function TaskColumn({
     const to = projectOverrides[canonicalId(id, taskAliases)] ?? projectOverrides[id];
     return to ? projects.find((p) => p.channel_id === to) : undefined;
   };
-  const projectFields = (p: Project) => ({ project: { id: p.channel_id, name: projectName(p) }, projectPriority: p.snapshot?.priority?.level, repoFolder: p.local_repos[0] ?? null });
+  const projectFields = (p: Project) => ({ project: { id: p.channel_id, name: projectName(p) }, projectPriority: projectPriority(p)?.level, repoFolder: p.local_repos[0] ?? null });
 
   // Slack and email items share one inbox; dated items first, soonest first. One you filed under a
   // project shows its badge.
@@ -550,7 +552,6 @@ export function TaskColumn({
       <header className="column-header">
         <div className="title-line">
           <h2>Tasks</h2>
-          <Updated at={adhoc.refreshed_at} />
         </div>
         {/* Refreshed from the bottom bar's Refresh menu; a spinner here while it runs. */}
         {(running.includes("adhoc") || running.includes("assess") || running.includes("sessions")) && (
@@ -600,7 +601,7 @@ export function TaskColumn({
                 keepOrder={sort !== "priority"}
                 dateOf={dateOf}
                 tasks={keep(allTasks)}
-                empty="No tasks yet. Add one, or refresh to find them in your projects, Slack and email."
+                empty={`No tasks yet. Add one, or refresh to find them in ${withProjects ? "your projects, " : ""}Slack and email.`}
                 filtered={filtering}
                 controls={filters}
                 {...shared}
@@ -651,7 +652,7 @@ export function TaskColumn({
             keepOrder={sort !== "priority"}
             dateOf={dateOf}
             tasks={keep(allTasks)}
-            empty="No tasks yet. Add one above, or refresh to find them in your projects, Slack and email."
+            empty={`No tasks yet. Add one above, or refresh to find them in ${withProjects ? "your projects, " : ""}Slack and email.`}
             filtered={filtering}
             controls={filters}
             {...shared}

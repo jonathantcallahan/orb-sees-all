@@ -2,9 +2,9 @@ import { withUpdate, type WatchedOutcome, type WatchedStatus, type WatchedTopic,
 import type { SessionLink } from "./sessions";
 import type { SessionScanDecision } from "./sessionScan";
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, ProjectProfile, ProjectSnapshot, QuickReply, RepoState, TaskPlan } from "./schema";
+import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, PathToShip, ProfilePerson, ProjectKind, ProjectPriority, ProjectProfile, ProjectSnapshot, QuickReply, Requirement, RequirementProgress, RequirementsRead, TaskPlan } from "./schema";
 import { withMovedUpdates } from "./inboxMoves";
-import { foldProfile, projectName, type DiscoveryPlan, type ProjectChannel } from "./projects";
+import { avatarIndex, foldProfile, newProjectId, projectName, recordedPeople, withRequirementsRead, type DiscoveryPlan, type ProjectChannel, type ProjectEpicLink, type SharedChannel } from "./projects";
 import type { ProjectTracking } from "./jobs/tracking";
 import { stateOf, type TaskState, type TaskStatus } from "./tasks";
 import { announceTaskDone } from "./orbEvents";
@@ -21,9 +21,13 @@ const json = <T>(text: string | null): T | null => (text ? (JSON.parse(text) as 
 export type ProjectState = "tracked" | "suggested" | "ignored" | "merged";
 
 export interface Project {
-  /** The project's id: the channel it was first found in. */
+  /**
+   * The project's id, which only identifies it: Demian's own "p:<id>" (see newProjectId), or for a
+   * project from before, the channel it was first found in or "jira:<key>". Never a channel to read:
+   * its channels can move, so reach them with primaryChannel and readChannels.
+   */
   channel_id: string;
-  /** That channel's name. */
+  /** Its first name: that channel's, or its epic's title. */
   name: string;
   /** Off the board: anything but tracked. */
   hidden: boolean;
@@ -33,17 +37,90 @@ export interface Project {
   merged_into: string | null;
   /** Every channel linked to the project, unlinked ones included (role "excluded"). */
   channels: ProjectChannel[];
+  /** Every Jira epic linked to the project, unlinked ones included (excluded). */
+  epics: ProjectEpicLink[];
+  /** Channels other projects own that this one reads too (see SharedChannel). */
+  shared_channels: SharedChannel[];
+  /** A ship date the user set, overriding the one refreshes read (see shipTarget). */
+  ship_choice: ShipChoice | null;
+  /** A TDD Demian drafted for it, waiting for the user to review and create it (see draftProjectTdd). */
+  doc_draft?: DocDraft | null;
   local_repos: string[];
   gh_repos: string[];
   last_refreshed_at: string | null;
   snapshot: ProjectSnapshot | null;
   profile: ProjectProfile | null;
-  repo_state: RepoState | null;
   last_error: string | null;
   /** What the project is, as the user means it (see ProjectFocus); null until they say. */
   focus: ProjectFocus | null;
   /** A status the user set (through the Demian chat), when, and why; see projectStatus. */
   status_override: StatusOverride | null;
+  /** Project or workstream, as the user set it; null leaves it to refreshes (see projectKind). */
+  kind_choice: KindChoice | null;
+  /** A priority the user set by hand, overriding the refreshes' until they pick Automatic (see projectPriority). */
+  priority_choice?: PriorityChoice | null;
+  /**
+   * Faces from the people record, by name as matched (see personName): everyone known on any
+   * project, so someone this project hasn't read yet still shows with theirs. The same for every project.
+   */
+  avatars?: Record<string, string>;
+  /** Its guiding doc as the user linked it, and the suggestions they turned down. */
+  docs: ProjectDocs | null;
+  /** The guiding doc's requirements and how far along each is. */
+  requirements: StoredRequirements | null;
+}
+
+export interface ShipChoice {
+  /** YYYY-MM-DD. */
+  date: string;
+  at: string;
+}
+
+export interface KindChoice {
+  kind: ProjectKind;
+  at: string;
+}
+
+export interface PriorityChoice {
+  level: ProjectPriority;
+  at: string;
+}
+
+/** The document that sets out a project's requirements, as the user linked or confirmed it. */
+export interface LinkedDoc {
+  link: string;
+  title: string;
+  /** "TDD", "PRD", "spec" or "other", when known. */
+  kind: string | null;
+  at: string;
+}
+
+/** A project's requirements doc: one the user linked or had Demian draft and create, never one it picked. */
+export interface ProjectDocs {
+  doc: LinkedDoc | null;
+}
+
+export type StoredProgress = RequirementProgress & { at: string };
+
+/** A guiding doc's requirements as last read, and their progress as the refreshes found it. */
+export interface StoredRequirements {
+  /** The doc they were read from; a different doc linked since means they're stale. */
+  link: string;
+  title: string | null;
+  kind: string | null;
+  /** When it was last read (or found unchanged). */
+  readAt: string | null;
+  /** When it was last tried, and why that failed, if it did. */
+  triedAt: string | null;
+  error: string | null;
+  /** When the doc itself was last edited, as its file says. */
+  docUpdated: string | null;
+  /** Why the doc couldn't be read, when it couldn't. */
+  unreadable: string | null;
+  requirements: Requirement[];
+  /** By requirement id; ids no longer in requirements are left out when shown. */
+  progress: Record<string, StoredProgress>;
+  progressAt: string | null;
 }
 
 export interface StatusOverride {
@@ -76,7 +153,6 @@ interface ProjectRow {
   last_refreshed_at: string | null;
   snapshot: string | null;
   profile: string | null;
-  repo_state: string | null;
   last_error: string | null;
 }
 
@@ -86,23 +162,41 @@ export async function listProjectChannels(): Promise<ProjectChannel[]> {
 
 export async function listProjects(): Promise<Project[]> {
   const d = await db();
-  const [rows, channels, focus, statuses] = await Promise.all([
+  const [rows, channels, focus, statuses, kinds, priorities, docs, requirements, epics, ships, shared, drafts, people] = await Promise.all([
     d.select<ProjectRow[]>("SELECT * FROM projects ORDER BY name"),
     listProjectChannels(),
     listFocus(),
     getStatusOverrides(),
+    getRows<KindChoice>("project_kind"),
+    getRows<PriorityChoice>("project_priority"),
+    getRows<ProjectDocs>("project_docs"),
+    getRows<StoredRequirements>("project_requirements"),
+    listProjectEpics(),
+    getRows<ShipChoice>("project_ship"),
+    getRows<SharedChannel[]>("project_shared_channels"),
+    getRows<DocDraft>("project_doc_draft"),
+    getRows<PersonRecord>("people"),
   ]);
+  const avatars = avatarIndex(Object.values(people));
   return rows.map((r) => ({
     ...r,
     hidden: r.hidden === 1,
     channels: channels.filter((c) => c.project_id === r.channel_id),
+    epics: epics.filter((e) => e.project_id === r.channel_id),
+    shared_channels: shared[r.channel_id] ?? [],
+    ship_choice: ships[r.channel_id] ?? null,
+    doc_draft: drafts[r.channel_id] ?? null,
     local_repos: JSON.parse(r.local_repos),
     gh_repos: JSON.parse(r.gh_repos),
     snapshot: json<ProjectSnapshot>(r.snapshot),
     profile: json<ProjectProfile>(r.profile),
-    repo_state: json<RepoState>(r.repo_state),
     focus: focus.get(r.channel_id) ?? null,
     status_override: statuses[r.channel_id] ?? null,
+    kind_choice: kinds[r.channel_id] ?? null,
+    priority_choice: priorities[r.channel_id] ?? null,
+    docs: docs[r.channel_id] ?? null,
+    requirements: requirements[r.channel_id] ?? null,
+    avatars,
   }));
 }
 
@@ -127,24 +221,100 @@ export async function applyDiscovery(plan: DiscoveryPlan) {
     await d.execute("UPDATE project_channels SET name = $1 WHERE channel_id = $2", [r.name, r.channel_id]);
     await d.execute("UPDATE projects SET name = $1 WHERE channel_id = $2", [r.name, r.channel_id]);
   }
+  for (const e of plan.epicLinks) await linkEpic(e.project_id, { key: e.epic_key, title: e.title }, "discovered");
+}
+
+// ---- a project's Jira epics: one row per epic in task_data, keyed by its key
+
+export async function listProjectEpics(): Promise<ProjectEpicLink[]> {
+  const rows = await getRows<Omit<ProjectEpicLink, "epic_key">>("project_epics");
+  return Object.entries(rows)
+    .map(([epic_key, e]) => ({ ...e, epic_key }))
+    .sort((a, b) => a.at.localeCompare(b.at));
+}
+
+/**
+ * Links an epic to a project. A user's link replaces whatever link the epic had; a discovered one
+ * never replaces an existing link (or an unlinking), only fills in a newer title for it.
+ */
+export async function linkEpic(projectId: string, epic: { key: string; title?: string | null; link?: string | null }, origin: "discovered" | "user") {
+  const key = epic.key.trim().toUpperCase();
+  const prev = (await getRows<Omit<ProjectEpicLink, "epic_key">>("project_epics"))[key];
+  const title = epic.title?.trim() || prev?.title || key;
+  const link = epic.link?.trim() || prev?.link || null;
+  if (origin === "discovered" && prev) {
+    if (prev.project_id === projectId && !prev.excluded && (title !== prev.title || link !== (prev.link ?? null))) await putRow("project_epics", key, { ...prev, title, link });
+    return;
+  }
+  await putRow("project_epics", key, { project_id: projectId, title, link, origin, excluded: false, at: nowIso() } satisfies Omit<ProjectEpicLink, "epic_key">);
+}
+
+/** Unlinks an epic from a project; remembered, so refreshes and discovery don't link it again. False if it isn't linked there. */
+export async function unlinkEpic(projectId: string, key: string): Promise<boolean> {
+  const k = key.trim().toUpperCase();
+  const prev = (await getRows<Omit<ProjectEpicLink, "epic_key">>("project_epics"))[k];
+  if (!prev || prev.project_id !== projectId || prev.excluded) return false;
+  await putRow("project_epics", k, { ...prev, origin: "user", excluded: true, at: nowIso() });
+  return true;
+}
+
+/** Sets the ship date the user knows (YYYY-MM-DD), or with null goes back to the one refreshes read. */
+export async function setShipChoice(projectId: string, date: string | null) {
+  if (date) await putRow("project_ship", projectId, { date, at: nowIso() } satisfies ShipChoice);
+  else await deleteRow("project_ship", projectId);
+}
+
+/** A requirements doc Demian drafted for a project, in Markdown, with what it drew on. */
+export interface DocDraft {
+  at: string;
+  title: string;
+  markdown: string;
+  sources: { title: string; link: string }[];
+  /** When its chat (or the user, by hand) last changed it after it was drafted. */
+  updated?: string | null;
+}
+
+export async function saveDocDraft(projectId: string, draft: DocDraft) {
+  await putRow("project_doc_draft", projectId, draft);
+}
+
+export async function deleteDocDraft(projectId: string) {
+  await deleteRow("project_doc_draft", projectId);
 }
 
 /** Links a channel to a project. A user's link replaces whatever link the channel had. */
 export async function linkChannel(projectId: string, c: { channel_id: string; name: string; reason?: string | null }, origin: "discovered" | "user") {
+  const before = (await listProjectChannels()).find((x) => x.channel_id === c.channel_id);
   const sql =
     origin === "user"
       ? "INSERT OR REPLACE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, 'related', 'user', $4, $5)"
       : "INSERT OR IGNORE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, 'related', 'discovered', $4, $5)";
   await (await db()).execute(sql, [c.channel_id, projectId, c.name, c.reason ?? null, nowIso()]);
+  // Taken from another project: that one picks a new main channel; this one has one.
+  if (origin === "user" && before && before.project_id !== projectId) await ensurePrimary(before.project_id);
+  await ensurePrimary(projectId);
 }
 
-/** Unlinks a related channel; it's remembered so discovery won't link it again. */
-/** Unlinks one of a project's related channels. False if it isn't one (its main channel, or another project's). */
+/**
+ * Keeps a project's main channel (where reminders go) among its own: when its main one moved away or
+ * was unlinked, the longest-linked of the rest takes over. A project with no channels has none.
+ */
+export async function ensurePrimary(projectId: string) {
+  const own = (await listProjectChannels()).filter((c) => c.project_id === projectId && c.role !== "excluded");
+  if (!own.length || own.some((c) => c.role === "primary")) return;
+  await (await db()).execute("UPDATE project_channels SET role = 'primary' WHERE channel_id = $1 AND project_id = $2", [own[0].channel_id, projectId]);
+}
+
+/**
+ * Unlinks one of a project's channels, its main one included (another takes over, if it has one);
+ * remembered, so discovery won't link it again. False if it isn't one of the project's.
+ */
 export async function unlinkChannel(channelId: string, projectId: string): Promise<boolean> {
   const { rowsAffected } = await (await db()).execute(
-    "UPDATE project_channels SET role = 'excluded', origin = 'user' WHERE channel_id = $1 AND project_id = $2 AND role = 'related'",
+    "UPDATE project_channels SET role = 'excluded', origin = 'user' WHERE channel_id = $1 AND project_id = $2 AND role IN ('related', 'primary')",
     [channelId, projectId],
   );
+  if (rowsAffected > 0) await ensurePrimary(projectId);
   return rowsAffected > 0;
 }
 
@@ -168,14 +338,27 @@ export async function mergeProject(fromId: string, intoId: string) {
     "UPDATE project_channels SET project_id = $1, role = CASE role WHEN 'excluded' THEN 'excluded' ELSE 'related' END, origin = 'user' WHERE project_id = $2",
     [intoId, fromId],
   );
+  // The channels it shared, the other project now shares (unless it owns them).
+  const shared = (await getRows<SharedChannel[]>("project_shared_channels"))[fromId] ?? [];
+  const intoOwns = new Set((await listProjectChannels()).filter((c) => c.project_id === intoId).map((c) => c.channel_id));
+  for (const c of shared) if (!intoOwns.has(c.channel_id)) await shareChannel(intoId, c);
+  if (shared.length) await deleteRow("project_shared_channels", fromId);
+  // Its epics join the other project too.
+  for (const e of await listProjectEpics())
+    if (e.project_id === fromId) await putRow("project_epics", e.epic_key, { project_id: intoId, title: e.title, origin: "user", excluded: e.excluded, at: e.at });
   await d.execute("UPDATE projects SET state = 'merged', merged_into = $1, hidden = 1 WHERE channel_id = $2", [intoId, fromId]);
   await d.execute("UPDATE manual_tasks SET project_id = $1 WHERE project_id = $2", [intoId, fromId]);
 }
 
-/** A project the user named (from the global chat): tracked, with its channels; the first is its main one. */
-export async function createProject(name: string, channels: { channel_id: string; name: string }[], reason?: string | null) {
+/**
+ * A project the user named (from the global chat): tracked, with its channels (the first its main
+ * one) and its epics; either can be empty.
+ */
+export async function createProject(name: string, channels: { channel_id: string; name: string }[], reason?: string | null, epics: string[] = []) {
   const d = await db();
-  const id = channels[0].channel_id;
+  const id = newProjectId();
+  // Projects whose channels this one takes: each picks a new main channel after.
+  const owners = new Set((await listProjectChannels()).filter((c) => channels.some((x) => x.channel_id === c.channel_id)).map((c) => c.project_id));
   await d.execute(
     "INSERT INTO projects (channel_id, name, hidden, state, found_reason) VALUES ($1, $2, 0, 'tracked', $3) ON CONFLICT(channel_id) DO UPDATE SET name = excluded.name, hidden = 0, state = 'tracked', merged_into = NULL",
     [id, name, reason ?? null],
@@ -185,22 +368,68 @@ export async function createProject(name: string, channels: { channel_id: string
       "INSERT OR REPLACE INTO project_channels (channel_id, project_id, name, role, origin, reason, added_at) VALUES ($1, $2, $3, $4, 'user', $5, $6)",
       [c.channel_id, id, c.name.replace(/^#/, ""), i === 0 ? "primary" : "related", reason ?? null, nowIso()],
     );
+  for (const owner of owners) await ensurePrimary(owner);
+  for (const key of epics) await linkEpic(id, { key }, "user");
   // The user named it, so that name holds through refreshes.
   await saveFocus(id, { pinned_name: name });
   return id;
 }
 
 /**
- * Splits channels off a project into a new one: the first moved channel becomes the new project's
- * id and main channel. Returns the new project's id.
+ * Splits part of a project off into a new one: channels and epics that move to it (any of them, its
+ * main channel too), and channels both keep reading, as when two projects grew up in one channel.
+ * Each project's record notes the split, so refreshes keep them apart. Returns the new project's id.
  */
-export async function splitProject(fromId: string, name: string, channelIds: string[], reason?: string | null) {
-  const channels = (await listProjectChannels()).filter((c) => c.project_id === fromId);
-  const moving = channelIds.map((id) => channels.find((c) => c.channel_id === id)).filter((c): c is ProjectChannel => !!c);
-  if (!moving.length) throw new Error("None of those channels belong to that project");
-  // The original project keeps its id, so if its main channel moves, the one left behind takes over.
-  if (moving.some((c) => c.channel_id === fromId)) throw new Error("A project's main channel can't move; split the other channels off instead");
-  return createProject(name, moving, reason);
+export async function splitProject(
+  fromId: string,
+  name: string,
+  channelIds: string[],
+  reason?: string | null,
+  epicKeys: string[] = [],
+  sharedChannelIds: string[] = [],
+) {
+  const [channels, epics, from] = await Promise.all([listProjectChannels(), listProjectEpics(), getProject(fromId)]);
+  const own = channels.filter((c) => c.project_id === fromId && c.role !== "excluded");
+  const moving = channelIds.map((id) => own.find((c) => c.channel_id === id)).filter((c): c is ProjectChannel => !!c);
+  if (channelIds.length && moving.length < channelIds.length) throw new Error("Some of those channels aren't that project's");
+
+  const keys = [...new Set(epicKeys.map((k) => k.trim().toUpperCase()))];
+  const missing = keys.filter((k) => !epics.some((e) => e.epic_key === k && e.project_id === fromId && !e.excluded));
+  if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} linked to that project`);
+  // Channels it reads, its own or ones it already shares, that both projects will read.
+  const readable = [...own, ...(from?.shared_channels ?? [])];
+  const sharing = sharedChannelIds
+    .filter((id) => !moving.some((c) => c.channel_id === id))
+    .map((id) => readable.find((c) => c.channel_id === id))
+    .filter((c): c is { channel_id: string; name: string } => !!c);
+  if (sharedChannelIds.length && sharing.length < sharedChannelIds.filter((id) => !moving.some((c) => c.channel_id === id)).length)
+    throw new Error("Some of the channels to share aren't that project's");
+  if (!moving.length && !keys.length && !sharing.length) throw new Error("Nothing to split off: name channels or epics to move, or a channel to share");
+  const id = await createProject(name, moving, reason, keys);
+  for (const c of sharing) await shareChannel(id, c);
+  // Each record says what the split was, in the user's context entries, which refreshes keep to.
+  const fromName = from ? projectName(from) : "the other project";
+  await saveFocus(id, { context: [`Split off from "${fromName}"${reason?.trim() ? `: ${reason.trim().replace(/\.$/, "")}` : ""}.`] });
+  if (from) await saveFocus(fromId, { context: [...(from.focus?.context ?? []), `Not part of it: ${name}, split off into its own project.`] });
+  return id;
+}
+
+/** Has a project read a channel another project owns, too. */
+export async function shareChannel(projectId: string, channel: { channel_id: string; name: string }) {
+  const all = await getRows<SharedChannel[]>("project_shared_channels");
+  const list = all[projectId] ?? [];
+  if (list.some((c) => c.channel_id === channel.channel_id)) return;
+  await putRow("project_shared_channels", projectId, [...list, { channel_id: channel.channel_id, name: channel.name.replace(/^#/, "") }]);
+}
+
+/** Stops a project reading a channel it shared. False if it wasn't sharing it. */
+export async function unshareChannel(projectId: string, channelId: string): Promise<boolean> {
+  const list = (await getRows<SharedChannel[]>("project_shared_channels"))[projectId] ?? [];
+  const next = list.filter((c) => c.channel_id !== channelId);
+  if (next.length === list.length) return false;
+  if (next.length) await putRow("project_shared_channels", projectId, next);
+  else await deleteRow("project_shared_channels", projectId);
+  return true;
 }
 
 /** The user's name for a project, which holds through refreshes (see projectName). */
@@ -224,8 +453,59 @@ export async function saveProjectSnapshot(channelId: string, snapshot: ProjectSn
   );
 }
 
-export async function saveRepoState(channelId: string, state: RepoState) {
-  await (await db()).execute("UPDATE projects SET repo_state = $1 WHERE channel_id = $2", [JSON.stringify(state), channelId]);
+/**
+ * The dependencies between tickets the old map of a project found (before the plan kept its own, see
+ * PathItem.waits_on), to show and carry over until a refresh has read them into the plan.
+ */
+export async function oldMapDependencies(projectId: string): Promise<{ from: string; to: string; source: "jira" | "assumed"; reason: string | null }[]> {
+  const stored = (await getRows<{ map?: { links?: { from: string; to: string; source?: string; reason?: string | null }[] } }>("project_map"))[projectId];
+  const key = /^[A-Z][A-Z0-9_]+-\d+$/;
+  return (stored?.map?.links ?? [])
+    .filter((l) => key.test(l.from) && key.test(l.to))
+    .map((l) => ({ from: l.from, to: l.to, source: l.source === "jira" ? ("jira" as const) : ("assumed" as const), reason: l.reason ?? null }));
+}
+
+// ---- the people record: one row per person, keyed by their Slack id (or name), across projects
+
+/**
+ * Someone Demian has seen on the user's projects: their face, and their part in each project they're
+ * on (role, how central, what they're doing on it now), kept up to date by each project's refresh.
+ */
+export interface PersonRecord {
+  name: string;
+  slack_user_id: string | null;
+  avatar: string | null;
+  /** Their part in each project they're on, by project id. */
+  projects: Record<string, PersonInvolvement>;
+  /** When anything about them last changed. */
+  at: string;
+}
+
+export interface PersonInvolvement {
+  role: string;
+  importance: number;
+  working_on: string;
+  at: string;
+}
+
+export async function listPeople(): Promise<PersonRecord[]> {
+  return Object.values(await getRows<PersonRecord>("people"));
+}
+
+/** Records who's on a project after its refresh (see recordedPeople). */
+export async function recordPeople(projectId: string, people: ProfilePerson[], at: string) {
+  const { put, remove } = recordedPeople(await getRows<PersonRecord>("people"), projectId, people, at);
+  for (const [key, record] of put) await putRow("people", key, record);
+  for (const key of remove) await deleteRow("people", key);
+}
+
+/** Changes the project's path as it's stored, without a refresh: after Demian applied a plan change in Jira. */
+export async function updatePath(projectId: string, change: (path: PathToShip) => PathToShip) {
+  const project = await getProject(projectId);
+  const path = project?.snapshot?.path;
+  if (!project?.snapshot || !path) return;
+  const snapshot = { ...project.snapshot, path: change(path) };
+  await (await db()).execute("UPDATE projects SET snapshot = $1 WHERE channel_id = $2", [JSON.stringify(snapshot), projectId]);
 }
 
 export async function saveProjectError(channelId: string, error: string | null) {
@@ -412,7 +692,17 @@ type Store =
   | "seen"
   | "inbox_moves"
   | "project_overrides"
-  | "session_scan";
+  | "session_scan"
+  | "project_kind"
+  | "project_priority"
+  | "project_docs"
+  | "project_requirements"
+  | "project_epics"
+  | "project_ship"
+  | "project_shared_channels"
+  | "project_map"
+  | "project_doc_draft"
+  | "people";
 
 async function getRows<T>(store: Store): Promise<Record<string, T>> {
   const rows = await (await db()).select<{ task_id: string; value: string }[]>("SELECT task_id, value FROM task_data WHERE store = $1", [store]);
@@ -514,6 +804,66 @@ export type StoredEpicChildren = EpicChildren & { at: string };
 export const getEpicChildren = () => getRows<StoredEpicChildren>("epic_children");
 export const saveEpicChildren = (key: string, children: EpicChildren) => putRow("epic_children", key, { ...children, at: nowIso() });
 export const saveProjectTracking = (projectId: string, tracking: ProjectTracking) => putRow("project_tracking", projectId, tracking);
+
+// ---- projects and workstreams, guiding docs and their requirements
+
+/** Sets a project's kind as the user sees it, or with null hands it back to refreshes. */
+export async function setProjectKind(projectId: string, kind: ProjectKind | null) {
+  if (kind) await putRow("project_kind", projectId, { kind, at: nowIso() } satisfies KindChoice);
+  else await deleteRow("project_kind", projectId);
+}
+
+/** Sets a project's priority by hand, or with null hands it back to refreshes. */
+export async function setProjectPriority(projectId: string, level: ProjectPriority | null) {
+  if (level) await putRow("project_priority", projectId, { level, at: nowIso() } satisfies PriorityChoice);
+  else await deleteRow("project_priority", projectId);
+}
+
+async function getProjectDocs(projectId: string): Promise<ProjectDocs> {
+  return (await getRows<ProjectDocs>("project_docs"))[projectId] ?? { doc: null };
+}
+
+/** Links a project's guiding doc, or with null removes it. */
+export async function setProjectDoc(projectId: string, doc: { link: string; title: string; kind?: string | null } | null) {
+  const docs = await getProjectDocs(projectId);
+  await putRow("project_docs", projectId, {
+    ...docs,
+    doc: doc ? { link: doc.link, title: doc.title, kind: doc.kind ?? null, at: nowIso() } : null,
+  } satisfies ProjectDocs);
+}
+
+async function getStoredRequirements(projectId: string): Promise<StoredRequirements | null> {
+  return (await getRows<StoredRequirements>("project_requirements"))[projectId] ?? null;
+}
+
+/**
+ * Records a read of a project's guiding doc: new requirements (the progress of ones still there is
+ * kept), or just when it was checked when the doc hasn't changed. Another doc starts afresh.
+ */
+export async function saveRequirementsRead(projectId: string, doc: { link: string; title: string; kind?: string | null }, read: RequirementsRead) {
+  await putRow("project_requirements", projectId, withRequirementsRead(await getStoredRequirements(projectId), doc, read, nowIso()));
+}
+
+/** Records that reading a project's guiding doc failed, keeping what was read before. */
+export async function saveRequirementsError(projectId: string, doc: { link: string; title: string; kind?: string | null }, error: string) {
+  const prev = await getStoredRequirements(projectId);
+  const base: StoredRequirements =
+    prev?.link === doc.link
+      ? prev
+      : { link: doc.link, title: doc.title, kind: doc.kind ?? null, readAt: null, triedAt: null, error: null, docUpdated: null, unreadable: null, requirements: [], progress: {}, progressAt: null };
+  await putRow("project_requirements", projectId, { ...base, error, triedAt: nowIso() } satisfies StoredRequirements);
+}
+
+/** Records a refresh's progress on the requirements of the doc it was given. */
+export async function saveRequirementsProgress(projectId: string, link: string, progress: RequirementProgress[]) {
+  const prev = await getStoredRequirements(projectId);
+  if (!prev || prev.link !== link || !progress.length) return;
+  const at = nowIso();
+  const ids = new Set(prev.requirements.map((r) => r.id));
+  const next = { ...prev.progress };
+  for (const p of progress) if (ids.has(p.id)) next[p.id] = { ...p, at };
+  await putRow("project_requirements", projectId, { ...prev, progress: next, progressAt: at } satisfies StoredRequirements);
+}
 
 export const getSessionLinks = () => getRows<SessionLink>("session_links");
 
@@ -849,6 +1199,20 @@ export interface LogEntry {
   status: string;
   error: string | null;
   cost_usd: number | null;
+}
+
+/**
+ * When each job last finished without an error, by its name in the log ("calendar", "adhoc", "watch"
+ * …), plus "all" for the last full refresh. What Refresh's menu shows beside each line.
+ */
+export async function lastUpdated(): Promise<Record<string, string>> {
+  const rows = await (await db()).select<{ job: string; at: string }[]>(
+    "SELECT job, MAX(finished_at) AS at FROM refresh_log WHERE status = 'ok' AND finished_at IS NOT NULL GROUP BY job",
+  );
+  const times: Record<string, string> = Object.fromEntries(rows.map((r) => [r.job, r.at]));
+  const all = await getSetting("last_full_refresh_at");
+  if (all) times.all = all;
+  return times;
 }
 
 export async function recentLog(limit = 50): Promise<LogEntry[]> {

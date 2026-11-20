@@ -1,6 +1,6 @@
 import type { AdhocStore, ManualTask, Project } from "./db";
 import type { Blocker, ManualAssessment, Priority } from "./schema";
-import { projectName } from "./projects";
+import { projectName, projectPriority } from "./projects";
 import { newsKey, projectUpdateKey } from "./inboxMoves";
 import { blockerKey, myBlockingIds, PRIORITY_RANK, stateOf, taskPriority, type TaskState } from "./tasks";
 
@@ -48,12 +48,12 @@ export function readingContext(r: ReadingInput) {
   const key = r.projects
     .filter((p) => !p.hidden && p.snapshot)
     .filter((p) => {
-      const level = LEVEL[p.snapshot!.priority?.level ?? "P4"];
+      const level = LEVEL[projectPriority(p)?.level ?? "P4"];
       return level <= 1 || (level === 2 && (p.snapshot!.status === "blocked" || p.snapshot!.status === "at_risk"));
     })
     .sort(
       (a, b) =>
-        LEVEL[a.snapshot!.priority?.level ?? "P4"] - LEVEL[b.snapshot!.priority?.level ?? "P4"] ||
+        LEVEL[projectPriority(a)?.level ?? "P4"] - LEVEL[projectPriority(b)?.level ?? "P4"] ||
         (TROUBLE[a.snapshot!.status] ?? 9) - (TROUBLE[b.snapshot!.status] ?? 9),
     )
     .slice(0, MAX_PROJECTS);
@@ -62,7 +62,7 @@ export function readingContext(r: ReadingInput) {
     const s = { ...p.snapshot!, blockers: openBlockers(p.snapshot!.blockers) };
     return {
       name: projectName(p),
-      priority: s.priority?.level,
+      priority: projectPriority(p)?.level,
       status: s.status,
       status_reason: s.status_reason,
       my_role: s.raci?.role,
@@ -101,7 +101,7 @@ export function readingContext(r: ReadingInput) {
         title: t.title,
         project: projectName(p),
         a: t.assessment,
-        projectPriority: p.snapshot?.priority?.level,
+        projectPriority: projectPriority(p)?.level,
         blocking: myBlockingIds(p.snapshot?.blockers, r.states).includes(t.id),
         due: t.due,
       })),

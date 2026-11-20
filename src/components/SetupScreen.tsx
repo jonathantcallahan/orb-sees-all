@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import * as db from "../db";
-import { isReady, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
+import { saveProjectConnectors } from "../features";
+import { isReady, projectConnectorsOf, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { CloseIcon, ExternalLink, Spinner } from "./common";
 import { INSTALL_CLAUDE, isWindows, TERMINAL, useLoginCommand } from "../platform";
 
@@ -102,7 +103,11 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
     setChecking(true);
     setReport(null);
     try {
-      setReport(await runSetupChecks(setReport));
+      const r = await runSetupChecks(setReport);
+      setReport(r);
+      // Kept for Settings' Projects switch, which needs Jira and GitHub.
+      const connectors = projectConnectorsOf(r);
+      if (connectors) saveProjectConnectors(connectors);
     } finally {
       setChecking(false);
     }
@@ -189,13 +194,7 @@ export function SetupScreen({ onClose, onDone }: { onClose: () => void; onDone: 
                 {!ready && !r.noClaudeAi && (
                   <p>
                     Add or sign in to the ones marked × at <ExternalLink href={CONNECTORS_URL}>claude.ai → Customize → Connectors</ExternalLink>, then check
-                    again.{" "}
-                    {r.connectors.some((c) => c.id === "jira" && c.state !== "connected") && (
-                      <>
-                        Jira isn't a claude.ai connector: it's an MCP server named <code>mcp-jira</code> your team sets up in Claude Code, and it may
-                        need your company's VPN.
-                      </>
-                    )}
+                    again.
                   </p>
                 )}
               </>

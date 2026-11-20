@@ -1,5 +1,5 @@
 import { TITLE_MAX } from "./baseLessons";
-import type { Automation, Priority, ProjectPriority, ProjectStatus, Raci } from "./schema";
+import type { Automation, Priority, ProjectKind, ProjectPriority, ProjectStatus, Raci } from "./schema";
 
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "blocked" | "done";
 
@@ -34,6 +34,21 @@ export const DEFAULT_TASK_STATE: TaskState = { status: "todo", dismissed: false,
 
 export function stateOf(states: Map<string, TaskState>, id: string): TaskState {
   return states.get(id) ?? DEFAULT_TASK_STATE;
+}
+
+/**
+ * Whether the user has worked on a task: moved it on from to-do, put it on a day, planned it, or
+ * edited its description or priority. A refresh never sorts such a task into the inbox.
+ */
+export function workedOn(
+  id: string,
+  states: Map<string, TaskState>,
+  plans: { has(id: string): boolean },
+  descriptions: Record<string, string>,
+  priorities: Record<string, string>,
+): boolean {
+  const st = stateOf(states, id);
+  return st.status !== "todo" || st.todayOn !== null || plans.has(id) || id in descriptions || id in priorities;
 }
 
 export interface ViewTask {
@@ -351,6 +366,8 @@ export function sinceWhen(at: string | null | undefined, now = new Date()): stri
 }
 
 export interface ProjectFilter {
+  /** Projects, workstreams or both; empty means any type. */
+  kinds: ProjectKind[];
   /** Empty means any status. */
   statuses: ProjectStatus[];
   /** Empty means any priority. */
@@ -359,17 +376,19 @@ export interface ProjectFilter {
   roles: Raci[];
 }
 
-export const NO_PROJECT_FILTER: ProjectFilter = { statuses: [], priorities: [], roles: [] };
+export const NO_PROJECT_FILTER: ProjectFilter = { kinds: [], statuses: [], priorities: [], roles: [] };
 
 export function isFilteringProjects(f: ProjectFilter): boolean {
-  return f.statuses.length > 0 || f.priorities.length > 0 || f.roles.length > 0;
+  return f.kinds.length > 0 || f.statuses.length > 0 || f.priorities.length > 0 || f.roles.length > 0;
 }
 
 /** Whether a project passes every filter that's set. */
 export function matchesProjectFilter(
-  p: { status: ProjectStatus | null; priority: ProjectPriority | null | undefined; role: Raci | null | undefined },
+  p: { kind?: ProjectKind | null; status: ProjectStatus | null; priority: ProjectPriority | null | undefined; role: Raci | null | undefined },
   f: ProjectFilter,
 ): boolean {
+  // One not yet read as a project or a workstream matches neither, like one with no status yet.
+  if (f.kinds.length && (!p.kind || !f.kinds.includes(p.kind))) return false;
   if (f.statuses.length && (!p.status || !f.statuses.includes(p.status))) return false;
   if (f.priorities.length && (!p.priority || !f.priorities.includes(p.priority))) return false;
   if (f.roles.length && (!p.role || !f.roles.includes(p.role))) return false;

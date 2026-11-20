@@ -18,6 +18,15 @@
   --green: #22803e;
   --green-bg: #e5f4e9;
   --grey-bg: #ececea;
+  /* Jira's colors for its levels of work, in the plan and the dependencies view. */
+  --epic: #904ee2;
+  --task: #4bade8;
+  --initiative: #f07a2b;
+  /* GitHub's colors for a pull request's state: open, draft, merged, closed. */
+  --gh-open: #1a7f37;
+  --gh-draft: #59636e;
+  --gh-merged: #8250df;
+  --gh-closed: #cf222e;
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -42,6 +51,10 @@
   --green: #6fcf8a;
   --green-bg: #1f3a27;
   --grey-bg: #333331;
+  --gh-open: #3fb950;
+  --gh-draft: #9198a1;
+  --gh-merged: #ab7df8;
+  --gh-closed: #f85149;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -61,6 +74,10 @@
     --green: #6fcf8a;
     --green-bg: #1f3a27;
     --grey-bg: #333331;
+    --gh-open: #3fb950;
+    --gh-draft: #9198a1;
+    --gh-merged: #ab7df8;
+    --gh-closed: #f85149;
   }
 }
 
@@ -131,8 +148,6 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 }
 .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 
-.project .reason { margin: 8px 0 0; }
-
 .pill { font-size: 11px; padding: 1px 7px; border-radius: 6px; white-space: nowrap; background: var(--grey-bg); }
 .pill.blocked { color: var(--red); background: var(--red-bg); }
 .pill.at_risk { color: var(--amber); background: var(--amber-bg); }
@@ -160,10 +175,7 @@ textarea { width: 100%; resize: vertical; font-size: 12px; }
 .spinner, .claude-spark { position: relative; top: -0.02em; }
 .spinner.dot, .claude-spark.dot { top: -0.085em; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--grey-bg); }
-.chip-error { color: var(--red); }
-.chip.pr.review_requested { color: var(--accent); }
 
 details { margin-top: 8px; }
 summary { cursor: pointer; }
@@ -247,7 +259,11 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .task-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-bottom: calc(var(--mist-height) + 24px); }
 /* Its sections keep their full height and the list scrolls, rather than squeezing them. */
 .task-list > * { flex-shrink: 0; }
-.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-bottom: calc(var(--mist-height) + 24px); }
+/* Projects sit flush, one under another, with no outline. The cards reach 9px into the column's
+   padding (the list's 4px of room for focus rings, then 9px more) and are set in by their 1px border
+   and 8px, so the names line up with the column's heading and the open one's fill (see
+   .project.selected) runs a little past them. */
+.project-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0; margin-inline: -13px; padding-bottom: calc(var(--mist-height) + 24px); }
 
 /* Content blurs and darkens progressively as it nears the mist. The fade zone
    starts above the mist and runs under it to the bottom edge. */
@@ -268,40 +284,53 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 }
 
 .link-button.danger { color: var(--red); }
-.project .p-badge + .badge.raci, .project .badge.raci { margin-right: 6px; vertical-align: 1px; }
-
-/* The status pill sits flush right; on hover the refresh button opens beside it and the pill slides over. */
-.project-header-right { gap: 0; flex-shrink: 0; }
-/* The project's title line never wraps: as the refresh status grows beside it, the name truncates. */
-.project > .card-header > div:first-child { flex: 1; min-width: 0; }
-.project > .card-header h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-header-right .refresh {
-  width: 0;
-  padding: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: width 0.18s ease, opacity 0.18s ease, padding 0.18s ease;
+/* A project card, on one line: its name, cut with an ellipsis when it's too long, like a task's
+   title, then its due date and status flush right. Its priority and your part in it open before the
+   name while the pointer is over the card, sliding the name over. As tall as a folded task card: 8px
+   above and below a 20px row, the name at its top, 18px badges 2px down from it, 8px between them.
+   No outline (its 1px border is kept, clear, for the height), and 8px at the sides (see .project-list). */
+.card.project { padding: 8px; border-color: transparent; }
+.project > .card-header { align-items: flex-start; gap: 0; min-height: 20px; }
+.project-badges-reveal {
+  display: grid; grid-template-columns: 0fr; flex-shrink: 0; margin-top: 2px; opacity: 0;
+  transition: grid-template-columns 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
 }
-.project:hover .project-header-right .refresh,
-.project-header-right .refresh.busy { width: 22px; padding: 0 4px; opacity: 1; }
+.project:hover .project-badges-reveal { grid-template-columns: 1fr; opacity: 1; }
+/* The space after the badges is the last one's margin, inside what folds away: as padding it would
+   hold the folded badges 8px open. */
+.project-badges { min-width: 0; overflow: hidden; gap: 8px; flex-wrap: nowrap; }
+.card.project .project-badges > :is(.p-badge, .badge.raci) { margin-right: 0; padding: 1px 7px; border-radius: 6px; vertical-align: 0; }
+.card.project .project-badges > :is(.p-badge, .badge.raci):last-child { margin-right: 8px; }
+.project-title { flex: 1; min-width: 0; display: flex; align-items: center; }
+.project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-header-right { gap: 8px; flex-shrink: 0; margin: 2px 0 0 8px; }
+.project-header-right .pill { display: block; line-height: 16px; }
+/* Due dates read at the size of the badges beside them. */
+.project-header-right .card-due { font-size: 11px; line-height: 18px; white-space: nowrap; }
+/* In a project's details: what kind it is, then its refresh, which opens beside it while the pointer
+   is over the details (and stays while one runs), sliding the kind over. */
+.project-head-tools { gap: 0; flex-shrink: 0; }
+.project-head-tools > .refresh-wrap {
+  width: 0; margin-left: 0; opacity: 0; overflow: hidden; justify-content: flex-end;
+  transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease;
+}
+.detail-pane:hover .project-head-tools > .refresh-wrap, .project-head-tools > .refresh-wrap:has(.busy) { width: 24px; margin-left: 8px; opacity: 1; }
+.project-head-tools > .project-due { margin-right: 8px; font-size: 11px; white-space: nowrap; }
 
 /* Project cards: badges, description, blockers, selection */
 .project { cursor: pointer; }
-/* The open project: the accent on the card's left side only, inset so the scrolling column can't
-   clip it, following its rounded corners. */
-.project.selected { border-left-color: var(--accent); box-shadow: inset 1px 0 0 var(--accent); }
+/* The open project: a light gray fill, lighter than the cards' usual outline and the gray badges (so
+   they still show on it): in light mode between the card's white and the badges' gray, in dark mode a
+   step lighter than the outline. */
+.project.selected { background: light-dark(color-mix(in srgb, var(--grey-bg) 55%, var(--surface)), color-mix(in srgb, var(--border) 94%, var(--text))); }
 /* A whole-pixel line height keeps the badge a whole 18px tall: at 1.45 it's 17.94px, and on a
    half-pixel top WebKit rounds its top up and its bottom down, dropping its last row. */
 .badge { font-size: 11px; line-height: 16px; padding: 1px 7px; border-radius: 6px; background: var(--grey-bg); white-space: nowrap; }
 .badge.priority.critical { color: var(--red); background: var(--red-bg); }
 .badge.priority.high { color: var(--amber); background: var(--amber-bg); }
 .badge.raci.accountable, .badge.raci.responsible { color: var(--accent); }
-.project .reason { color: var(--muted); margin-top: 4px; }
-.work-items { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.work-items .what { display: block; margin-top: 4px; font-weight: 400; color: var(--muted); }
 .owners { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .owners h4 { margin: 0 2px 0 0; }
-.work-items .age { font-size: 11px; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 
 /* Tasks column: project badges and the project filter */
 .task-project { color: var(--muted); }
@@ -351,7 +380,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .status-badge.waiting { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 .status-badge.human { color: var(--amber); background: var(--amber-bg); border-color: transparent; }
 /* A task whose Claude session is working: "Working", with a light sweeping across it. The sweep is
-   drawn from the text's own color toward white, so it reads as a light sweep in both themes and still moves when the card is gray at rest. */
+   drawn from the text's own color toward white, so it reads as a light sweep in both themes. It keeps
+   its blue when the card is gray at rest, as Human keeps its amber (see the badges' gray below). */
 .status-badge.working { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: transparent; }
 .status-badge .shimmer {
   background: linear-gradient(100deg, currentColor 0%, currentColor 38%, color-mix(in srgb, currentColor 35%, #fff) 50%, currentColor 62%, currentColor 100%);
@@ -737,20 +767,6 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .project .badge.raci,
 .p-badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; vertical-align: 1px; }
 
-/* Send a reminder to whoever owns a blocker */
-.work-actions {
-  display: inline-flex;
-  gap: 10px;
-  align-items: baseline;
-  max-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 0;
-  transform: translateX(-6px);
-  transition: max-width 0.2s ease, opacity 0.15s ease, transform 0.2s ease;
-}
-.work-item:hover .work-actions, .work-actions.open { max-width: 320px; opacity: 1; transform: none; }
-.checking { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Result of a blocker double check */
 .check-result { margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: var(--grey-bg); display: flex; flex-direction: column; gap: 3px; }
@@ -779,7 +795,7 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .check-findings li.flag .finding-mark { color: var(--amber, #c98a1b); }
 .check-result .corrected { color: var(--text); }
 /* Action links everywhere are 11px, the size of the small age and time labels. */
-.link-button, .link-button.small, .reminded, .checking { font-size: 11px; }
+.link-button, .link-button.small { font-size: 11px; }
 
 /* The Orb's picks for today */
 .badge.recommended { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); flex-shrink: 0; }
@@ -852,53 +868,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .title-line { display: flex; align-items: baseline; gap: 8px; }
 .projects-column > .column-header { flex-wrap: wrap; row-gap: 4px; }
 
-/* Blocking / Active tabs: none open at first */
-/* Blocking / Active: plain labels until one is open; then it becomes a tab joined to a ruled panel. */
-/* The rules run edge to edge across the card (its padding is 14px); text stays aligned with the card body. */
-.work-tabs { display: flex; align-items: flex-end; gap: 2px; margin: 8px -14px 0; padding: 0 14px 0 6px; }
-.work-tabs.has-open { border-bottom: 1px solid var(--border); }
-.work-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: -1px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px 6px 0 0;
-  background: none;
-  font-size: 12px;
-  color: var(--muted);
-}
-.work-tab:hover, .work-tab.open { color: var(--text); }
-/* About opens a modal rather than a tab, so it sits back a step: the faint gray of the stats line */
-.work-tab.about-tab { color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
-.work-tab.about-tab:hover { color: var(--muted); }
-.work-tab.about-tab .muted { color: inherit; }
-.work-tab.open { border-color: var(--border); border-bottom-color: var(--surface); background: var(--surface); }
-.work-items.tab-panel { margin: 0 -14px; padding: 10px 14px 0; }
 .profile-goal { margin: 0; }
-.profile-modal .column-header { display: flex; justify-content: space-between; align-items: center; }
-.profile-modal dl { font-size: 12px; }
-.person-chip { cursor: default; }
-/* Above the profile modal (z-index 30) */
+/* Above the modals (z-index 30) */
 .person-card { z-index: 40; }
-.profile-modal dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 0; }
-.profile-modal dt { color: var(--muted); }
-.profile-modal dd { margin: 0; min-width: 0; }
 .profile-channels { display: flex; flex-wrap: wrap; gap: 4px; }
 .profile-channels .chip { color: inherit; text-decoration: none; }
 .profile-channels .chip:hover { background: color-mix(in srgb, var(--grey-bg) 70%, var(--text)); }
 .profile-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .milestone.done { color: var(--muted); }
 /* The text reads like any milestone still to come; its badge says how it's doing. */
-
-/* Projects discovery found outside the #tmp- convention, waiting for the user to track or ignore */
-.suggested-projects { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.suggested-projects h3 { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); }
-.suggested-project { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
-.suggested-project .body { flex: 1; min-width: 0; }
-.suggested-project .actions { display: flex; gap: 6px; flex-shrink: 0; }
-.mine-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: 2px; }
 
 /* High-level plan inside the assessment: numbered circles, then Open in chat */
 .plan-outline { margin-top: 4px; padding: 4px 0; display: flex; flex-direction: column; gap: 6px; }
@@ -916,7 +894,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Remind sits at the end of a blocked step's line, shown while the step is hovered. */
 .step-remind { margin-left: auto; padding-left: 8px; flex-shrink: 0; opacity: 0; transition: opacity 0.15s ease; }
 .plan-outline-steps li:hover .step-remind, .step-remind:focus-visible { opacity: 1; }
-.hover-tip { max-width: 320px; padding: 6px 10px; line-height: 1.45; }
+/* As wide as its text up to 320px, wherever it starts: HoverTip keeps it inside the window. */
+.hover-tip { width: max-content; max-width: 320px; padding: 6px 10px; line-height: 1.45; z-index: 45; }
 .plan-outline-steps li.step-skipped > .hover-tip-anchor > .small { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 .step-circle.waiting { color: var(--amber); }
 /* Your own steps: an orange circle in place of a Human tag. */
@@ -1001,6 +980,19 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 
 /* Multi-select filter: a pill that opens a checklist */
 .multi-filter { position: relative; }
+/* Project or workstream, at the top right of a project's details: a badge that opens a menu. */
+.kind-badge-wrap { flex: none; }
+.kind-badge { display: inline-flex; align-items: center; gap: 4px; border: none; font: inherit; font-size: 11px; cursor: pointer; }
+.kind-badge.project { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.kind-badge.workstream { color: var(--green); background: var(--green-bg); }
+.kind-badge.unknown { color: var(--muted); }
+.kind-badge:hover, .kind-badge.open { box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent); }
+.multi-filter-menu.kind-menu { min-width: 200px; max-width: 280px; }
+.kind-option { flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+/* A project's name with its due date under it, as a task shows its own. */
+.detail-split > .detail-pane > .column-header.project-head, .column-header.project-head { height: auto; align-items: flex-start; }
+.detail-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.project-due:hover .due-clear, .project-due .due-clear:focus-visible { opacity: 1; }
 .multi-filter-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -1065,15 +1057,17 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* Task body text matches the project cards' gray. */
 .automation .suggestion { color: var(--muted); }
 
-/* Badges stay gray until you hover their card, so color draws the eye only where you're looking. The
+/* Badges stay gray until you hover their card, so color draws the eye only where you're looking,
+   except Working and Human, which keep their color so work under way and work waiting on you show
+   at a glance. The
    same in a project's details beside the list: its tags, link icons and Project context link stay gray
    until you hover the details. They're grayed by swapping the colors they're drawn with for grays,
    not with a grayscale filter: WebKit can cut the last row of pixels off a filtered element. Only
    the link icons, whose colors are drawn into them, keep the filter. */
 .card :is(.badge, .pill, .chip, .owner, .source, .p-badge),
-.project-detail-pane :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .understanding-link) { transition: color 0.15s ease, background-color 0.15s ease; }
-.card:not(:hover) :is(.badge, .pill, .chip, .owner, .source, .p-badge),
-.project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .tracking-pill, .epic-issue-dot, .understanding-link) {
+.project-detail-pane :is(.badge, .pill, .chip, .understanding-link) { transition: color 0.15s ease, background-color 0.15s ease; }
+.card:not(:hover) :is(.badge:not(.status-badge:is(.working, .human)), .pill, .chip, .owner, .source, .p-badge),
+.project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .understanding-link) {
   --red: var(--muted); --amber: var(--muted); --green: var(--muted); --accent: var(--muted);
   --red-bg: var(--grey-bg); --amber-bg: var(--grey-bg); --green-bg: var(--grey-bg); --blocking-bg: var(--blocking-gray);
 }
@@ -1088,8 +1082,8 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .card:hover .hover-only, .card .hover-only:focus-visible { opacity: 1; }
 
 /* A priority you set by hand gets a thin outline; an unrated task offers "Priority" on hover. */
-.badge.priority.manual { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 45%, transparent); }
-.badge.priority.unset { color: var(--muted); }
+.badge.priority.manual, .p-badge.manual { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 45%, transparent); }
+.badge.priority.unset, .p-badge.unset { color: var(--muted); }
 
 /* Task title with the Claude icon right after it; the title truncates, the icon stays. */
 .task-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
@@ -1133,13 +1127,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .connect-session:disabled { opacity: 1; }
 .connect-session-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connect-session-meta { display: inline-flex; align-items: center; gap: 6px; }
-.tab-close { color: var(--muted); }
-.work-tab:hover .tab-close { color: var(--text); }
 
 /* Close buttons: a centered drawn ×. */
 .close-icon { display: block; }
 .icon-button:has(> .close-icon) { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; line-height: 0; }
-.tab-close { display: inline-grid; place-items: center; margin-left: 2px; }
 
 /* The mood word fades in when it changes, as the orb glides to its new state. */
 
@@ -1368,27 +1359,6 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   .reveal-inner, .reveal.closed .reveal-inner { transform: none; transition: opacity 120ms linear; }
 }
 
-/* A project's tracking feed (About modal): epics, PRs and branches, newest first */
-.tracking { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
-.tracking-header { display: flex; align-items: baseline; gap: 10px; }
-.tracking-header h3 { margin: 0; font-size: 13px; }
-.tracking-header .link-button { margin-left: auto; }
-.tracking-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.tracking-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.tracking-item:last-child { border-bottom: none; }
-.tracking-item > .link-chip-icon { margin-top: 2px; flex-shrink: 0; }
-.tracking-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.tracking-title { color: var(--text); text-decoration: none; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.tracking-title:hover { text-decoration: underline; }
-.tracking-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; }
-.tracking-pill { padding: 1px 7px; border-radius: 999px; background: var(--grey-bg); color: var(--muted); white-space: nowrap; }
-.tracking-pill.state-open, .tracking-pill.checks-passing, .tracking-pill.review-approved { background: var(--green-bg); color: var(--green); }
-.tracking-pill.state-merged { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.tracking-pill.state-closed, .tracking-pill.checks-failing, .tracking-pill.review-changes { background: var(--red-bg); color: var(--red); }
-.tracking-pill.checks-pending, .tracking-pill.review-needed { background: var(--amber-bg); color: var(--amber); }
-.tracking-recheck { flex-shrink: 0; padding: 2px 4px; opacity: 0; transition: opacity 0.15s; }
-.tracking-item:hover .tracking-recheck, .tracking-recheck:focus-visible, .tracking-recheck:disabled { opacity: 1; }
-.tracking-note code { font-size: 11px; }
 /* In a task investigation the buttons sit on their own row, from the left. */
 .task-check .check-buttons { margin-left: 0; width: 100%; align-items: center; }
 
@@ -1423,6 +1393,11 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
   background: var(--grey-bg); white-space: pre-wrap;
 }
 .chat-turn.claude { align-self: stretch; color: var(--text); display: flex; flex-direction: column; gap: 10px; }
+/* Links in a chat: the accent color with a light underline, so they read as links among the words. */
+.chat-turn .chat-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.chat-turn .chat-link:hover { text-decoration-color: currentColor; }
+/* A file Claude names (it can't be opened from here): its name, its path on hover. */
+.chat-turn .chat-ref { text-decoration: underline dotted; text-decoration-color: var(--muted); text-underline-offset: 2px; cursor: help; }
 .chat-working { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .chat-working .chat-stop { margin-left: 4px; }
 .claude-spark { display: inline-block; width: 1em; text-align: center; color: #d97757; font-size: 14px; line-height: 1; }
@@ -1486,6 +1461,9 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .setting-row.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
 .setting-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .setting-label { font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+/* A setting's line of gray text under its label (Projects: what it needs connected). */
+.setting-note { font-size: 11px; line-height: 1.4; color: var(--muted); }
+.setting-note .link-button { font-size: 11px; }
 /* A (?) beside a label; its explanation shows in a tooltip (see InfoTip). */
 .info-tip { display: inline-grid; place-items: center; color: color-mix(in srgb, var(--muted) 70%, var(--bg)); cursor: help; border-radius: 50%; line-height: 0; }
 .info-tip:hover, .info-tip:focus-visible { color: var(--muted); outline: none; }
@@ -1526,6 +1504,8 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 .switch:checked { background: var(--accent); }
 .switch:checked::after { transform: translateX(10px); }
 .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Like macOS's dimmed controls: a switch that can't change now (Watched topics in lite). */
+.switch:disabled { opacity: 0.4; cursor: default; }
 
 /* A project: name, Repos and its show switch on one line, its channels under it. */
 .settings-project { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1609,6 +1589,10 @@ button.now-playing-app:focus-visible { outline: 2px solid var(--accent); outline
   position: absolute; left: -6px; bottom: calc(100% + 8px);
   opacity: 0; pointer-events: none; transform: translateY(3px); transition: opacity 120ms ease, transform 120ms ease;
 }
+/* Everything's shortcut right beside it, and each line's last update in the timestamps' gray at the right. */
+.refresh-menu .link-button { white-space: nowrap; }
+.refresh-menu .kbd { margin-left: 0; }
+.refresh-menu .timestamp { margin-left: auto; padding-left: 16px; font-size: 11px; }
 .refresh-menu::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
 .refresh-menu-anchor:is(:hover, :focus-within) > .refresh-menu { opacity: 1; pointer-events: auto; transform: none; }
 @media (prefers-reduced-motion: reduce) { .refresh-menu { transition: none; } }
@@ -1728,6 +1712,9 @@ button.now-playing-app:focus-visible { outline: 2px solid var(--accent); outline
 /* The Demian chat, beside Settings: the same glass button, reading Chat with its shortcut. */
 .chat-button { display: inline-flex; align-items: center; gap: 6px; padding-right: 9px; }
 .chat-modal-head-actions { display: flex; align-items: center; gap: 10px; }
+/* Something Claude Code asks before using a tool: a handoff card, with the command in full. */
+.ask-code { margin: 2px 0 0; padding: 6px 8px; border-radius: 4px; background: var(--grey-bg); color: var(--text); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+.ask-note { padding: 0 2px; }
 /* A change the global chat proposed: what it does, with Apply and Not this. */
 .action-card .handoff-head { align-items: flex-start; }
 .action-summary { color: var(--text); line-height: 1.45; }
@@ -1740,7 +1727,7 @@ button.now-playing-app:focus-visible { outline: 2px solid var(--accent); outline
 }
 .focus-field:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
 
-/* The optional "Why?" after a correction, by where you clicked. */
+/* The optional "Why?" after a correction, right under the cursor. */
 .why-prompt {
   position: fixed; z-index: 40; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px;
   border-radius: 10px; border: 1px solid var(--border); background: var(--bg); box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
@@ -1755,9 +1742,9 @@ button.now-playing-app:focus-visible { outline: 2px solid var(--accent); outline
   color: var(--text); font: inherit; font-size: 12px;
 }
 .why-prompt input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
-.why-actions { display: flex; justify-content: flex-end; gap: 12px; }
-.why-actions .link-button { color: var(--muted); }
-.why-actions .link-button:hover { color: var(--text); }
+.why-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+/* Its shortcut beside each action, while the field is empty and the shortcuts work. */
+.why-actions .kbd { margin-left: 5px; }
 /* Settings: lessons learned from corrections, with where each applies. */
 .lesson { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1; }
 .lesson-scope { flex-shrink: 0; color: var(--muted); font-size: 11px; min-width: 64px; }
@@ -1871,21 +1858,6 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 .release-notes { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.5; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .release-more { align-self: flex-start; margin-top: 8px; }
 
-/* An epic's issues, opened under its row in the tracking feed, with who each is assigned to. */
-.epic-toggle { margin-left: auto; }
-.epic-issues { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-.epic-issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.epic-issue { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
-.epic-issue-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); align-self: center; }
-.epic-issue-dot.in_progress { background: var(--accent); }
-.epic-issue-dot.done { background: var(--green); }
-.epic-issue-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.epic-issue.done .epic-issue-title { color: var(--muted); }
-.epic-issue-key { color: var(--muted); }
-.epic-issue-assignee { flex-shrink: 0; color: var(--muted); }
-.epic-issue-assignee.unassigned { font-style: italic; opacity: 0.7; }
-.epic-issues-foot { display: flex; gap: 8px; align-items: baseline; }
-
 /* Detail: the orb and calendar column, a rule, a rail of area icons, then the open area in a panel
    set in from the top and right, rounded at the top, flush with the bottom of the window. */
 .detail-layout {
@@ -1934,6 +1906,12 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
   background: var(--surface); border: 1px solid var(--border); border-bottom: none; border-radius: 14px 14px 0 0;
 }
 .detail-split { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+/* The Projects area: the list at most 500px, room for its four filters beside the heading on one row
+   with some to spare, and the project's details (or its TDD chat) the rest. In a narrow window they split evenly. When a "blocked" count joins the heading, the filters
+   go under it rather than being squeezed. */
+.projects-split { grid-template-columns: minmax(0, min(420px, 50%)) minmax(0, 1fr); }
+.projects-split > .detail-pane:first-child > .column-header { flex-wrap: wrap; row-gap: 4px; height: auto; min-height: 26px; }
+.projects-split > .detail-pane:first-child > .column-header > .task-filters { flex: 1 0 auto; }
 .detail-pane { min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 18px; }
 .detail-pane + .detail-pane { border-left: 1px solid var(--border); }
 /* The Updates area's chat dock: the chat fills it, inline rather than as a window. */
@@ -1945,8 +1923,14 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
    left-aligned, rather than beside it as in the window. */
 .project-detail-pane dl { margin: 0; font-size: 12px; display: flex; flex-direction: column; }
 .project-detail-pane dt { color: var(--muted); margin-top: 16px; }
-.project-detail-pane dt:first-child { margin-top: 4px; }
+.project-detail-pane dt:first-child { margin-top: 0; }
 .project-detail-pane dd { margin: 6px 0 0; min-width: 0; }
+/* A folding field's label: it opens the field, with how many it holds and a chevron after it. */
+.fold-label { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: none; background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.fold-label:hover { color: var(--text); }
+.fold-chevron { transition: transform 0.12s ease; }
+.fold-chevron path { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.fold-label[aria-expanded="true"] .fold-chevron { transform: rotate(90deg); }
 
 /* A milestone on one line: its date, its text cut short, then its health badge, which always fits. */
 .profile-list .milestone { display: flex; align-items: baseline; gap: 0; min-width: 0; white-space: nowrap; }
@@ -2082,12 +2066,8 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 /* A section being refreshed: a spinner after its title. */
 .section-spinner { margin-left: 6px; display: inline-flex; vertical-align: -1px; }
 
-/* "updated …" shows only while the pointer is over its section (a column, pane or card). */
-.updated-stamp { transition: opacity 0.15s ease; }
-:is(.column, .detail-pane, .card):not(:hover) .updated-stamp { opacity: 0; }
 /* Each section's first item sits the same 6px under its heading (the section's 4px gap plus 2px), as in the Inbox. */
 .reading > .column-header + * { margin-top: 2px; }
-.project .card-header h3 .updated-stamp { margin-left: 8px; font-weight: 400; }
 /* When a task's plan was made, or its investigation corrected: shown while that box is hovered. */
 .hover-stamp { transition: opacity 0.15s ease; }
 :is(.automation, .check-result):not(:hover) .hover-stamp { opacity: 0; }
@@ -2153,3 +2133,461 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 /* Unread: Demian found something new about it (see unread.ts); it goes once you open it. */
 .unread-dot { display: inline-block; flex-shrink: 0; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--green); vertical-align: middle; }
 .task-title-wrap .unread-dot { margin-left: 0; }
+
+/* Project or workstream, under a project's goal in its details: the choice, then whose call it is and why. */
+
+/* A project's guiding doc when it has none: a warning in the shape of the doc's chip (light amber, a
+   dashed amber outline and a warning sign where the doc's icon would be), then linking one or
+   drafting a TDD. */
+.doc-linker { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
+.doc-missing-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px;
+  border: 1px dashed var(--amber); border-radius: 12px; background: var(--amber-bg); color: var(--amber); line-height: 18px; white-space: nowrap;
+}
+.doc-missing-icon { flex: none; }
+/* Link a doc and Draft a TDD stay gray until you point at one; Draft a TDD stays blue while a draft is
+   being written or waits for your review. */
+.doc-linker .link-button { color: var(--muted); transition: color 0.15s ease; }
+.doc-linker .link-button:is(:hover, :focus-visible, .tdd-drafting, .tdd-review) { color: var(--accent); }
+.doc-link-form { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; min-width: 0; }
+.doc-link-form .lesson-edit { flex: 1 1 220px; }
+.badge.doc-kind { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* Requirements in a project's details: its doc, a summary with a bar split by status, then each
+   requirement with its status, grouped by the doc's sections. */
+.requirements { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.requirements-doc { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+/* Changing or removing the doc shows while the requirements are hovered or the buttons have focus. */
+.requirements-doc-actions { display: inline-flex; gap: 8px; margin-left: auto; opacity: 0; transition: opacity 0.15s ease; }
+.requirements:hover .requirements-doc-actions, .requirements-doc-actions:focus-within { opacity: 1; }
+.requirements-summary { display: flex; flex-direction: column; gap: 4px; }
+/* The bar, 6px tall, sits in a taller strip that takes the hover, so each part's count is easy to reach. */
+.requirements-bar-hit { padding: 5px 0; margin: -5px 0; }
+.requirements-bar { display: flex; gap: 1px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--grey-bg); }
+.requirements-bar-part { flex-basis: 0; min-width: 3px; }
+.requirements-bar-part.done { background: var(--green); }
+.requirements-bar-part.in_progress { background: var(--accent); }
+.requirements-bar-part.at_risk { background: var(--amber); }
+.requirements-bar-part.not_started { background: color-mix(in srgb, var(--muted) 40%, transparent); }
+.requirements-bar-part.unclear, .requirements-bar-part.pending { background: color-mix(in srgb, var(--muted) 22%, transparent); }
+.requirements-bar-part.descoped { background: color-mix(in srgb, var(--muted) 10%, transparent); }
+.requirements-section { margin: 6px 0 2px; font-size: 11px; font-weight: normal; color: var(--muted); }
+.requirement-row { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 2px 0; border: none; background: none; color: inherit; font: inherit; font-size: 12px; text-align: left; }
+.requirement-status { flex-shrink: 0; min-width: 64px; text-align: center; color: var(--muted); }
+.requirement-status.done { color: var(--green); background: var(--green-bg); }
+.requirement-status.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.requirement-status.at_risk { color: var(--amber); background: var(--amber-bg); }
+.requirement-text { flex: 1; min-width: 0; }
+.requirement.done .requirement-text, .requirement.descoped .requirement-text { color: var(--muted); }
+.requirement.descoped .requirement-text { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.requirement-must { flex-shrink: 0; color: var(--muted); }
+.requirement-detail { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px 72px; }
+.requirement-detail p { margin: 0; }
+/* Like badges, the requirements bar stays gray until you hover it. */
+.requirements-bar-part { transition: color 0.15s ease, background-color 0.15s ease; }
+.project-detail-pane:not(:hover) .requirements-bar {
+  --amber: var(--muted); --amber-bg: var(--grey-bg); --green: var(--muted); --accent: var(--muted); --red: var(--muted);
+}
+
+/* A project's record, at the top of its details: its people and purpose (untitled), its status, then
+   Work under a small heading, before the rest of what's known about it. */
+/* Sections in the details column sit 16px apart (the column's 10px gap and 6px of margin), each
+   label 6px over what it labels: the same rhythm as the fields listed under them. */
+.record-section { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; min-width: 0; }
+/* Like the labels below it (Requirements, Channels…): muted, not bold. */
+.record-heading { margin: 0; font-size: 12px; font-weight: normal; color: var(--muted); }
+.record-section .profile-goal { margin: 0; }
+/* Status sits 10px under the purpose, as a task's Plan box sits under its description; its text is
+   the description's size. */
+.project-detail-pane .record-section + .automation { margin: -6px 0 6px; }
+.status-text { margin: 0; font-size: 13px; }
+
+
+/* A step's mark, as the work map's blocks use it. */
+.path-mark { flex-shrink: 0; position: relative; width: 10px; height: 10px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--muted); background: var(--surface); box-sizing: border-box; }
+
+/* The project's work as a plan, the way Jira's plan view lays it out: a row per epic, opening to
+   its stories and tasks, with columns for who, status and due date, and a timeline of when each
+   epic runs (today in red, the ship date dashed green). Narrower, the timeline goes, then the dates. */
+.plan-wrap { container-type: inline-size; margin-top: 6px; }
+.plan { --plan-cols: minmax(0, 1fr) 56px 84px 44px; display: flex; flex-direction: column; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.plan.with-timeline { --plan-cols: minmax(0, 1.7fr) 56px 84px 44px minmax(100px, 1fr); }
+/* In the project's details: a Progress column, a bar of how far along what's under each row is. */
+.plan.with-progress { --plan-cols: minmax(0, 1fr) 56px 84px 44px 56px; }
+.plan-progress { display: flex; align-items: center; min-width: 0; }
+.plan-progress > .hover-tip-anchor { display: block; width: 100%; }
+.plan-progress-bar { width: 100%; }
+.requirements-bar-part.blocked { background: var(--red); }
+.plan-row { display: grid; grid-template-columns: var(--plan-cols); align-items: center; column-gap: 8px; min-height: 30px; padding: 0 8px; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.plan > .plan-row:first-child { border-top: none; }
+.plan-head { min-height: 26px; font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--text) 3%, transparent); }
+.plan-row.item { background: color-mix(in srgb, var(--text) 1.5%, transparent); }
+.plan-work { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.plan-head .plan-work { gap: 10px; }
+.plan-all { font-size: 11px; }
+/* Each level in is indented a step: initiatives, epics, stories, requirements. */
+.plan-row .plan-work { padding-left: calc(var(--depth, 0) * 18px); }
+.plan-group { display: contents; }
+.plan-row:is(.item, .requirement, .code) { background: color-mix(in srgb, var(--text) 1.5%, transparent); }
+.plan-requirement-text { flex: 0 1 auto; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.plan-requirement-text .plan-title { display: block; }
+.plan-requirement-text:hover .plan-title { text-decoration: underline; }
+.plan-row .requirement-must { flex: none; }
+.plan-row.plan-requirement-detail { display: block; padding: 2px 8px 8px calc(var(--depth, 0) * 18px + 48px); background: color-mix(in srgb, var(--text) 1.5%, transparent); border-top: none; min-height: 0; }
+.plan-requirement-detail .requirement-detail { margin: 0; }
+/* A pull request's or branch's mark, gray: its state is in the Status column. */
+/* A pull request's or branch's icon, in its state's color (see codeLook). */
+.plan-icon.code { color: var(--muted); fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.plan-icon.code .dot { fill: currentColor; stroke: none; }
+:is(.plan-icon.code, .code-mark, .code-state).open { color: var(--gh-open); }
+:is(.plan-icon.code, .code-mark, .code-state).draft { color: var(--gh-draft); }
+:is(.plan-icon.code, .code-mark, .code-state).merged { color: var(--gh-merged); }
+:is(.plan-icon.code, .code-mark, .code-state).closed { color: var(--gh-closed); }
+/* A ticket's pull requests and branches on its row: solid when the ticket links one, dotted when Demian only matched its key. */
+.code-marks { display: inline-flex; flex: none; align-items: center; gap: 3px; }
+.code-marks > .hover-tip-anchor { display: inline-flex; }
+.code-mark {
+  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  width: 18px; height: 18px; border-radius: 4px; color: var(--muted);
+  border: 1px solid color-mix(in srgb, currentColor 65%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  text-decoration: none;
+}
+.code-mark.suggested { border-style: dotted; border-color: currentColor; background: transparent; }
+.code-mark:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+.code-mark .plan-icon.code { width: 12px; height: 12px; }
+.code-mark.more { width: auto; padding: 0 4px; font-size: 10px; font-variant-numeric: tabular-nums; cursor: default; }
+/* A pull request's or branch's hover. */
+.code-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.code-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.code-card-head > .clip-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.code-state { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.code-card-branch { align-self: flex-start; max-width: 100%; padding: 0 4px; border-radius: 3px; background: var(--grey-bg); font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.code-card-about { color: var(--muted); }
+.code-card-tie { margin-top: 3px; padding-top: 4px; border-top: 1px solid var(--border); color: var(--muted); }
+.plan-icon.initiative rect { fill: var(--initiative); }
+.plan-icon.initiative path { stroke: #fff; stroke-width: 1.4; stroke-linecap: round; }
+.plan-icon.initiative.proposed rect { fill: none; stroke: var(--initiative); stroke-width: 1.4; stroke-dasharray: 2.4 1.8; }
+.plan-icon.initiative.proposed path { stroke: var(--initiative); }
+.plan-row.initiative { background: color-mix(in srgb, var(--initiative) 5%, transparent); }
+.plan-bar.initiative { --bar: var(--initiative); }
+/* A change Demian proposes to Jira: an outlined label, and its action while the row is hovered or focused. */
+.plan-proposal { flex: none; font-style: italic; background: none; border: 1px dashed color-mix(in srgb, var(--muted) 70%, transparent); color: var(--muted); padding: 0 6px; line-height: 15px; }
+.plan-action { flex: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* At rest it takes no room (the name gets it), but it can still be reached from the keyboard. */
+/* Its negative margin takes back the row's gap, so a hidden action leaves no double gap behind. */
+button.plan-action { max-width: 0; margin-left: -6px; overflow: hidden; opacity: 0; transition: opacity 0.12s ease; }
+.plan-row:is(:hover, :focus-within) button.plan-action { max-width: 140px; margin-left: 0; opacity: 1; }
+.plan-review-field { display: flex; flex-direction: column; gap: 4px; }
+.plan-review-key { width: 120px; text-transform: uppercase; }
+.plan-review-type { width: 160px; }
+.plan-review-check { display: flex; align-items: flex-start; gap: 8px; }
+.plan-review-check input { margin-top: 2px; }
+.plan-review-list ul { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.plan-review p { margin: 0; }
+/* Hover tips wrap a row's parts. Each keeps its size (an issue type's 14px icon, a key, a label)
+   except the title, which gives up room first. */
+.plan-work > .hover-tip-anchor { display: inline-flex; flex: none; }
+.plan-work > .hover-tip-anchor:has(.plan-title) { flex: 0 1 auto; min-width: 0; }
+.plan-toggle { flex: none; width: 14px; height: 14px; padding: 0; border: none; border-radius: 3px; background: none; color: var(--muted); display: inline-grid; place-items: center; }
+.plan-toggle svg { transition: transform 0.12s ease; }
+.plan-toggle svg path { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.plan-row[aria-expanded="true"] .plan-toggle svg { transform: rotate(90deg); }
+button.plan-toggle:hover { color: var(--text); background: var(--grey-bg); }
+.plan-icon { flex: none; }
+.plan-icon.epic rect { fill: var(--epic); }
+.plan-icon.epic path { fill: #fff; }
+.plan-icon.epic.proposed rect { fill: none; stroke: var(--epic); stroke-width: 1.4; stroke-dasharray: 2.4 1.8; }
+.plan-icon.epic.proposed path { fill: var(--epic); }
+/* Issue types in Jira's colors: story green, task blue, bug red, spike teal, the project's own types gray. */
+.plan-icon.item { --type: var(--task); }
+.plan-icon.item.story { --type: #63ba3c; }
+.plan-icon.item.bug { --type: #e5493a; }
+.plan-icon.item.spike { --type: #2fa59a; }
+.plan-icon.item.other { --type: #8993a4; }
+.plan-icon.item rect { fill: var(--type); }
+.plan-icon.item path { fill: none; stroke: #fff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.plan-icon.item .fill { fill: #fff; stroke: none; }
+.plan-icon.item text { fill: #fff; font-size: 8px; font-weight: 700; font-family: inherit; }
+/* Proposed, not in Jira yet: outlined, dashed, in its type's color. */
+.plan-icon.item.untracked rect { fill: none; stroke: var(--type); stroke-width: 1.2; stroke-dasharray: 2.2 1.8; }
+.plan-icon.item.untracked path { stroke: var(--type); }
+.plan-icon.item.untracked .fill, .plan-icon.item.untracked text { fill: var(--type); }
+.plan-key { flex: none; font-size: 11px; color: var(--muted); text-decoration: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.plan-key:hover { color: var(--accent); text-decoration: underline; }
+.plan-key.untracked { font-style: italic; }
+.plan-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; }
+a.plan-title:hover { color: var(--text); text-decoration: underline; }
+.plan-row.done .plan-title { color: var(--muted); }
+.plan-count { flex: none; margin-left: auto; padding-left: 4px; font-variant-numeric: tabular-nums; }
+.plan-who { display: flex; align-items: center; }
+.plan-state { display: flex; }
+/* A requirement's status hugs its text in the plan, like the work's, so the column lines up. */
+.plan-state .requirement-status { min-width: 0; text-align: left; }
+.plan-status.done { color: var(--green); background: var(--green-bg); }
+.plan-status.in_progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.plan-status.blocked { color: var(--red); background: var(--red-bg); }
+.plan-status.next { color: var(--muted); }
+.plan-due-date { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-timeline-cell { position: relative; align-self: stretch; min-width: 0; }
+.plan-scale { overflow: hidden; }
+.plan-tick { position: absolute; top: 50%; transform: translateY(-50%); padding-left: 4px; border-left: 1px solid var(--border); font-size: 10px; line-height: 12px; white-space: nowrap; }
+.plan-today { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--red) 55%, transparent); }
+.plan-ship { position: absolute; top: 0; bottom: 0; border-left: 1px dashed color-mix(in srgb, var(--green) 70%, transparent); }
+.plan-ship-mark { position: absolute; bottom: 3px; width: 7px; height: 7px; margin-left: -3.5px; background: var(--green); transform: rotate(45deg); }
+.plan-bar { --bar: var(--muted); position: absolute; top: 50%; height: 10px; transform: translateY(-50%); border-radius: 3px; background: var(--bar); box-sizing: border-box; }
+.plan-bar.in_progress { --bar: var(--accent); }
+.plan-bar.done { --bar: var(--green); }
+.plan-bar.blocked { --bar: var(--red); }
+.plan-bar.next { --bar: color-mix(in srgb, var(--muted) 60%, transparent); }
+.plan-bar.assumed { opacity: 0.45; }
+.plan-bar.proposed { background: color-mix(in srgb, var(--bar) 22%, transparent); border: 1px dashed var(--bar); }
+.plan-due { position: absolute; top: 50%; width: 7px; height: 7px; margin-left: -3.5px; transform: translateY(-50%) rotate(45deg); background: var(--muted); }
+.plan-due.in_progress { background: var(--accent); }
+.plan-due.done { background: var(--green); }
+.plan-due.blocked { background: var(--red); }
+@container (max-width: 640px) {
+  .plan.with-timeline { --plan-cols: minmax(0, 2.2fr) 56px 84px minmax(90px, 1fr); }
+  .plan.with-timeline .plan-due-date { display: none; }
+}
+@container (max-width: 500px) {
+  .plan.with-timeline { --plan-cols: minmax(0, 1fr) 56px 84px 44px; }
+  .plan.with-progress { --plan-cols: minmax(0, 1fr) 56px 84px 48px; }
+  .plan.with-progress .plan-due-date { display: none; }
+  .plan.with-timeline .plan-due-date { display: block; }
+  .plan .plan-timeline-cell { display: none; }
+  .plan .plan-count { display: none; }
+  /* Titles take two lines here rather than being cut to a word. */
+  .plan-row:not(.plan-head) { padding-block: 4px; }
+  .plan .plan-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  /* Work with a key goes on two lines: the key and its labels, then the title under the key, so
+     neither crowds the other out. A label too long for its line is cut short (its hover says it all). */
+  .plan-row:is(.initiative, .epic, .item):has(.plan-key, .plan-proposal) .plan-work { flex-wrap: wrap; row-gap: 1px; }
+  .plan-row:is(.initiative, .epic, .item):has(.plan-key, .plan-proposal) .plan-work > .hover-tip-anchor:has(.plan-title) { order: 1; flex: 1 0 calc(100% - 40px); margin-left: 40px; }
+  .plan-row .plan-work > .hover-tip-anchor:has(> .plan-proposal) { flex: 1 1 0; min-width: 0; max-width: max-content; }
+  .plan-row .plan-proposal { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+}
+@container (max-width: 400px) {
+  .plan, .plan.with-timeline, .plan.with-progress { --plan-cols: minmax(0, 1fr) auto auto; }
+  .plan .plan-due-date, .plan .plan-progress { display: none; }
+}
+
+/* People's faces: their Jira avatar, or their initials on a color of their own. */
+.avatar { flex: none; display: inline-grid; place-items: center; border-radius: 50%; object-fit: cover; background: var(--grey-bg); box-sizing: border-box; }
+.avatar-initials { background: hsl(var(--hue, 210) 40% 46%); color: #fff; font-weight: 600; line-height: 1; user-select: none; }
+.avatar-more { background: var(--grey-bg); color: var(--muted); font-size: 9px; font-weight: 600; }
+.face-stack { display: inline-flex; align-items: center; border-radius: 999px; }
+.face-stack .avatar { box-shadow: 0 0 0 1.5px var(--bg); }
+.face-stack .avatar + .avatar { margin-left: -5px; }
+.face-stack:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.face-stack-names { list-style: none; margin: 0; padding: 0; }
+
+/* Who's involved: a row for each part of RACI, its label beside one line per person, the name then
+   their role, all in one grid so they line up. */
+/* A project's details, and while its chat is open, the chat in the column's bottom two fifths under them. */
+.project-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); border-left: 1px solid var(--border); }
+.project-pane.with-chat { grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+.project-pane > .detail-pane { border-left: none; }
+/* With the chat under them, the details end above it rather than above the fog: the Project
+   context line at their foot sits as far above the chat's line as below its own. */
+.project-pane.with-chat > .project-detail-pane { padding-bottom: var(--detail-foot-gap); }
+.project-chat-pane { border-top: 1px solid var(--border); }
+/* The project's name, then its Chat button: a rounded outline, no fill, darker while the chat is open. */
+.detail-title-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.detail-title-line h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-chat-button { flex: none; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px; background: none; color: var(--muted); font-size: 11px; line-height: 16px; cursor: pointer; }
+.project-chat-button:hover, .project-chat-button.on { color: var(--text); border-color: color-mix(in srgb, var(--text) 35%, transparent); }
+.project-chat-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* The project's name and its badges stay at the top of its column while the details scroll under
+   them: the header reaches over the column's padding, with the column's color behind it. */
+/* Its offset is counted from inside the column's 16px top padding, so -16px is the column's top edge. */
+.project-detail-pane > .project-head { position: sticky; top: -16px; z-index: 4; margin: -16px -18px 0; padding: 16px 18px 6px; background: var(--surface); }
+/* The first section 16px under the name, like the sections below (the header's 6px and the column's 10px gap). */
+.project-detail-pane .project-head + .record-section { margin-top: 0; }
+.people-raci { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: start; font-size: 12px; }
+/* The labels at the right end of their rows, flush right. */
+.people-raci .raci-row > .hover-tip-anchor { justify-self: end; }
+.raci-row { display: contents; }
+/* The label sits on the first line of badges, which wrap under each other. */
+.raci-label { display: inline-block; color: var(--muted); font-size: 11px; line-height: 18px; }
+.raci-row.unsorted .raci-label { font-style: italic; }
+.raci-people { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+/* Each badge a flex item, not in a line of text, so it sits level with its label. */
+.raci-people > * { display: flex; }
+/* Fully rounded, its face a circle set 2px into the rounded end. */
+.person-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 2px; border-radius: 9px; color: var(--text); cursor: default; }
+.person-badge.me { padding-left: 8px; }
+.person-badge:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.person-card-head { display: flex; align-items: center; gap: 8px; }
+.person-card-name { min-width: 0; }
+.person-card p { margin: 0; }
+
+.record-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.path-tools { display: inline-flex; align-items: center; gap: 6px; }
+/* Work's Plan / Dependencies switch is 18px tall, a badge's height, rather than Settings' 24px. */
+.path-tools .segmented { padding: 1px; gap: 1px; }
+.path-tools .segmented button { height: 16px; padding: 0 8px; line-height: 16px; }
+.path-full-button { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 6px; }
+.path-full-button:hover { background: var(--grey-bg); }
+
+/* Work over the open area's two columns, inside its panel's border, so the calendar and the rail stay
+   in view: the plan scrolling under its header, the dependencies filling the rest. Both end above
+   the fog, as the columns do. */
+.path-full { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: var(--surface); padding: 16px 18px 0; }
+.path-full-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; }
+.path-full-head h2 { margin: 0; font-size: 15px; }
+.path-full-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0; gap: 6px; padding-bottom: calc(var(--mist-height) + 24px); }
+.path-full.dependencies .path-full-body { overflow: hidden; }
+.path-full .dependency-view { flex: 1; min-height: 0; }
+.path-full .dependency-view .work-map-scroll { max-height: none; }
+
+/* A TDD Demian drafted, to read and edit before it's created in Drive. */
+/* A TDD draft's chat, in place of the project's details: the draft on top, the conversation under it. */
+.tdd-drafting { display: inline-flex; align-items: center; gap: 6px; }
+.tdd-chat .chat-modal-top { flex: none; }
+/* The draft takes the room the chat doesn't. The chat (conversation and reply box) grows with use,
+   up to a third of the column; past that its conversation scrolls, and the reply box stays. */
+.tdd-doc { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
+.tdd-chat .chat-body { flex: 0 1 auto; max-height: calc(100% / 3); min-height: 0; display: flex; flex-direction: column; }
+.tdd-chat .chat-log { flex: 0 1 auto; min-height: 0; }
+.tdd-chat .chat-modal-foot { flex: none; }
+.tdd-doc-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 16px; display: flex; flex-direction: column; }
+.tdd-text { flex: 1; min-height: 200px; padding: 10px 12px; resize: none; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.55; }
+.tdd-doc-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px 10px 20px; border-top: 1px solid var(--border); }
+.tdd-doc-when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdd-doc-actions, .tdd-confirm { flex: none; display: inline-flex; align-items: center; gap: 10px; }
+.tdd-error { margin: 0; padding: 0 20px 10px; }
+.tdd-sources { margin-top: 14px; }
+.tdd-sources ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.tdd-doc > .tdd-drafting { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: auto; padding: 24px; max-width: 320px; text-align: left; }
+.tdd-doc > .tdd-drafting .tdd-drafting-note { display: block; }
+.tdd-chat-empty { margin: auto 0 0; }
+
+/* A doc in Markdown, read in a column: compact headings, quiet tables. */
+.md { font-size: 12px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md :is(h2, h3, h4, h5, h6) { margin: 18px 0 6px; line-height: 1.35; }
+.md h2 { font-size: 16px; }
+.md h3 { font-size: 14px; }
+.md :is(h4, h5, h6) { font-size: 12.5px; }
+.md p, .md blockquote, .md pre, .md .md-table-wrap { margin: 0 0 10px; }
+.md :is(ul, ol) { margin: 0 0 10px; padding-left: 20px; }
+.md li > :is(ul, ol) { margin: 2px 0 4px; }
+.md li { margin: 2px 0; }
+.md blockquote { padding: 6px 10px; border-left: 2px solid var(--border); color: var(--muted); }
+/* The app sets nothing in bold, but in a doc bold carries meaning (the must-haves), as it will in Drive. */
+.md strong { font-weight: 600; }
+.md code { padding: 0 3px; border-radius: 4px; background: var(--grey-bg); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em; }
+.md pre { padding: 8px 10px; border-radius: 6px; background: var(--grey-bg); overflow-x: auto; }
+.md pre code { padding: 0; background: none; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.md .md-table-wrap { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 11.5px; }
+.md :is(th, td) { padding: 4px 8px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.md th { font-weight: 600; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.md .md-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.md .md-link:hover { text-decoration-color: currentColor; }
+/* What the chat's last change touched: a soft accent wash, with a bar at its left edge. */
+.md .md-changed { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: -6px 0 0 color-mix(in srgb, var(--accent) 12%, transparent), -8px 0 0 var(--accent); border-radius: 2px; }
+.md li.md-changed > .md-li-text, .md tr.md-changed, .md tr.md-changed th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.md li.md-changed { background: none; box-shadow: none; }
+.md li.md-changed > .md-li-text { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 2px; }
+
+/* Tasks and dependencies: the project's work left to right, a lane per track. Jira tickets and
+   Jira's Blocks links are solid; what Demian assumes is dashed. Hovering a block brings it and
+   what it's linked to forward and dims the rest. */
+/* The plan's work by the order it has to happen in, under Work; it scrolls both ways. */
+.dependency-view { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.dependency-view .work-map-scroll { max-height: 520px; }
+.work-map-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; }
+.work-map-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); }
+.work-map-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-block { display: inline-block; width: 16px; height: 11px; border-radius: 3px; border: 1.5px solid var(--text); }
+.legend-block.assumed { border-style: dashed; border-color: var(--muted); }
+.legend-block.mine { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 9%, transparent); }
+.legend-line { display: inline-block; width: 22px; border-top: 2px solid var(--text); }
+.legend-line.assumed { border-top-style: dashed; border-top-color: var(--muted); }
+.work-map-updated { display: inline-flex; align-items: center; gap: 8px; }
+.work-map-note { margin: 0; }
+.work-map-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.work-map { position: relative; }
+.work-map-lane { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
+.work-map-lane:nth-child(even) { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.work-map-lane:first-child { border-top: none; }
+.work-map-lane-name { position: sticky; left: 0; display: inline-block; padding: 8px 16px 0; font-size: 11px; color: var(--muted); }
+/* An epic Demian proposes (not in Jira yet): its lane outlined in the epic's purple, dashed. */
+.work-map-lane.proposed { left: 6px; right: 6px; border: 1.5px dashed var(--epic); border-radius: 8px; background: color-mix(in srgb, var(--epic) 4%, transparent); }
+.work-map-lane.proposed .work-map-lane-name { color: var(--epic); padding-left: 10px; }
+.work-map-lane.proposed + .work-map-lane { border-top-color: transparent; }
+.legend-block.proposed-epic { border: 1.5px dashed var(--epic); background: color-mix(in srgb, var(--epic) 6%, transparent); }
+.work-map-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.map-line { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: 0.7; transition: opacity 0.15s ease, stroke 0.15s ease; }
+.map-line.jira { stroke: var(--text); opacity: 0.55; }
+.map-line.assumed { stroke-dasharray: 4 4; }
+.map-line.loop { stroke: var(--red); opacity: 0.8; }
+.map-line.on { stroke: var(--accent); opacity: 1; stroke-width: 2; }
+.work-map.focused .map-line:not(.on) { opacity: 0.15; }
+.map-arrow.plain { fill: var(--muted); }
+.map-arrow.on { fill: var(--accent); }
+.map-arrow.loop { fill: var(--red); }
+.map-block {
+  position: absolute; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; gap: 2px;
+  padding: 7px 9px; border-radius: 8px; border: 1.5px solid color-mix(in srgb, var(--text) 55%, transparent); background: var(--surface);
+  font-size: 12px; cursor: default; transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+.map-block.assumed { border-style: dashed; border-color: var(--muted); background: color-mix(in srgb, var(--surface) 70%, var(--bg)); }
+/* The user's own tasks, beside the work they move forward. */
+.map-block.mine { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 9%, var(--surface)); }
+.map-card-mine { color: var(--amber); }
+.map-block.in_progress { border-color: var(--accent); }
+.map-block.blocked { border-color: var(--red); }
+.map-block.done { opacity: 0.7; }
+.map-block.dim { opacity: 0.35; }
+.map-block.hovered, .map-block:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); outline: none; z-index: 2; }
+.map-block-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); line-height: 1.3; }
+.map-block-title .path-mark { display: inline-block; vertical-align: -1px; margin: 0 5px 0 0; }
+.map-block.done .path-mark { border-color: var(--green); background: var(--green); }
+.map-block.in_progress .path-mark { border-color: var(--accent); background: var(--accent); }
+.map-block.blocked .path-mark { border-color: var(--red); background: var(--red-bg); }
+.map-block-owner { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.map-card {
+  position: absolute; z-index: 5; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
+}
+.map-card-title { font-size: 13px; line-height: 1.3; }
+.map-card-key { color: var(--text); }
+.map-card-assumed { color: var(--muted); font-style: italic; }
+.map-card-detail { margin: 0; line-height: 1.45; }
+.map-card-links ul { margin: 2px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+
+/* The project's epics: a chip each with its key and title, linking to Jira. */
+.epic-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.epic-chip-link { display: inline-flex; gap: 4px; min-width: 0; color: inherit; text-decoration: none; }
+.epic-chip .epic-key { flex-shrink: 0; color: var(--text); }
+.epic-chip .epic-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; color: var(--muted); }
+/* A workstream's epics in Work: one per line, each with how far along its issues are to its right,
+   the bars starting together after the widest epic. */
+.epic-links { display: grid; grid-template-columns: minmax(0, max-content) minmax(80px, 1fr); align-items: center; gap: 6px 12px; }
+.epic-links > .epic-chip { justify-self: start; min-width: 0; }
+.epic-links > .hover-tip-anchor { display: block; }
+.epic-links > :is(.link-button, form) { grid-column: 1 / -1; justify-self: start; }
+/* A pull request or branch under its epic, indented a step, across the whole row. */
+.epic-links > .epic-code { grid-column: 1 / -1; min-width: 0; padding-left: 12px; }
+.code-line { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.code-line > .hover-tip-anchor:has(.code-line-title) { display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.code-line-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.code-line .plan-icon { flex: none; }
+
+/* The card's line about shipping, under its status reason. */
+.record-section .understanding-row { margin-top: 0; }
+/* The Project context line, at the very bottom of a project's details, which scroll far enough
+   for it to clear the mist at the bottom of the window. Last in the column, under a line, at the
+   size of the fields above it. */
+:root { --detail-foot-gap: 10px; }
+.understanding-row.detail-foot { margin-top: 6px; padding-top: var(--detail-foot-gap); border-top: 1px solid var(--border); font-size: 12px; }
+/* In the details pane its line runs edge to edge, across the pane's side padding. */
+.project-detail-pane > .understanding-row.detail-foot { margin-inline: -18px; padding-inline: 18px; }
+.detail-pane.project-detail-pane { padding-bottom: calc(var(--mist-height) + 24px); }
+/* Like the badges, the path's marks stay gray in the details beside the list until you hover them. */
+.project-detail-pane:not(:hover) :is(.path-steps, .path-tracks) { --green: var(--muted); --accent: var(--muted); --red: var(--muted); --red-bg: var(--grey-bg); }

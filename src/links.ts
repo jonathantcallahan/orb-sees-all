@@ -62,7 +62,7 @@ const KIND_NAME: Record<LinkKind, string> = {
   web: "Link",
 };
 
-/** A readable title for a link that came without one, e.g. "CPS-6931" for a Jira issue. */
+/** A readable title for a link that came without one, e.g. "PAY-6931" for a Jira issue. */
 export function fallbackTitle(url: string, kind: LinkKind = linkKind(url)): string {
   try {
     const u = new URL(url);
@@ -88,7 +88,7 @@ function placeOnly(title: string): boolean {
   return channelName || /^https?:\/\//.test(t) || /^(DM|Slack|Email|Gmail)$/i.test(t);
 }
 
-/** Removes Slack channel names ("in #tmp-pricing", "#asset-store-eng") from a title. */
+/** Removes Slack channel names ("in #tmp-pricing", "#shop-eng") from a title. */
 export function withoutChannels(title: string): string {
   return title
     .replace(/\s*\b(?:in|from|on)\s+#[\w-]+/gi, "")

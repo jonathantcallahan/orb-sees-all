@@ -1,6 +1,6 @@
-import { PLAN_RULES, STEP_RULE, WRITING_RULES } from "./baseLessons";
+import { ATLASSIAN_RULE, PLAN_RULES, STEP_RULE, WRITING_RULES } from "./baseLessons";
 import { z } from "zod";
-import { runCliStreaming, type StreamingCliRunner } from "./cli";
+import { runCliStreaming, type RunInput, type StreamingCliRunner } from "./cli";
 
 // Read-only connector tools. Nothing here can send, post, draft or edit.
 const SLACK = "mcp__claude_ai_Slack__";
@@ -8,6 +8,24 @@ const GMAIL = "mcp__claude_ai_Gmail__";
 const GCAL = "mcp__claude_ai_Google_Calendar__";
 const ZOOM = "mcp__claude_ai_Zoom_for_Claude__";
 const GRANOLA = "mcp__claude_ai_Granola__";
+/** Atlassian's Rovo connector: Jira and Confluence on the company's Atlassian cloud site. */
+const ATLASSIAN = "mcp__claude_ai_Atlassian_Rovo__";
+/** Every Jira and Confluence tool needs the site's cloud id: this finds it when no link gives it. */
+const ATLASSIAN_SITE = `${ATLASSIAN}getAccessibleAtlassianResources`;
+/** Confluence pages, reading only: a page, its comments and the pages under it, and CQL search. */
+const CONFLUENCE_READ = [
+  ATLASSIAN_SITE,
+  ...[
+    "getConfluencePage",
+    "searchConfluenceUsingCql",
+    "getConfluenceSpaces",
+    "getPagesInConfluenceSpace",
+    "getConfluencePageDescendants",
+    "getConfluencePageFooterComments",
+    "getConfluencePageInlineComments",
+    "getConfluenceCommentChildren",
+  ].map((t) => `${ATLASSIAN}${t}`),
+];
 /**
  * Amplitude's tools, under both names they can have: the claude.ai connector's, and an Amplitude
  * server added to Claude Code itself ("Amplitude"). With both set up, Claude Code keeps only the one
@@ -49,8 +67,16 @@ export const TOOLS = {
     "mcp__claude_ai_Claude_Docs__read",
     "mcp__claude_ai_Claude_Docs__query",
     "mcp__claude_ai_Claude_Docs__guide",
+    // Docs in Confluence too: TDDs, PRDs and specs often live there.
+    ...CONFLUENCE_READ,
   ],
-  jiraRead: ["mcp__mcp-jira__jira_search", "mcp__mcp-jira__jira_get_issue"],
+  /** Confluence on its own, reading only (driveRead includes it): for a refresh to find a page by title. */
+  confluenceRead: CONFLUENCE_READ,
+  /** Jira, reading only: JQL search, an issue and its links, projects and their issue types, and people's account ids. */
+  jiraRead: [
+    ATLASSIAN_SITE,
+    ...["searchJiraIssuesUsingJql", "getJiraIssue", "getJiraIssueRemoteIssueLinks", "getVisibleJiraProjects", "lookupJiraAccountId", "getJiraProjectIssueTypesMetadata"].map((t) => `${ATLASSIAN}${t}`),
+  ],
   /**
    * Amplitude product analytics, reading only: its context, taxonomy and saved charts, and ad-hoc
    * queries. Nothing that creates, changes or shares (events, properties, dashboards, flags, cohorts,
@@ -119,8 +145,21 @@ export const TOOLS = {
    * could send what the run has read.
    */
   webSearch: ["WebSearch"],
+  /**
+   * Making a change to Jira that Demian proposed in a project's plan, used only for one the user
+   * reviewed and clicked Apply or Create on: creating an epic or initiative, putting issues and epics
+   * in their parents, making a story-sized epic a story.
+   */
+  planApply: [
+    ATLASSIAN_SITE,
+    ...["createJiraIssue", "editJiraIssue", "getJiraIssue", "searchJiraIssuesUsingJql", "createIssueLink", "getIssueLinkTypes", "getJiraProjectIssueTypesMetadata"].map((t) => `${ATLASSIAN}${t}`),
+  ],
   /** Filing a Jira ticket, used only for one the user reviewed and clicked Create on: create it, put it in its epic, link it. */
-  ticketCreate: ["mcp__mcp-jira__jira_create_issue", "mcp__mcp-jira__jira_link_to_epic", "mcp__mcp-jira__jira_create_issue_link", "mcp__mcp-jira__jira_get_issue", "mcp__mcp-jira__jira_search"],
+  ticketCreate: [
+    ATLASSIAN_SITE,
+    // editJiraIssue only to put the new ticket in its epic when creating it with one didn't take.
+    ...["createJiraIssue", "editJiraIssue", "createIssueLink", "getIssueLinkTypes", "getJiraIssue", "searchJiraIssuesUsingJql"].map((t) => `${ATLASSIAN}${t}`),
+  ],
 };
 
 // User settings can route Claude Code through a gateway (ANTHROPIC_BASE_URL and
@@ -138,22 +177,27 @@ const RUN_SETTINGS = JSON.stringify({
   permissions: { blockReadsOutsideWorkingDirectories: true },
 });
 
+/**
+ * A chat's settings: the same login, but reads outside its folders aren't blocked. Like any other
+ * use of a tool it wasn't given, auto mode's check decides each one, or the chat asks you (see
+ * runSessionTurn).
+ */
+const CHAT_RUN_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" } });
+
 // Belt and braces: built-in tools that could touch the machine, or send what a run has read to an
-// address of its choosing (WebFetch), are denied outright. So is U-Know, a company knowledge-base
-// connector, which runs no longer use.
-const DISALLOWED = [
-  "Bash",
-  "Edit",
-  "Write",
-  "NotebookEdit",
-  "WebFetch",
-  "Agent",
+// address of its choosing (WebFetch), are denied outright in background runs. Chats may use them
+// (see chatDeniedTools), each use checked by auto mode or asked in the chat.
+const BUILT_INS_DENIED = ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "Agent"];
+
+// Denied in every run, chats too: U-Know, a company knowledge-base connector, which runs no longer
+// use, and Rovo's own search, which spends the organization's Rovo credits on every call (up to ten)
+// and fails once they run out; JQL and CQL searches find the same issues and pages for nothing.
+const CONNECTORS_DENIED = [
   ...["ask_uknow", "ask_uknow_session", "list_knowledge_bases"].map((t) => `mcp__claude_ai_U-Know__${t}`),
-  // The Atlassian (Rovo) connector reaches Jira Cloud, where the team's issues aren't yet: it would
-  // answer with empty or stale results that read like real ones. Jira comes from mcp-jira only.
-  "mcp__claude_ai_Atlassian",
-  "mcp__claude_ai_Atlassian_Rovo",
+  `${ATLASSIAN}search`,
 ];
+
+const DISALLOWED = [...BUILT_INS_DENIED, ...CONNECTORS_DENIED];
 
 /**
  * Every connector tool that posts, drafts, sends or changes something. Each run is denied all of them
@@ -206,6 +250,20 @@ export const WRITE_TOOLS = [
     "apply_sensitive_thread_label",
   ].map((t) => `${GMAIL}${t}`),
   ...["create_event", "update_event", "delete_event", "respond_to_event"].map((t) => `${GCAL}${t}`),
+  // Jira and Confluence: creating, changing, moving or commenting on issues and pages.
+  ...[
+    "createJiraIssue",
+    "editJiraIssue",
+    "transitionJiraIssue",
+    "addCommentToJiraIssue",
+    "addWorklogToJiraIssue",
+    "createIssueLink",
+    "createConfluencePage",
+    "updateConfluencePage",
+    "createConfluenceFooterComment",
+    "createConfluenceInlineComment",
+  ].map((t) => `${ATLASSIAN}${t}`),
+  // The self-hosted Jira's MCP server that came before the Rovo connector, for anyone who still has it.
   ...[
     "jira_create_issue",
     "jira_batch_create_issues",
@@ -291,11 +349,78 @@ export function deniedTools(granted: string[]): string[] {
 }
 
 /**
- * Every run asks for nothing: a tool it wasn't given is refused outright, never offered for approval
- * (there's no one to approve it in a background run). Pinned here so the user's own default mode
- * (bypassPermissions, say) never applies to the app's runs.
+ * What a chat is denied: U-Know, Rovo's credit-spending search, and every write tool it wasn't given, so
+ * a message still goes out only through the hand-off you approve. Claude Code's own tools (Bash,
+ * Edit, Write, WebFetch, subagents) aren't denied: auto mode's check, or an ask in the chat, decides
+ * each use.
+ */
+export function chatDeniedTools(granted: string[]): string[] {
+  const given = new Set(granted);
+  return [...CONNECTORS_DENIED, ...[...TOOLS.webSearch, ...WRITE_TOOLS].filter((t) => !given.has(t))];
+}
+
+/**
+ * A background run asks for nothing: a tool it wasn't given is refused outright, never offered for
+ * approval (there's no one to approve it). Pinned here, like CHAT_PERMISSION_MODE, so the user's own
+ * default mode (bypassPermissions, say) never applies to the app's runs.
  */
 export const PERMISSION_MODE = "dontAsk";
+
+/**
+ * A chat runs in auto mode: a tool it wasn't given goes to Claude Code's safety check, which lets it
+ * run or refuses it. Where auto mode isn't available, Claude Code falls back to its default mode by
+ * itself, and asks instead; so does auto mode, now and then. Each ask comes to the chat (see
+ * runSessionTurn's onAsk). The tools a chat is denied (chatDeniedTools) stay denied in every mode.
+ */
+export const CHAT_PERMISSION_MODE = "auto";
+
+/** Asking before every tool a chat wasn't given, rather than auto mode's check (the chat_auto_mode setting, "off"). */
+export const ASK_PERMISSION_MODE = "default";
+
+/** Something a chat turn asks the user before Claude Code uses a tool (see runSessionTurn's onAsk). */
+export interface ChatAsk {
+  id: string;
+  tool: string;
+  input: Record<string, unknown>;
+  /** Claude Code's words for the call: Claude's description of a command, or a connector's. */
+  description?: string;
+  /** A connector's own name and title for the call, when it gives them. */
+  displayName?: string;
+  title?: string;
+  /** The allow rules "Always" adds for the rest of the chat, as Claude Code writes them ("Bash(git status:*)"); none means it can't be always allowed. */
+  rules: string[];
+}
+
+/** Allow this once, allow it for the rest of the chat (the ask's rules), or refuse it. */
+export type AskAnswer = "allow" | "always" | "deny";
+
+interface Suggestion {
+  type?: string;
+  behavior?: string;
+  rules?: { toolName?: string; ruleContent?: string }[];
+  destination?: string;
+}
+
+/**
+ * The allow rules among Claude Code's suggestions for an ask, kept to this run (the CLI suggests
+ * saving some to the folder's settings file, which would outlast the chat): what "Always" applies
+ * now, while Demian keeps their rule strings with the chat for its later turns (see allowRules).
+ */
+export function allowSuggestions(suggestions: unknown): { apply: Suggestion[]; rules: string[] } {
+  const list = Array.isArray(suggestions) ? (suggestions as Suggestion[]) : [];
+  const apply = list.filter((s) => s?.type === "addRules" && s.behavior === "allow" && s.rules?.length).map((s) => ({ ...s, destination: "session" }));
+  const rules = apply.flatMap((s) => s.rules ?? []).filter((r) => r.toolName).map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName!));
+  return { apply, rules: [...new Set(rules)] };
+}
+
+/** What Demian writes back to Claude Code for an ask (a stream-json control_response line). */
+export function askResponse(requestId: string, input: unknown, answer: AskAnswer, apply: Suggestion[]): string {
+  const response =
+    answer === "deny"
+      ? { behavior: "deny", message: "Declined in the chat." }
+      : { behavior: "allow", updatedInput: input, ...(answer === "always" && apply.length ? { updatedPermissions: apply } : {}) };
+  return `${JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response } })}\n`;
+}
 
 /**
  * How long a run may go before it's stopped, with everything it started (see runs.rs): ten minutes
@@ -339,6 +464,12 @@ export interface ClaudeOptions<T> {
   maxTurns?: number;
   /** Called with a plain-language description of each step Claude takes. */
   onStatus?: (status: string) => void;
+  /**
+   * What's still wrong with a reply that matches the schema, or null when nothing is: asked about once
+   * more in the same session. The reply that comes back is kept, whatever this says of it; when it
+   * doesn't parse, the first reply is.
+   */
+  recheck?(data: T): string | null;
 }
 
 const quoted = (text: string, max = 40) => {
@@ -409,10 +540,29 @@ export function describeTool(name: string, input: Record<string, unknown>): stri
     case "read_file_content":
     case "get_file_metadata":
       return "Reading a doc";
-    case "jira_search":
+    case "searchJiraIssuesUsingJql":
       return str("jql") ? `Searching Jira for ${quoted(str("jql"))}` : "Searching Jira";
-    case "jira_get_issue":
-      return str("issue_key") ? `Reading ${str("issue_key")}` : "Reading a Jira issue";
+    case "getJiraIssue":
+      return str("issueIdOrKey") ? `Reading ${str("issueIdOrKey")}` : "Reading a Jira issue";
+    case "getJiraIssueRemoteIssueLinks":
+      return str("issueIdOrKey") ? `Reading the links on ${str("issueIdOrKey")}` : "Reading a Jira issue's links";
+    case "getVisibleJiraProjects":
+      return "Listing Jira projects";
+    case "lookupJiraAccountId":
+      return "Looking someone up in Jira";
+    case "getAccessibleAtlassianResources":
+      return "Finding your Atlassian site";
+    case "getConfluencePage":
+    case "getConfluencePageDescendants":
+    case "getConfluencePageFooterComments":
+    case "getConfluencePageInlineComments":
+    case "getConfluenceCommentChildren":
+      return "Reading a Confluence page";
+    case "searchConfluenceUsingCql":
+      return str("cql") ? `Searching Confluence for ${quoted(str("cql"))}` : "Searching Confluence";
+    case "getConfluenceSpaces":
+    case "getPagesInConfluenceSpace":
+      return "Looking through Confluence";
     case "Read":
       return str("file_path") ? `Reading ${str("file_path").split("/").pop()}` : "Reading the code";
     case "Grep":
@@ -538,21 +688,32 @@ export async function runClaude<T>(opts: ClaudeOptions<T>, run: StreamingCliRunn
   let session: string | undefined;
   let costUsd = 0;
   let durationMs = 0;
+  // A first reply that parsed but was asked about again (see recheck), kept in case the next doesn't parse.
+  let first: T | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const envelope = await callOnce(prompt, opts as ClaudeOptions<unknown>, run, session);
     costUsd += envelope.total_cost_usd ?? 0;
     durationMs += envelope.duration_ms ?? 0;
     let problem: string;
+    let rejected = "Your reply was rejected";
     try {
       const parsed = opts.schema.safeParse(extractJson(envelope.result));
-      if (parsed.success) return { data: parsed.data, costUsd, durationMs };
-      problem = z.prettifyError(parsed.error);
+      const recheck = parsed.success && attempt === 0 ? (opts.recheck?.(parsed.data) ?? null) : null;
+      if (parsed.success && !recheck) return { data: parsed.data, costUsd, durationMs };
+      if (parsed.success) {
+        first = parsed.data;
+        rejected = "Your reply needs one more fix";
+        problem = recheck!;
+      } else problem = z.prettifyError(parsed.error);
     } catch (e) {
       problem = (e as Error).message;
     }
-    if (attempt === 1) throw new Error(`Claude's reply didn't match the schema: ${problem}`);
+    if (attempt === 1) {
+      if (first !== undefined) return { data: first, costUsd, durationMs };
+      throw new Error(`Claude's reply didn't match the schema: ${problem}`);
+    }
     session = envelope.session_id;
-    prompt = `Your reply was rejected:\n${problem}\n\nReply again with ONLY the corrected JSON object.`;
+    prompt = `${rejected}:\n${problem}\n\nReply again with ONLY the corrected JSON object, all of it.`;
     if (!session) prompt = `${opts.prompt}\n\n${prompt}\n\nPrevious reply:\n${envelope.result}`;
   }
   throw new Error("unreachable");
@@ -586,12 +747,13 @@ export const SESSION_DISPLAY = [
   "You can read only the folders this session was given: you can't add one (no /add-dir here), and don't suggest changing settings to get at others. When you need code you weren't given, write `[orb] code <owner/name on GitHub, the repo's name, or the checkout's folder>` on its own line, say in a sentence what you're getting, and stop. Orb adds it if it's a code checkout on this computer or a GitHub repo it can copy, then tells you to carry on.",
   "To find a conversation with someone in Slack, look up their user id first (slack_search_users), then search with `with:<@USERID>` (a name there doesn't match) and include DMs and group DMs (channel_types \"public_channel,private_channel,mpim,im\"). Try a few searches (by person, by channel, by a distinctive word) before saying you can't find something, and say what you searched.",
   "You can read my Google Calendar (list, search and open events, and find free time with suggest_time), so use it whenever a step depends on my schedule or a meeting; don't say you lack calendar access. You can't create, change or answer events yourself, but Orb can: when I want a meeting scheduled, find a time that works for everyone: get each attendee's email address (slack_search_users, then slack_read_user_profile, or from my email), then call suggest_time with all of them, me included, over the next few working days in working hours (or the window I asked for), and take the earliest slot it gives that's free for every one of them. Never guess a time or pick one from my calendar alone. Then hand the invite to Orb as a block: a line `[orb] event step N: <the event's title>` (or `[orb] event: <title>` when it isn't a plan step), then lines `when: <date, start and end time, e.g. 2026-11-04 14:00-14:30>`, `who: <attendees' email addresses, comma separated>` (look them up in Slack or my email if you need to; leave the line out for a hold on my own calendar), `meet: yes` for a video call, then a blank line and the description, then `[orb] end`. Tell me in a line that the time is free for everyone, or who you couldn't check. Then, if it's a plan step, write `[orb] step N waiting: review and create the invite`, and stop. Orb shows it to me to review, creates it and sends the invites, then tells you its link.",
-  "You can't create Jira tickets yourself (its write tools are turned off here), but Orb can: whenever I ask for a ticket, never say you can't file it or that it's my step. Hand it to Orb as a block: a line `[orb] ticket step N: <the ticket's summary>` (or `[orb] ticket: <summary>` when it isn't a plan step), then lines `project: <project key, e.g. ABC>`, `type: <Task, Bug, Story…>`, and when they apply `epic: <epic key>`, `component: <name>`, `priority: <name>`, `labels: <comma separated>`, `links: <KEY (relates to)>, …`, then a blank line and the description (may be empty), then `[orb] end`. Match the project's other tickets (look at a few in the same epic). If I've never filed a ticket in that project (jira_search `project = KEY AND reporter = currentUser()` finds none), say so in a line when you hand it over: I may not be able to create tickets there, and someone on that team could file it instead. Then, if it's a plan step, write `[orb] step N waiting: review and create the ticket`, and stop. Orb shows it to me to review, files it in Jira as me, then tells you its link. Filing it is your step, not mine.",
+  "You can't create Jira tickets yourself (its write tools are turned off here), but Orb can: whenever I ask for a ticket, never say you can't file it or that it's my step. Hand it to Orb as a block: a line `[orb] ticket step N: <the ticket's summary>` (or `[orb] ticket: <summary>` when it isn't a plan step), then lines `project: <project key, e.g. ABC>`, `type: <Task, Bug, Story…>`, and when they apply `epic: <epic key>`, `component: <name>`, `priority: <name>`, `labels: <comma separated>`, `links: <KEY (relates to)>, …`, then a blank line and the description (may be empty), then `[orb] end`. Match the project's other tickets (look at a few in the same epic). If I've never filed a ticket in that project (searchJiraIssuesUsingJql `project = KEY AND reporter = currentUser()` finds none), say so in a line when you hand it over: I may not be able to create tickets there, and someone on that team could file it instead. Then, if it's a plan step, write `[orb] step N waiting: review and create the ticket`, and stop. Orb shows it to me to review, files it in Jira as me, then tells you its link. Filing it is your step, not mine.",
   "You can't create Google Docs yourself either: Drive's write tools are turned off here, so whenever I ask for a doc (\"make this a Google doc\", \"put the plan in a doc\"), never try a Drive tool or tell me it needs a permission; hand it to Orb. When a doc is ready (a brief, a summary, a spec), hand it to Orb as a block: a line `[orb] doc step N: <the doc's title>` (or `[orb] doc: <title>` when it isn't a plan step), then the doc's content in Markdown (headings, lists and tables are fine there), then a line `[orb] end`. Then, if it's a plan step, write `[orb] step N waiting: review and create the doc`, and stop. Orb shows it to me to review and creates it in my Google Drive, then tells you its link.",
+  ATLASSIAN_RULE,
   "Think things through before you agree with something or draft a reply on it. Test what you're told (by a colleague, a doc or a search result) against what you know of the task: the numbers involved, who asked and why, what's been done before. Search Slack and Jira for precedent, and when a claim doesn't fit (a limit far below what's needed, a process that doesn't explain why the person reached out), say so and dig before writing anything. Don't hand me a draft that just restates an answer you haven't checked.",
   "You can read and analyze my Amplitude experiments and feature flags (use_amp_experiments, use_amp_flags). The same tools can also create, change, start or roll out an experiment or flag, which changes what real users see: only do that when I've asked for that exact change in this chat, and tell me what you'll change, in which project, before you do it.",
   `How to get plans and messages right (my own lessons, given with each turn, win where they differ): ${[...PLAN_RULES, ...WRITING_RULES].join(" ")}`,
-  "Find answers yourself before asking anyone. Search the code you can read (Read, Grep, Glob over the folders you're given), Jira, Slack, my email, Drive, Zoom meeting summaries and product analytics in Amplitude, and keep at it across sources before concluding something isn't written down. U-Know is off-limits here, even though its instructions may be loaded: don't try it or plan around it. Never draft a question to a colleague, or add one to a message, for something those sources can answer (whether tests cover a flow, how code behaves, a status, a decision, an owner, a link). Ask a person only for their decision, their opinion, or what only they know or haven't done yet, and then say in the message what you already checked. If you find you can't reach a source (a folder, a tool), tell me plainly which and why rather than routing the question to a person.",
+  "Find answers yourself before asking anyone. Search the code you can read (Read, Grep, Glob over the folders you're given), Jira, Confluence, Slack, my email, Drive, Zoom meeting summaries and product analytics in Amplitude, and keep at it across sources before concluding something isn't written down. U-Know is off-limits here, even though its instructions may be loaded: don't try it or plan around it. Never draft a question to a colleague, or add one to a message, for something those sources can answer (whether tests cover a flow, how code behaves, a status, a decision, an owner, a link). Ask a person only for their decision, their opinion, or what only they know or haven't done yet, and then say in the message what you already checked. A connector can still be connecting when a turn starts: if a tool isn't there yet (ToolSearch finds nothing, or it says a server is still connecting), wait a moment and look for it again, once or twice, before deciding you can't reach it. If you find you can't reach a source (a folder, a tool), tell me plainly which and why rather than routing the question to a person.",
   "Orb also shows the plan's steps with their progress, so keep that list true to what's actually happening.",
   "When something in our conversation finishes a step, even out of order or one of mine, report it done straight away. When a step is no longer needed, write `[orb] step N skipped: <why>` on its own line.",
   "When a step can't move until someone else acts (an answer, an approval, a fix from another team), write `[orb] step N blocked: <who or what, in a few words>`. That's different from waiting, which is for things I need to do. Report the step started or done again once it moves.",
@@ -617,52 +779,109 @@ export async function runSessionTurn(
     onText?: (text: string) => void;
     /** Stops the turn when aborted (Stop in the chat); the turn then rejects with "Stopped". */
     signal?: AbortSignal;
+    /** "default" to ask before every tool the chat wasn't given, rather than auto mode's check. */
+    permissionMode?: typeof CHAT_PERMISSION_MODE | typeof ASK_PERMISSION_MODE;
+    /** Rules the user chose "Always" for earlier in this chat, allowed again this turn. */
+    allowRules?: string[];
+    /** Asks the user about a tool Claude Code wants to use; without it, every ask is refused. */
+    onAsk?: (ask: ChatAsk) => Promise<AskAnswer>;
+    /** Claude Code no longer needs the answer to an ask (the turn moved on, or was interrupted). */
+    onAskGone?: (id: string) => void;
+    /** The permission mode the turn actually runs in: auto, or default where auto isn't available. */
+    onMode?: (mode: string) => void;
   },
   run: StreamingCliRunner = runCliStreaming,
 ): Promise<SessionTurn> {
   const code = codeArgs(opts.dirs);
   const tools = [...opts.tools, ...code.tools];
+  const allowed = [...new Set([...tools, ...(opts.allowRules ?? [])])];
   const args = [
     ...code.args,
     ...(opts.resume ? ["--resume", opts.resume] : []),
-    // The prompt (the user's message) goes on stdin and the system prompt in a file; see CliInput.
+    // The prompt (the user's message) goes on stdin as a stream-json message, and stays open for
+    // the answers to Claude Code's asks; the system prompt goes in a file. See CliInput.
     "-p",
+    "--input-format",
+    "stream-json",
     "--output-format",
     "stream-json",
     "--verbose",
     "--settings",
-    RUN_SETTINGS,
+    CHAT_RUN_SETTINGS,
     "--permission-mode",
-    PERMISSION_MODE,
+    opts.permissionMode ?? CHAT_PERMISSION_MODE,
+    // Permission asks come to Demian as control requests on stdout, answered on stdin.
+    "--permission-prompt-tool",
+    "stdio",
     "--model",
     opts.model ?? "opus",
     ...(opts.effort ? ["--effort", opts.effort] : []),
     "--max-turns",
     String(opts.maxTurns ?? 80),
-    ...(tools.length ? ["--allowedTools", ...tools] : []),
+    ...(allowed.length ? ["--allowedTools", ...allowed] : []),
     "--disallowedTools",
-    ...deniedTools(tools),
+    ...chatDeniedTools(tools),
     // Text arrives as it's written, so the chat can show the reply forming.
     ...(opts.onText ? ["--include-partial-messages"] : []),
   ];
   const { onStatus, onText } = opts;
   let text = "";
+  let io: RunInput | null = null;
+  // Asks not yet answered: while any is, the run waits on the user and isn't stopped for going quiet.
+  let waitingOn = 0;
+  const answerAsk = async (requestId: string, request: Record<string, unknown>) => {
+    const input = (request.input ?? {}) as Record<string, unknown>;
+    const { apply, rules } = allowSuggestions(request.permission_suggestions);
+    const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    waitingOn++;
+    if (waitingOn === 1) await io?.waiting(true).catch(() => {});
+    const answer: AskAnswer = opts.onAsk
+      ? await opts
+          .onAsk({ id: requestId, tool: String(request.tool_name ?? ""), input, description: str(request.description), displayName: str(request.display_name), title: str(request.title), rules })
+          .catch((): AskAnswer => "deny")
+      : "deny";
+    waitingOn--;
+    if (waitingOn === 0) await io?.waiting(false).catch(() => {});
+    await io?.write(askResponse(requestId, input, answer, apply)).catch(() => {});
+  };
   const system = [SESSION_DISPLAY, notesPrompt(), opts.context].filter(Boolean).join("\n\n");
-  const out = await run("claude", args, (line) => {
-    if (onStatus) reportLine(line, onStatus);
-    if (!onText) return;
-    try {
-      const event = JSON.parse(line).event;
+  const first = `${JSON.stringify({ type: "user", message: { role: "user", content: opts.prompt } })}\n`;
+  const out = await run(
+    "claude",
+    args,
+    (line) => {
+      let parsed: { type?: string; subtype?: string; request_id?: string; request?: Record<string, unknown>; permissionMode?: unknown; event?: any };
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (parsed.type === "control_request" && parsed.request_id) {
+        if (parsed.request?.subtype === "can_use_tool") void answerAsk(parsed.request_id, parsed.request);
+        // Nothing else is asked of Demian; say so rather than leave Claude Code waiting.
+        else void io?.write(`${JSON.stringify({ type: "control_response", response: { subtype: "error", request_id: parsed.request_id, error: "Not supported here" } })}\n`).catch(() => {});
+        return;
+      }
+      if (parsed.type === "control_cancel_request" && parsed.request_id) {
+        opts.onAskGone?.(parsed.request_id);
+        return;
+      }
+      if (parsed.type === "system" && (parsed.subtype === "init" || parsed.subtype === "status") && typeof parsed.permissionMode === "string") opts.onMode?.(parsed.permissionMode);
+      // One message in, one result out: closing stdin lets Claude Code finish.
+      if (parsed.type === "result") void io?.close().catch(() => {});
+      if (onStatus) reportLine(line, onStatus);
+      if (!onText) return;
+      const event = parsed.event;
       // Each of Claude's messages this turn starts a new paragraph; text deltas grow it.
       if (event?.type === "message_start" && text) text += "\n\n";
       else if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
         text += event.delta.text;
         onText(text);
       }
-    } catch {
-      // Not a JSON line.
-    }
-  }, { stdin: opts.prompt, appendSystemPrompt: system }, { limits: SESSION_LIMITS, signal: opts.signal, cwd: opts.cwd });
+    },
+    { stdin: first, appendSystemPrompt: system, keepStdinOpen: true },
+    { limits: SESSION_LIMITS, signal: opts.signal, cwd: opts.cwd, onInput: (input) => (io = input) },
+  );
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
   return {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeChannels, newRelatedChannels, planDiscovery, type ProjectChannel } from "./projects";
+import { activeChannels, newRelatedChannels, planDiscovery, projectPriority, roleParts, type ProjectChannel } from "./projects";
 import { discoveryPrompt, projectPrompt } from "./prompts";
 
 const link = (channel_id: string, project_id: string, name: string, role: ProjectChannel["role"] = "primary", origin: ProjectChannel["origin"] = "discovered"): ProjectChannel => ({
@@ -11,6 +11,12 @@ const link = (channel_id: string, project_id: string, name: string, role: Projec
   reason: null,
 });
 
+/** Predictable new ids, in order. */
+const ids = () => {
+  let n = 0;
+  return () => String(++n).padStart(12, "0");
+};
+
 describe("planDiscovery", () => {
   it("tracks new #tmp- projects and suggests others", () => {
     const plan = planDiscovery(
@@ -20,18 +26,21 @@ describe("planDiscovery", () => {
       ],
       [],
       new Set(),
+      [],
+      ids(),
     );
+    // Each gets an id of Demian's own, not its channel's.
     expect(plan.newProjects).toEqual([
-      { id: "C1", name: "tmp-refunds", tracked: true, reason: "Refund flow" },
-      { id: "C2", name: "search-v2", tracked: false, reason: "Search rewrite" },
+      { id: "p:000000000001", name: "Refunds", tracked: true, reason: "Refund flow" },
+      { id: "p:000000000002", name: "Search v2", tracked: false, reason: "Search rewrite" },
     ]);
     expect(plan.links.map((l) => [l.channel_id, l.project_id, l.role])).toEqual([
-      ["C1", "C1", "primary"],
-      ["C2", "C2", "primary"],
+      ["C1", "p:000000000001", "primary"],
+      ["C2", "p:000000000002", "primary"],
     ]);
   });
 
-  it("keys a multi-channel project by its #tmp- channel and links the rest", () => {
+  it("makes a multi-channel project's #tmp- channel its main one and links the rest", () => {
     const plan = planDiscovery(
       [
         {
@@ -46,8 +55,10 @@ describe("planDiscovery", () => {
       ],
       [],
       new Set(),
+      [],
+      ids(),
     );
-    expect(plan.newProjects.map((p) => p.id)).toEqual(["C1"]);
+    expect(plan.newProjects.map((p) => p.id)).toEqual(["p:000000000001"]);
     expect(plan.links.map((l) => [l.channel_id, l.role])).toEqual([
       ["C1", "primary"],
       ["C9", "related"],
@@ -114,7 +125,6 @@ describe("project prompts", () => {
       previous: null,
       profile: { goal: "Ship refunds", context: [], aliases: ["RFD"], people: [], resources: [], milestones: [], decisions: [] },
       lastRefreshedAt: null,
-      repoState: null,
       now: new Date(2026, 9, 30),
     });
     expect(text).toContain("#tmp-refunds (C1), #refunds-eng (C2)");
@@ -182,5 +192,33 @@ describe("send targets", () => {
     const named = sendToChannelPrompt("Ana Lee, @U0456EFGH", "Hi");
     expect(named).toContain('slack_search_users for "Ana Lee"');
     expect(named).toContain("and the ones you found");
+  });
+});
+
+describe("a project's priority", () => {
+  const snapshot = { priority: { level: "P2", reason: "Planned work" } } as never;
+
+  it("is the one you set, else the refresh's, else none", () => {
+    expect(projectPriority({ snapshot, priority_choice: null })).toEqual({ level: "P2", reason: "Planned work", byYou: false });
+    expect(projectPriority({ snapshot, priority_choice: { level: "P0", at: "2026-11-19T00:00:00Z" } })).toEqual({ level: "P0", reason: null, byYou: true });
+    expect(projectPriority({ snapshot: null, priority_choice: null })).toBeNull();
+  });
+
+  it("is passed to the refresh when you set it", () => {
+    const ask = (prioritySetByUser: string | null) =>
+      projectPrompt({ channels: [{ channel_id: "C1", name: "tmp-refunds" }], userId: "U1", previous: null, profile: null, lastRefreshedAt: null, now: new Date(2026, 9, 30), prioritySetByUser });
+    expect(ask("P0")).toContain('The user set it to "P0": return that');
+    expect(ask(null)).not.toContain("The user set it to");
+  });
+});
+
+describe("a person's role", () => {
+  it("is their title, with anything said after it apart", () => {
+    expect(roleParts("eng, 6 issues in PAY-123")).toEqual({ title: "eng", detail: "6 issues in PAY-123" });
+    expect(roleParts("PM (payments)")).toEqual({ title: "PM", detail: "payments" });
+    expect(roleParts("Engineer - backend")).toEqual({ title: "Engineer", detail: "backend" });
+    expect(roleParts("Eng lead")).toEqual({ title: "Eng lead", detail: null });
+    expect(roleParts("Co-owner")).toEqual({ title: "Co-owner", detail: null });
+    expect(roleParts("")).toEqual({ title: "", detail: null });
   });
 });

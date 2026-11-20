@@ -27,6 +27,16 @@ export interface SessionLink {
   /** Keys of handed-off messages Orb has already sent (see PendingSend). */
   sentKeys?: string[];
   /**
+   * The Demian chat: which version of the changes it can propose its opening prompt carried (see
+   * actionDocsVersion). While it differs from the current one, the chat is given the current list.
+   */
+  openedDocs?: string;
+  /**
+   * What the planner last told the chat each turn, by part (see TurnPart): a hash of each part's
+   * text, so a resumed turn is told only what has changed since.
+   */
+  sent?: Record<string, string>;
+  /**
    * What Orb sent or created for the session (a message, a doc, an event), with its link and the
    * step it finished when there was one, shown as chips beside that step.
    */
@@ -47,6 +57,11 @@ export interface SessionLink {
   notes?: string;
   /** Preferences the session handed over ("[orb] remember …") that are already saved as lessons. */
   remembered?: string[];
+  /**
+   * Rules the user answered "Always" for in this chat ("Bash(git status:*)"): Claude Code may do what
+   * they cover without asking again, for every later turn of the chat.
+   */
+  allowRules?: string[];
   /** The plan as last recorded as a correction, so each revision in the chat is logged once. */
   loggedPlan?: string[];
   /**
@@ -162,6 +177,45 @@ export interface ChatMessage {
  * paragraph in parentheses starting "(From Orb:". They're for Claude, so the chat leaves them out.
  */
 export const ORB_NOTE = "(From Orb:";
+
+/**
+ * A part of what the planner tells a chat with each turn: what it shows now (projects and tasks,
+ * or the task's changes and steps), standing notes, lessons, code, the changes it can propose.
+ */
+export interface TurnPart {
+  key: string;
+  text: string;
+}
+
+/** A short hash of a text, to tell whether it changed. */
+export function textHash(text: string): string {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
+  return `${text.length.toString(36)}.${(h >>> 0).toString(36)}`;
+}
+
+/** The parts a chat hasn't been told as they are now (all of them when it never noted any). */
+export function changedParts(parts: TurnPart[], sent: Record<string, string> | undefined): TurnPart[] {
+  return parts.filter((p) => p.text && sent?.[p.key] !== textHash(p.text));
+}
+
+/** What to note as told, once a turn has gone through with these parts. */
+export function sentHashes(parts: TurnPart[]): Record<string, string> {
+  return Object.fromEntries(parts.filter((p) => p.text).map((p) => [p.key, textHash(p.text)]));
+}
+
+/**
+ * Parts a resumed chat hasn't been told, as a note under the user's message: Claude Code keeps the
+ * system prompt a session began with and ignores a new one when it's resumed, so after the first
+ * turn this is the only way they reach it. The chat doesn't show the note (see withoutOrbNotes).
+ */
+export function turnNote(parts: TurnPart[]): string {
+  if (!parts.length) return "";
+  return [
+    `${ORB_NOTE} here's what my planner shows as of this message. Where it differs from your system prompt or an earlier note like this, go by this one; it's the current state, even if you said otherwise before.)`,
+    ...parts.map((p) => p.text),
+  ].join("\n\n");
+}
 export function withoutOrbNotes(text: string): string {
   // A message that's only a note from Orb (one Orb sent itself) isn't shown at all.
   if (text.trimStart().startsWith(ORB_NOTE)) return "";

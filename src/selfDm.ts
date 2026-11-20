@@ -5,8 +5,12 @@ import { localDate } from "./scheduler";
  * Instructions from the user's own Slack DM. They use it as a scratchpad, so only a message they
  * tagged #demian is for Demian; it checks the DM every few minutes and reads only what's new since
  * the last check. A tagged message can ask for anything the global chat can do (see GlobalAction).
+ * Once the workspace has a channel named #demian, Slack turns the typed tag into a link to it
+ * (`<#C0123ABCD|demian>`), so that counts as the tag too.
  */
-export const SELF_DM_TAG = /#demian\b/i;
+export const SELF_DM_TAG = /#demian\b|<#[A-Z0-9]+\|demian>/i;
+/** The tag as a channel link, written back as #demian so the message reads as typed, not as a pointer to that channel. */
+const TAG_LINK = /<#[A-Z0-9]+\|demian>/gi;
 
 /** How often to check, in seconds, or off. */
 export type SelfDmEvery = "300" | "off";
@@ -33,12 +37,32 @@ export interface SelfDmState {
   usd: number;
   /** Checks in a row that read #demian messages but couldn't work out what they ask (see SELF_DM_TRIES). */
   tries: number;
+  /** Checks in a row that couldn't read the DM at all (see SELF_DM_MISSES). */
+  misses: number;
+}
+
+/**
+ * Checks in a row that can't read the DM before it counts as failing: a Slack connector still
+ * connecting, or a laptop just back on the network, sorts itself out by the next check.
+ */
+export const SELF_DM_MISSES = 3;
+
+/**
+ * After a check that couldn't read the DM: the state to save (it reads from the same place next
+ * time), and the error to log, if any. A miss is logged only once the reads have failed
+ * SELF_DM_MISSES times in a row, and then once per error, not every check; until then Settings
+ * doesn't call the check failed either.
+ */
+export function afterMissedRead(state: SelfDmState, error: string): { state: SelfDmState; log: string | null } {
+  const misses = state.misses + 1;
+  if (misses < SELF_DM_MISSES) return { state: { ...state, misses }, log: null };
+  return { state: { ...state, misses, lastError: error }, log: misses === SELF_DM_MISSES || error !== state.lastError ? error : null };
 }
 
 /** After this many failed tries at the same messages, they're skipped, so one Demian can't read isn't retried forever. */
 export const SELF_DM_TRIES = 3;
 
-export const emptySelfDmState = (): SelfDmState => ({ cursor: null, seen: [], lastError: null, day: null, runs: 0, usd: 0, tries: 0 });
+export const emptySelfDmState = (): SelfDmState => ({ cursor: null, seen: [], lastError: null, day: null, runs: 0, usd: 0, tries: 0, misses: 0 });
 
 export function parseSelfDmState(raw: string | null): SelfDmState {
   try {
@@ -68,10 +92,12 @@ const tsValue = (ts: string | null | undefined, now: Date) => {
 export function takeFromPoll(state: SelfDmState, poll: SelfDmPoll, oldest: string, now: Date, costUsd = 0) {
   const from = Number(oldest);
   const seen = new Set(state.seen);
-  const messages = poll.messages.filter((m) => {
-    const v = tsValue(m.ts, now);
-    return v != null && v > from && !seen.has(m.ts) && SELF_DM_TAG.test(m.text) && m.text.replace(SELF_DM_TAG, "").trim() !== "";
-  });
+  const messages = poll.messages
+    .filter((m) => {
+      const v = tsValue(m.ts, now);
+      return v != null && v > from && !seen.has(m.ts) && SELF_DM_TAG.test(m.text) && m.text.replace(SELF_DM_TAG, "").trim() !== "";
+    })
+    .map((m) => ({ ...m, text: m.text.replace(TAG_LINK, "#demian") }));
   let cursor = tsValue(state.cursor, now) ?? null;
   for (const ts of [poll.latest_ts, ...messages.map((m) => m.ts)]) {
     const v = tsValue(ts, now);
@@ -89,6 +115,7 @@ export function takeFromPoll(state: SelfDmState, poll: SelfDmPoll, oldest: strin
     runs: (sameDay ? state.runs : 0) + 1,
     usd: (sameDay ? state.usd : 0) + costUsd,
     tries: 0,
+    misses: 0,
   };
   return { messages, state: next };
 }

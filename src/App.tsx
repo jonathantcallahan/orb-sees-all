@@ -1,10 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
-import { Kbd, RefreshButton, ScrambleText, Spinner } from "./components/common";
+import { Kbd, RefreshButton, ScrambleText, Spinner, updatedText } from "./components/common";
 import { DailyReading } from "./components/DailyReading";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
-import { SuggestedProjects } from "./components/SuggestedProjects";
 import { UpdateButton } from "./components/UpdateButton";
 import { NowPlayingBar } from "./components/NowPlaying";
 import { WindowButtons } from "./components/WindowButtons";
@@ -13,24 +12,30 @@ import { Onboarding } from "./components/Onboarding";
 import { GlobalChat } from "./components/GlobalChat";
 import { WhyPrompt } from "./components/WhyPrompt";
 import { isWindows, MOD } from "./platform";
-import { ProjectCard, ProjectDetail } from "./components/ProjectCard";
+import { ProjectCard, ProjectDetail, ProjectRefresh } from "./components/ProjectCard";
+import { KindBadge } from "./components/ProjectRequirements";
+import { ProjectChat } from "./components/ProjectChat";
+import { ProjectDue } from "./components/ProjectRecord";
 import { revealTask } from "./components/TaskCard";
 import { WatchedTopics } from "./components/WatchedTopics";
 import { needsYou } from "./watched";
 import { Inbox } from "./components/Inbox";
-import { ChatDockProvider } from "./components/chatDock";
+import { ChatDockProvider, InDock, type ChatDock } from "./components/chatDock";
+import { TddChat, tddChatProject } from "./components/TddChat";
+import { useAreasOn, type Area } from "./features";
+import { ensureProjectsUpgrade } from "./projectsUpgrade";
 import { useDetailTab, type DetailTab } from "./viewMode";
 import { Settings } from "./components/Settings";
 import { TaskColumn } from "./components/TaskColumn";
 import { TodayColumn } from "./components/TodayColumn";
-import { getNotes, getSetting, markInterruptedJobs, saveSeen, setSetting } from "./db";
+import { getNotes, getSetting, lastUpdated, markInterruptedJobs, saveSeen, setSetting } from "./db";
 import { seenAfter, toRecord, unreadIds, updateFacts } from "./unread";
 import { setStandingNotes } from "./claude";
 import { assessPendingTasks, checkWatchedTopics, maybeDistill, maybeRunMorning, pollSelfDm, refreshAdhoc, refreshAll, refreshCalendar, refreshReading, scanClaudeSessions } from "./jobs";
 import { localDate } from "./scheduler";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, stateOf, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
-import { projectStatus, projectName } from "./projects";
+import { projectKind, projectPriority, projectStatus, projectName } from "./projects";
 import { useTheme } from "./theme";
 import { useOrbLook } from "./orbLook";
 import { setUserProfile } from "./prompts";
@@ -122,7 +127,8 @@ export default function App() {
   /** Settings opened from the chat's View learnings, scrolled to them. */
   const [settingsLearnings, setSettingsLearnings] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // "first" on the first run, "replay" from the menu bar: only a first run sets which areas start on.
+  const [showOnboarding, setShowOnboarding] = useState<false | "first" | "replay">(false);
   /** Settings' Simulate onboarding: the same screens, with made-up results, changing nothing. */
   const [simulateOnboarding, setSimulateOnboarding] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -139,27 +145,57 @@ export default function App() {
   }, []);
   // The menu bar's hidden "Replay onboarding".
   useEffect(() => {
-    const unlisten = listen("tray-onboarding", () => setShowOnboarding(true));
+    const unlisten = listen("tray-onboarding", () => setShowOnboarding((cur) => cur || "replay"));
     return () => {
       unlisten.then((f) => f());
     };
   }, []);
   // First run: walk through setup until it's done. Anyone already using the app (it knows their
   // Slack user) counts as set up.
+  // Someone already set up who upgraded: Projects is turned off if Jira or GitHub is missing (once; see
+  // projectsUpgrade).
   useEffect(() => {
     Promise.all([getSetting("setup_done"), getSetting("slack_user_id")]).then(([done, user]) => {
-      if (done || user) setSetting("setup_done", "1").catch(() => {});
-      else setShowOnboarding(true);
+      if (done || user) {
+        setSetting("setup_done", "1").catch(() => {});
+        ensureProjectsUpgrade();
+      } else setShowOnboarding("first");
     }, () => {});
   }, []);
   // The open area, the project the Projects area shows, and the chat open in the Updates area.
-  const [tab, setTab] = useDetailTab();
+  const [chosenTab, setTab] = useDetailTab();
+  // Each area can be turned off in Settings (see features). One that's off isn't shown: the first
+  // area on shows instead, and the one picked comes back when it's on again. With one area on, there's
+  // no rail to pick from.
+  const areas = useAreasOn();
+  const tab: DetailTab = areas.includes(chosenTab) ? chosenTab : areas[0];
+  const withProjects = areas.includes("projects");
+  const watchedOn = areas.includes("watched");
   const [shownProject, setShownProject] = useState<string | null>(null);
   const [dockOwner, setDockOwner] = useState<string | null>(null);
+  // A TDD draft's chat, open in place of the Projects area's details until you close it or pick
+  // another project. Opening one selects its project.
+  const [projectChat, setProjectChat] = useState<string | null>(null);
+  // The shown project's own chat, under its details; it follows the project shown.
+  const [projectChatOpen, setProjectChatOpen] = useState(false);
   const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
   const dock = useMemo(
     () => ({ owner: dockOwner, target: dockTarget, open: setDockOwner, close: (owner: string) => setDockOwner((cur) => (cur === owner ? null : cur)) }),
     [dockOwner, dockTarget],
+  );
+  // The chat draws in the column itself, not into a target.
+  const projectDock = useMemo<ChatDock>(
+    () => ({
+      owner: projectChat,
+      target: null,
+      open: (owner: string) => {
+        setProjectChat(owner);
+        const id = tddChatProject(owner);
+        if (id) setShownProject(id);
+      },
+      close: (owner: string) => setProjectChat((cur) => (cur === owner ? null : cur)),
+    }),
+    [projectChat],
   );
   const [theme, setTheme] = useTheme();
   const [orbLook, setOrbLook] = useOrbLook();
@@ -177,7 +213,7 @@ export default function App() {
     () =>
       data
         ? updateFacts({
-            projects: data.projects.filter((p) => !p.hidden && p.state === "tracked"),
+            projects: withProjects ? data.projects.filter((p) => !p.hidden && p.state === "tracked") : [],
             adhoc: data.adhoc.tasks,
             manual: data.manual,
             watched: data.watched,
@@ -187,7 +223,7 @@ export default function App() {
             taskStates: data.taskStates,
           })
         : null,
-    [data],
+    [data, withProjects],
   );
   const unread = useMemo(() => (data && facts ? unreadIds(facts.facts, facts.mine, data.seen, data.unreadStarted) : new Set<string>()), [data, facts]);
   // What you have when dots begin starts read; so does each task of your own when it first appears.
@@ -216,12 +252,14 @@ export default function App() {
 
   // Watched topics that need you (an action ready, or set to Human): a dot on their area's icon.
   const watchedNeedYou = data.watched.filter((t) => needsYou(t, stateOf(data.taskStates, t.id))).length;
+  // With Projects off, projects aren't shown or refreshed, so their tasks (as their last refresh left
+  // them) stay out of the list and the orb: refreshes find tasks in every channel instead.
   const projects = data.projects
-    .filter((p) => !p.hidden)
+    .filter((p) => !p.hidden && withProjects)
     .sort((a, b) =>
       compareProjects(
-        { name: a.name, status: projectStatus(a) ?? null, priority: a.snapshot?.priority?.level },
-        { name: b.name, status: projectStatus(b) ?? null, priority: b.snapshot?.priority?.level },
+        { name: a.name, status: projectStatus(a) ?? null, priority: projectPriority(a)?.level },
+        { name: b.name, status: projectStatus(b) ?? null, priority: projectPriority(b)?.level },
       ),
     );
   const counts = {
@@ -231,7 +269,7 @@ export default function App() {
   const recommended = new Set(data.reading?.date === localDate(new Date()) ? (data.reading.recommended ?? []) : []);
   const shownProjects = projects.filter((p) =>
     matchesProjectFilter(
-      { status: projectStatus(p) ?? null, priority: p.snapshot?.priority?.level, role: p.snapshot?.raci?.role },
+      { kind: projectKind(p), status: projectStatus(p) ?? null, priority: projectPriority(p)?.level, role: p.snapshot?.raci?.role },
       projectFilter,
     ),
   );
@@ -242,15 +280,17 @@ export default function App() {
   };
   // Every open task the user owns, at the priority its card shows, so the orb weighs what you see.
   // The same work from several sources counts once, under its canonical id, at its highest priority.
+  // The orb shows the load of your tasks; with Tasks off there's no list for it to weigh, so it rests.
+  const withTasks = areas.includes("tasks");
   const load = pressure(
-    onePerTask([
+    onePerTask(withTasks ? [
       ...projects.flatMap((p) => {
         const blocking = new Set(myBlockingIds(p.snapshot?.blockers, data.taskStates));
         return (p.snapshot?.my_tasks ?? []).map((t) => ({
           id: t.id,
           due: dueFor(t.id, t.due),
           projectId: p.channel_id,
-          priority: taskPriority(t.assessment?.priority, p.snapshot?.priority?.level, blocking.has(t.id), data.priorityOverrides[t.id]),
+          priority: taskPriority(t.assessment?.priority, projectPriority(p)?.level, blocking.has(t.id), data.priorityOverrides[t.id]),
         }));
       }),
       ...data.adhoc.tasks.map((t) => ({
@@ -264,9 +304,12 @@ export default function App() {
         projectId: t.project_id,
         priority: taskPriority(data.assessments.get(t.id)?.priority, null, false, data.priorityOverrides[t.id]),
       })),
-    ], data.taskAliases),
+    ] : [], data.taskAliases),
     data.taskStates,
   );
+
+  // The project whose TDD chat is open in the Projects area's column, if any.
+  const chatProject = data.projects.find((p) => p.channel_id === tddChatProject(projectChat)) ?? null;
 
   return (
     <div className="app">
@@ -293,8 +336,10 @@ export default function App() {
       <main className="detail-layout">
         <OrbGlow look={orbLook} level={load.level} />
         <TodayColumn pressure={load} orbLook={orbLook} working={running.length > 0} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        {/* With one area on, no icons: the rail's column only holds the calendar's hours. */}
+        {areas.length > 1 && (
         <nav className="detail-rail" aria-label="Areas">
-          {DETAIL_TABS.map(({ id, label, rects, paths }) => {
+          {DETAIL_TABS.filter(({ id }) => areas.includes(id)).map(({ id, label, rects, paths }) => {
             // A watched topic that needs you puts a dot on its area's icon.
             const dot = id === "watched" && watchedNeedYou > 0;
             return (
@@ -312,6 +357,7 @@ export default function App() {
             );
           })}
         </nav>
+        )}
         <div className="detail-panel">
           {tab === "updates" && (
             <ChatDockProvider value={dock}>
@@ -320,7 +366,7 @@ export default function App() {
                   <DailyReading
                     alwaysOpen
                     reading={data.reading}
-                    projects={data.projects}
+                    projects={withProjects ? data.projects : []}
                     news={data.adhoc.news}
                     states={data.taskStates}
                     inbox={new Set(data.adhoc.replies.map((r) => r.id))}
@@ -336,7 +382,7 @@ export default function App() {
               </div>
             </ChatDockProvider>
           )}
-          {tab === "watched" && (
+          {tab === "watched" && watchedOn && (
             <WatchedTopics
               topics={data.watched}
               unread={unread}
@@ -344,10 +390,14 @@ export default function App() {
               projects={projects.map((p) => ({ id: p.channel_id, name: projectName(p) }))}
               states={data.taskStates}
               running={running}
-              onViewTask={(id) => {
-                revealTask(id);
-                setTab("tasks");
-              }}
+              onViewTask={
+                areas.includes("tasks")
+                  ? (id) => {
+                      revealTask(id);
+                      setTab("tasks");
+                    }
+                  : undefined
+              }
               onChange={reload}
             />
           )}
@@ -383,7 +433,8 @@ export default function App() {
         />
           )}
           {tab === "projects" && (
-            <div className="detail-split">
+            <ChatDockProvider value={projectDock}>
+            <div className="detail-split projects-split">
               <section className="column detail-pane">
           <header className="column-header">
             <div className="row">
@@ -404,40 +455,75 @@ export default function App() {
               key={p.channel_id}
               project={p}
               busy={running.includes(`project:${p.channel_id}`)}
-              taskStates={data.taskStates}
               selected={(shownProject ?? shownProjects[0]?.channel_id) === p.channel_id}
               unread={unread.has(p.channel_id)}
-              reminders={data.reminders}
-              blockerChecks={data.blockerChecks}
-              onSelect={() => setShownProject(p.channel_id)}
-              inlineDetails
-              onViewTask={(id) => {
-                revealTask(id);
-                setTab("tasks");
-              }}
               onChange={reload}
+              onSelect={() => {
+                setShownProject(p.channel_id);
+                // Another project's details take the chat's place.
+                if (chatProject && chatProject.channel_id !== p.channel_id) setProjectChat(null);
+              }}
             />
           ))}
-          <SuggestedProjects projects={data.projects.filter((p) => p.state === "suggested")} onChange={reload} />
           </div>
               </section>
-              <section className="column detail-pane project-detail-pane">
-                {(() => {
+              {chatProject ? (
+                <section className="detail-pane chat-dock">
+                  <InDock>
+                    <TddChat key={chatProject.channel_id} project={chatProject} onClose={() => setProjectChat(null)} onChange={reload} />
+                  </InDock>
+                </section>
+              ) : (
+                (() => {
                   const project = shownProjects.find((p) => p.channel_id === shownProject) ?? shownProjects[0];
-                  return project ? (
-                    <>
-                      <SeenWhileShown id={project.channel_id} unread={unread.has(project.channel_id)} onSeen={markSeen} />
-                      <header className="column-header">
-                        <h2>{projectName(project)}</h2>
-                      </header>
-                      <ProjectDetail project={project} onChange={reload} />
-                    </>
-                  ) : (
-                    <p className="muted small">Pick a project to see its details.</p>
+                  const chatting = !!project && projectChatOpen;
+                  return (
+                    // The details, and while its chat is open, the chat in the column's bottom two fifths.
+                    <div className={`project-pane${chatting ? " with-chat" : ""}`}>
+                      <section className="column detail-pane project-detail-pane">
+                        {project ? (
+                          <>
+                            <SeenWhileShown id={project.channel_id} unread={unread.has(project.channel_id)} onSeen={markSeen} />
+                            <header className="column-header project-head">
+                              <div className="detail-title">
+                                <div className="detail-title-line">
+                                  <h2>{projectName(project)}</h2>
+                                  <button
+                                    className={`project-chat-button${chatting ? " on" : ""}`}
+                                    aria-pressed={chatting}
+                                    aria-label={chatting ? "Close the project's chat" : "Chat about this project"}
+                                    onClick={() => setProjectChatOpen(!chatting)}
+                                  >
+                                    Chat
+                                  </button>
+                                </div>
+                              </div>
+                              {/* Its due date, what kind it is, and its refresh (when it last refreshed on hover). */}
+                              <span className="row project-head-tools">
+                                <ProjectDue project={project} onChange={reload} />
+                                <KindBadge project={project} onChange={reload} />
+                                <ProjectRefresh project={project} busy={running.includes(`project:${project.channel_id}`)} />
+                              </span>
+                            </header>
+                            <ProjectDetail project={project} onChange={reload} taskStates={data.taskStates} />
+                          </>
+                        ) : (
+                          <p className="muted small">Pick a project to see its details.</p>
+                        )}
+                      </section>
+                      {chatting && (
+                        <section className="detail-pane chat-dock project-chat-pane">
+                          <InDock>
+                            <ProjectChat key={project.channel_id} project={project} projects={data.projects} onClose={() => setProjectChatOpen(false)} onApplied={reload} />
+                          </InDock>
+                        </section>
+                      )}
+                    </div>
                   );
-                })()}
-              </section>
+                })()
+              )}
             </div>
+            </ChatDockProvider>
           )}
         </div>
       </main>
@@ -447,7 +533,7 @@ export default function App() {
       <WhyPrompt />
       {showChat && (
         <GlobalChat
-          projects={data.projects}
+          projects={withProjects ? data.projects : []}
           onClose={() => setShowChat(false)}
           onApplied={reload}
           onViewLearnings={() => {
@@ -460,6 +546,7 @@ export default function App() {
       {simulateOnboarding && <Onboarding simulate onDone={() => setSimulateOnboarding(false)} />}
       {showOnboarding && (
         <Onboarding
+          firstRun={showOnboarding === "first"}
           onDone={() => {
             setShowOnboarding(false);
             reload();
@@ -563,23 +650,33 @@ function viewIcon(rects: Rect[], outlined: boolean, size = 14, paths: string[] =
 /**
  * What can be refreshed on its own, from the bottom bar's menu: each area that used to have its own
  * refresh button. `jobs` are the keys of the jobs that refresh it (a prefix ending in ":" stands for
- * all of a kind), so it shows a spinner while they run.
+ * all of a kind), so it shows a spinner while they run. `logged` is the job, as the refresh log names
+ * it, whose last finish is when the area was last updated.
  */
-const REFRESH_AREAS: { label: string; jobs: string[]; run: () => Promise<unknown> }[] = [
-  { label: "Calendar", jobs: ["calendar"], run: refreshCalendar },
+const REFRESH_AREAS: { label: string | ((on: Area[]) => string); jobs: string[]; logged: string; run: () => Promise<unknown>; areas?: Area[] }[] = [
+  { label: "Calendar", jobs: ["calendar"], logged: "calendar", run: refreshCalendar },
   // Then your Claude Code sessions, matched against the tasks those found (whether or not Slack and
   // email could be read); any it adds are assessed.
+  // It also reads the messages for Updates' inbox and news, so it's there with Tasks off too.
   {
-    label: "Tasks",
+    label: (on) => (on.includes("tasks") ? "Tasks" : "Inbox and news"),
+    areas: ["tasks", "updates"],
     jobs: ["adhoc", "assess", "sessions"],
+    logged: "adhoc",
     run: () =>
       Promise.allSettled([refreshAdhoc(), assessPendingTasks()])
         .then(() => scanClaudeSessions())
         .then((added) => (added.length ? assessPendingTasks() : undefined)),
   },
-  { label: "Daily briefing", jobs: ["reading"], run: refreshReading },
-  { label: "Watched topics", jobs: ["watch:"], run: checkWatchedTopics },
+  // Each only while its area is on: the briefing is in Updates.
+  { label: "Daily briefing", areas: ["updates"], jobs: ["reading"], logged: "reading", run: refreshReading },
+  { label: "Watched topics", areas: ["watched"], jobs: ["watch:"], logged: "watch", run: checkWatchedTopics },
 ];
+
+/** When a line of Refresh's menu was last updated: just the time today, else the date and time. */
+function LastUpdated({ at }: { at: string | undefined }) {
+  return at ? <span className="timestamp" title={`Last updated ${new Date(at).toLocaleString()}`}>{updatedText(at)}</span> : null;
+}
 
 /**
  * The bottom bar's Refresh everything, or while anything loads, its line of text in its place. Its
@@ -588,13 +685,21 @@ const REFRESH_AREAS: { label: string; jobs: string[]; run: () => Promise<unknown
  */
 function BottomStatus({ running }: { running: string[] }) {
   const allStatus = useJobStatus("all");
+  const areas = useAreasOn();
   /** What's loading: the running jobs' steps, taking turns. */
   const loadingStatus = useStatusFeed();
   // What's running in the background: chats show their own progress.
   const loading = running.filter((k) => !isChatJob(k));
   const isRunning = (job: string) => running.some((k) => (job.endsWith(":") ? k.startsWith(job) : k === job));
+  // Read again as jobs finish, and as the menu opens, so a time from yesterday shows its date.
+  const [updated, setUpdated] = useState<Record<string, string>>({});
+  const readUpdated = () => lastUpdated().then(setUpdated, () => {});
+  const runningKey = running.join(",");
+  useEffect(() => {
+    readUpdated();
+  }, [runningKey]);
   return (
-    <span className="refresh-menu-anchor">
+    <span className="refresh-menu-anchor" onPointerEnter={readUpdated} onFocus={readUpdated}>
       {loading.length === 0 ? (
         <RefreshButton busy={running.includes("all")} status={allStatus} title={`Refresh everything (${MOD}R)`} onClick={refreshAllSafely} />
       ) : (
@@ -607,13 +712,16 @@ function BottomStatus({ running }: { running: string[] }) {
           {running.includes("all") && <Spinner />}
           Everything
           <Kbd keys={`${MOD}R`} />
+          <LastUpdated at={updated.all} />
         </button>
-        {REFRESH_AREAS.map((area) => {
+        {REFRESH_AREAS.filter((area) => !area.areas || area.areas.some((x) => areas.includes(x))).map((area) => {
+          const label = typeof area.label === "string" ? area.label : area.label(areas);
           const busy = area.jobs.some(isRunning);
           return (
-            <button key={area.label} role="menuitem" className="link-button small" disabled={busy} onClick={() => area.run().catch(() => {})}>
+            <button key={area.logged} role="menuitem" className="link-button small" disabled={busy} onClick={() => area.run().catch(() => {})}>
               {busy && <Spinner />}
-              {area.label}
+              {label}
+              <LastUpdated at={updated[area.logged]} />
             </button>
           );
         })}

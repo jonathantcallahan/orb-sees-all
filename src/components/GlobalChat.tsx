@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import * as db from "../db";
 import { actionNames, describeAction } from "../globalActions";
 import { globalChatKey, startGlobalChat } from "../jobs";
+import { useAreasOn, type Area } from "../features";
 import { projectName } from "../projects";
 import type { Project } from "../db";
 import { unsentMessages, useSessionProgress, type PendingAction, type SessionLink } from "../sessions";
@@ -13,7 +14,23 @@ import { SessionChat } from "./TaskCard";
  * Example messages for the empty reply box, made from what's on the board: the kinds of things the
  * chat is for, with real project and people names where there are some.
  */
-function examplePrompts(projects: Project[]): string[] {
+function examplePrompts(projects: Project[], areas: Area[]): string[] {
+  // Each set is about the areas that are on: with Projects off, tasks; with Tasks off too, the briefing and you.
+  if (!areas.includes("projects") && !areas.includes("tasks"))
+    return [
+      "The daily briefing is missing context from one of my DMs",
+      "Leave office social news out of my briefing",
+      "I'm on the payments team now",
+      "Read my calendar again",
+    ];
+  if (!areas.includes("projects"))
+    return [
+      "I was asked something in a DM yesterday that isn't on my list",
+      "Add a task to review the launch doc by Friday",
+      "The vendor contract task is done",
+      "Put my two most urgent tasks in Today",
+      "Requests in my team's social channel aren't tasks",
+    ];
   const tracked = projects.filter((p) => p.state === "tracked").map(projectName);
   // Other people on the projects, not the user (who's in the snapshots' owner lists as "is_me").
   const me = new Set(projects.flatMap((p) => [...(p.snapshot?.blockers ?? []), ...(p.snapshot?.active ?? [])].flatMap((b) => b.owners.filter((o) => o.is_me).map((o) => o.name))));
@@ -29,10 +46,10 @@ function examplePrompts(projects: Project[]): string[] {
   const [x, y] = people;
   return [
     a ? `"${a}" is really two separate projects that should be split` : "One of my projects is really two separate projects",
-    x && y ? `The daily briefing is missing the context from my DM with ${x} and ${y}` : "The daily briefing is missing context from one of my DMs",
+    ...(areas.includes("updates") ? [x && y ? `The daily briefing is missing the context from my DM with ${x} and ${y}` : "The daily briefing is missing context from one of my DMs"] : []),
     "I have an ongoing project that isn't on the board",
     b ? `"${b}" is paused until next quarter, so it isn't at risk` : "One of my projects is paused, so it isn't at risk",
-    c ? `I'm only consulted on "${c}", so stop giving me its tasks` : "I'm only consulted on one project, so stop giving me its tasks",
+    ...(areas.includes("tasks") ? [c ? `I'm only consulted on "${c}", so stop giving me its tasks` : "I'm only consulted on one project, so stop giving me its tasks"] : []),
   ];
 }
 
@@ -53,6 +70,7 @@ export function GlobalChat({
   onApplied: () => void;
   onViewLearnings: () => void;
 }) {
+  const areas = useAreasOn();
   const [key, setKey] = useState<string | null>(null);
   const [link, setLink] = useState<SessionLink | undefined>();
   useEffect(() => {
@@ -75,7 +93,7 @@ export function GlobalChat({
   const describe = (item: PendingAction) => (item.action ? describeAction(item.action, names.project, names.channel, names.item) : (item.error ?? "Couldn't read this change"));
 
   if (!key) return null;
-  const hints = examplePrompts(projects);
+  const hints = examplePrompts(projects, areas);
   const started = !!link;
   return (
     <SessionChat

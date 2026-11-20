@@ -5,10 +5,12 @@
  * functions the rest of the app uses, then starts the refresh that brings the board up to date; the
  * refresh runs on in the background.
  */
+import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
+import { PROJECT_ACTIONS, TASK_ACTIONS } from "./openInClaude";
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, checkBlocker, continueTaskSession, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
-import { projectContext, projectName } from "./projects";
+import { assessPendingTasks, checkBlocker, continueTaskSession, linkProjectDoc, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
+import { epicKeyFrom, primaryChannel, projectContext, projectName } from "./projects";
 import { blockerKey } from "./tasks";
 import { setUserProfile } from "./prompts";
 import type { GlobalAction } from "./schema";
@@ -28,7 +30,7 @@ export function actionNames(projects: db.Project[]): { project: Names; channel: 
       const p = projects.find((x) => x.channel_id === id);
       return p ? projectName(p) : id;
     },
-    channel: (id) => projects.flatMap((p) => p.channels).find((c) => c.channel_id === id)?.name ?? id,
+    channel: (id) => [...projects.flatMap((p) => p.channels), ...projects.flatMap((p) => p.shared_channels ?? [])].find((c) => c.channel_id === id)?.name ?? id,
     item: (projectId, itemId) => {
       const s = projects.find((x) => x.channel_id === projectId)?.snapshot;
       return [...(s?.blockers ?? []), ...(s?.active ?? [])].find((b) => b.id === itemId)?.what ?? null;
@@ -171,10 +173,19 @@ const stepList = (steps: { title: string; by: "claude" | "you" }[]) => steps.map
 /** What a change will do, in a line, for its card. */
 export function describeAction(a: GlobalAction, project: Names, channel: Names, item: Items): string {
   switch (a.type) {
-    case "create_project":
-      return `Add the project "${a.name}", from ${channelList(a.channels.map((c) => c.name))}`;
-    case "split_project":
-      return `Split "${project(a.project_id)}": move ${channelList(a.channel_ids.map(channel))} into a new project, "${a.new_name}"`;
+    case "create_project": {
+      const from = [...(a.channels.length ? [channelList(a.channels.map((c) => c.name))] : []), ...a.epics.map((k) => k.toUpperCase())];
+      return `Add the project "${a.name}"${from.length ? `, from ${from.join(", ")}` : ""}`;
+    }
+    case "link_project_epic":
+      return `Link the epic ${a.epic_key.toUpperCase()} to "${project(a.project_id)}"`;
+    case "unlink_project_epic":
+      return `Unlink the epic ${a.epic_key.toUpperCase()} from "${project(a.project_id)}"`;
+    case "split_project": {
+      const moving = [...(a.channel_ids.length ? [channelList(a.channel_ids.map(channel))] : []), ...a.epic_keys.map((k) => k.trim().toUpperCase())];
+      const sharing = a.shared_channel_ids.length ? `, both reading ${channelList(a.shared_channel_ids.map(channel))}` : "";
+      return `Split "${project(a.project_id)}": ${moving.length ? `move ${moving.join(", ")} into` : "start"} a new project, "${a.new_name}"${sharing}`;
+    }
     case "merge_projects":
       return `Merge "${project(a.from_id)}" into "${project(a.into_id)}"`;
     case "rename_project":
@@ -191,6 +202,10 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
       return a.status === "auto"
         ? `Let refreshes set the status of "${project(a.project_id)}" again`
         : `Set "${project(a.project_id)}" to ${STATUS_WORDS[a.status]}${a.reason ? `: ${a.reason}` : ""}`;
+    case "set_project_kind":
+      return a.kind === "auto" ? `Let refreshes decide whether "${project(a.project_id)}" is a project or a workstream` : `Make "${project(a.project_id)}" a ${a.kind}`;
+    case "set_project_doc":
+      return a.link ? `Use ${a.title ? `"${a.title}"` : a.link} as the requirements doc of "${project(a.project_id)}"` : `Remove the requirements doc of "${project(a.project_id)}"`;
     case "resolve_project_item":
     case "check_project_item": {
       // Named from the item the id points to, not the chat's words for it, so the card says what Apply does.
@@ -294,14 +309,19 @@ export async function applyAction(a: GlobalAction, said?: string, summary?: stri
 }
 
 async function apply(a: GlobalAction): Promise<string> {
+  // A chat begun before Projects was turned off can still propose these.
+  if (!projectsOn() && PROJECT_ACTIONS.has(a.type)) throw new Error("Projects is off. Turn it on in Settings to change a project.");
+  if (!tasksOn() && TASK_ACTIONS.has(a.type)) throw new Error("Tasks is off. Turn it on in Settings to change a task.");
   switch (a.type) {
     case "create_project": {
-      const id = await db.createProject(a.name, a.channels, a.reason);
+      const epics = a.epics.map((k) => epicKeyFrom(k)).filter((k): k is string => !!k);
+      const id = await db.createProject(a.name, a.channels, a.reason, epics);
       quiet(refreshProject(id));
       return `Added "${a.name}" and started reading it.`;
     }
     case "split_project": {
-      const id = await db.splitProject(a.project_id, a.new_name, a.channel_ids, a.reason);
+      const epics = a.epic_keys.map((k) => epicKeyFrom(k) ?? k);
+      const id = await db.splitProject(a.project_id, a.new_name, a.channel_ids, a.reason, epics, a.shared_channel_ids);
       quiet(refreshProject(a.project_id));
       quiet(refreshProject(id));
       return `Split off "${a.new_name}" and started reading both projects.`;
@@ -349,6 +369,15 @@ async function apply(a: GlobalAction): Promise<string> {
     case "set_project_status":
       await db.setProjectStatus(a.project_id, a.status === "auto" ? null : a.status, a.reason ?? null);
       return a.status === "auto" ? "Its status comes from refreshes again." : `It's ${STATUS_WORDS[a.status]} now; refreshes keep to that unless something clearly changes.`;
+    case "set_project_kind":
+      await db.setProjectKind(a.project_id, a.kind === "auto" ? null : a.kind);
+      return a.kind === "auto" ? "Refreshes decide whether it's a project or a workstream again." : `It's a ${a.kind} now.`;
+    case "set_project_doc": {
+      const link = a.link?.trim();
+      if (link && !/^https?:\/\/\S+$/i.test(link)) return "That isn't a link to a doc, so nothing changed.";
+      await linkProjectDoc(a.project_id, link ? { link, title: a.title?.trim() || "Requirements doc", kind: null } : null);
+      return link ? "Linked; its requirements are read and checked in a refresh that's starting now." : "Its requirements doc is removed.";
+    }
     case "resolve_project_item": {
       const p = await db.getProject(a.project_id);
       const item = [...(p?.snapshot?.blockers ?? []), ...(p?.snapshot?.active ?? [])].find((b) => b.id === a.item_id);
@@ -364,23 +393,40 @@ async function apply(a: GlobalAction): Promise<string> {
       const item = blocker ?? active;
       if (!p || !item) throw new Error("That item isn't on the project any more");
       const reminders = await db.getReminders();
-      quiet(checkBlocker(projectName(p), p.channel_id, item, reminders[item.id], blocker ? "blocker" : "active"));
+      quiet(checkBlocker(projectName(p), primaryChannel(p)?.channel_id ?? null, item, reminders[item.id], blocker ? "blocker" : "active"));
       return "Checking it; the result shows on the project.";
     }
+    case "link_project_epic": {
+      const key = epicKeyFrom(a.epic_key);
+      if (!key) throw new Error(`"${a.epic_key}" isn't an epic key like ABC-123`);
+      await db.linkEpic(a.project_id, { key }, "user");
+      quiet(refreshProject(a.project_id));
+      return `Linked ${key}; the project is being read again with it.`;
+    }
+    case "unlink_project_epic": {
+      const key = epicKeyFrom(a.epic_key) ?? a.epic_key.trim().toUpperCase();
+      if (!(await db.unlinkEpic(a.project_id, key))) throw new Error(`${key} isn't linked to that project`);
+      quiet(refreshProject(a.project_id));
+      return `Unlinked ${key}; the project is being read again without it.`;
+    }
     case "unlink_channel":
-      if (!(await db.unlinkChannel(a.channel_id, a.project_id))) throw new Error("That channel isn't one of the project's related channels");
+      // A related channel it owns, or one it shares with another project.
+      if (!(await db.unlinkChannel(a.channel_id, a.project_id)) && !(await db.unshareChannel(a.project_id, a.channel_id)))
+        throw new Error("That channel isn't one of the project's related or shared channels");
       quiet(refreshProject(a.project_id));
       return "Unlinked; the project is being read again without it.";
     case "add_note": {
       const notes = [...(await db.getNotes()), a.text.trim()];
       await db.saveNotes(notes);
       setStandingNotes(notes);
+      if (!updatesOn()) return "Saved. Every refresh will take it into account.";
       quiet(refreshReading());
       return "Saved. Every refresh will take it into account; the daily briefing is being rebuilt now.";
     }
     case "update_profile":
       await db.setSetting("user_profile", a.text.trim());
       setUserProfile(a.text);
+      if (!updatesOn()) return "Updated how Demian describes you.";
       quiet(refreshReading());
       return "Updated how Demian describes you; the daily briefing is being rebuilt.";
     case "add_task": {
@@ -460,6 +506,7 @@ async function apply(a: GlobalAction): Promise<string> {
       return "The task's plan is updated.";
     }
     case "watch_topic": {
+      if (!watchedTopicsOn()) throw new Error("Watched topics is off. Turn it on in Settings to watch a topic.");
       // As the Watched topics box does: added at once, then filled in (title, project, conditional actions) and checked.
       await watchFromText(a.text.trim());
       return "Watching it; it's in Watched topics, being filled in and checked.";
@@ -474,6 +521,8 @@ async function apply(a: GlobalAction): Promise<string> {
       await db.setPriorityOverride(await taskFor(a), a.priority);
       return "Priority set.";
     case "refresh": {
+      if (a.what === "project" && !projectsOn()) throw new Error("Projects is off. Turn it on in Settings to reread a project.");
+      if (a.what === "briefing" && !updatesOn()) throw new Error("Updates, where the daily briefing is, is off. Turn it on in Settings to reread it.");
       const run = {
         all: refreshAll,
         project: () => (a.project_id ? refreshProject(a.project_id) : refreshAll()),

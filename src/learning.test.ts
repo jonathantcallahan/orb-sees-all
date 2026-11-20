@@ -83,7 +83,6 @@ describe("corrections reach the prompts", () => {
       previous: null,
       profile: null,
       lastRefreshedAt: null,
-      repoState: null,
       now: new Date("2026-11-02T10:00:00Z"),
       excluded: ["C9"],
       learning,
@@ -141,7 +140,7 @@ describe("built-in lessons", () => {
     const plan = planPrompt({ title: "T", description: null, link: null, requester: null, source: "slack", userId: null });
     expect(plan).toContain("Keep plans minimal");
     expect(plan).toContain("Start with the substance");
-    const project = projectPrompt({ channels: [{ channel_id: "C1", name: "x" }], userId: "U1", previous: null, profile: null, lastRefreshedAt: null, repoState: null, now: new Date("2026-11-02T10:00:00Z") });
+    const project = projectPrompt({ channels: [{ channel_id: "C1", name: "x" }], userId: "U1", previous: null, profile: null, lastRefreshedAt: null, now: new Date("2026-11-02T10:00:00Z") });
     expect(project).toContain("A meeting already on the calendar isn't a task");
     const distill = distillPrompt({ feedback: [], lessons: [], projects: [] });
     expect(distill).toContain("Already built into the assistant");

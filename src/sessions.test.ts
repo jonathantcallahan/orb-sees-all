@@ -323,8 +323,9 @@ describe("tickets handed to Orb", () => {
     const { createTicketPrompt } = await import("./prompts");
     const { SESSION_DISPLAY } = await import("./claude");
     const p = createTicketPrompt("Add the export button", "project: ABC\ntype: Task\nepic: ABC-12\n\nAdd an export button to the report page.");
-    expect(p).toMatch(/jira_create_issue exactly once/);
-    expect(p).toMatch(/"epicKey"/);
+    expect(p).toMatch(/createJiraIssue exactly once/);
+    expect(p).toMatch(/Put the epic from "epic:" in parent/);
+    expect(p).toMatch(/editJiraIssue, fields \{"parent": \{"key": "<epic key>"\}\}/);
     expect(p).toMatch(/exactly as written/);
     expect(SESSION_DISPLAY).toMatch(/\[orb\] ticket step N: /);
     expect(SESSION_DISPLAY).toMatch(/Filing it is your step, not mine/);

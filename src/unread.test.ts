@@ -3,7 +3,7 @@ import { seenAfter, toRecord, unreadIds, updateFacts, type UnreadInput } from ".
 
 const project = (over: object) => ({
   channel_id: "C1", name: "tmp-refunds", hidden: false, state: "tracked" as const, found_reason: null, merged_into: null, channels: [], local_repos: [], gh_repos: [],
-  last_refreshed_at: "2026-11-09T07:00:00Z", profile: null, repo_state: null, last_error: null, focus: null, status_override: null,
+  last_refreshed_at: "2026-11-09T07:00:00Z", profile: null, last_error: null, focus: null, status_override: null, kind_choice: null, docs: null, requirements: null, epics: [], shared_channels: [], ship_choice: null,
   snapshot: {
     name: "x", description: "", status: "on_track" as const, status_reason: "", raci: { role: "accountable" as const, reason: "" }, priority: { level: "P1" as const, reason: "" },
     blockers: [], active: [], summary: "",

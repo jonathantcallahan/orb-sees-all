@@ -4,6 +4,8 @@ import type { SessionLink } from "./sessions";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as db from "./db";
 import { dataVersion, jobStatus, queue } from "./jobs";
+import { asksFor, noAutoMode, subscribeAsks } from "./chatAsks";
+import type { ChatAsk } from "./claude";
 import { enqueueStep, isChatJob, stepMs, type FeedItem } from "./statusFeed";
 import { localDate } from "./scheduler";
 import type { CalendarDay, ManualAssessment } from "./schema";
@@ -171,3 +173,12 @@ export function useStatusFeed(): string | undefined {
   return shown?.text;
 }
 
+/** What a chat is asking the user before Claude Code uses a tool, oldest first (see chatAsks). */
+export function useChatAsks(key: string): ChatAsk[] {
+  return useSyncExternalStore(subscribeAsks, () => asksFor(key));
+}
+
+/** Whether a chat's turn runs without auto mode, which isn't available, so Claude asks about everything. */
+export function useNoAutoMode(key: string): boolean {
+  return useSyncExternalStore(subscribeAsks, () => noAutoMode(key));
+}

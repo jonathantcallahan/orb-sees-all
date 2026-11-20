@@ -1,5 +1,6 @@
 import { revealTask } from "./TaskCard";
 import { showDetailTab } from "../viewMode";
+import { useAreaOn } from "../features";
 import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -102,6 +103,8 @@ function MeetingCard({
   onEnter: () => void;
   onLeave: () => void;
 }) {
+  // Each prep item is a task, opened in Tasks: not while Tasks is off.
+  const tasksShown = useAreaOn("tasks");
   const width = 280;
   // Beside the block, kept inside the window. In the lower half of the window it
   // grows upward from the block's bottom edge so it isn't cut off.
@@ -140,6 +143,7 @@ function MeetingCard({
                   <div className="task-body">
                     <span className="task-title">{p.title}</span>
                     {/* Each prep item is a task too: open its card in Tasks. */}
+                    {tasksShown && (
                     <button
                       className="link-button small more-link prep-view-task"
                       onClick={() => {
@@ -149,6 +153,7 @@ function MeetingCard({
                     >
                       View in tasks
                     </button>
+                    )}
                   </div>
                 </li>
               );

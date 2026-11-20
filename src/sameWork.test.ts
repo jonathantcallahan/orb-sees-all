@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SAME_WORK_RULE } from "./baseLessons";
-import { GLOBAL_ACTION_DOCS } from "./openInClaude";
+import { globalActionDocs } from "./openInClaude";
 import { adhocPrompt, checkTaskPrompt, sameWorkPrompt, selfDmActionsPrompt } from "./prompts";
 import { formatWhen } from "./scheduler";
 
@@ -14,7 +14,7 @@ describe("one rule for the same work", () => {
     const prompts = [
       adhocPrompt({ userId: "U1", previous: [], previousReplies: [], projectChannels: [], lastRefreshedAt: null, now: new Date(2026, 10, 4), index }),
       checkTaskPrompt({ task: { title: "x", description: null, source: "Slack", link: null, requester: null, due: null, priority: null }, otherTasks: [], userId: null }),
-      GLOBAL_ACTION_DOCS,
+      globalActionDocs(),
       selfDmActionsPrompt([{ ts: "1793000000.000100", text: "Book the venue #demian" }], ""),
       sameWorkPrompt(index),
     ];

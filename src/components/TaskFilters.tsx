@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { TASK_SORTS, type TaskSort } from "../taskDates";
-import type { ProjectPriority, ProjectStatus, Raci } from "../schema";
+import type { ProjectKind, ProjectPriority, ProjectStatus, Raci } from "../schema";
 import { NO_FILTER, NO_PROJECT_FILTER, type AssistanceFilter, type DueFilter, type PriorityFilter, type ProjectFilter, type TaskFilter, type TaskSource, type TaskStatus } from "../tasks";
 
 const SOURCES: [TaskSource, string][] = [
@@ -126,12 +126,15 @@ export function SortSelect({ value, onChange }: { value: TaskSort; onChange: (v:
  * A row of filters that never wraps: they're listed most important first, and when they don't all fit
  * on one line the ones at the end move into a More filters menu (at least two of them, so the menu
  * never holds just one), which shows how many of those are in use. Every filter stays reachable.
+ * Filters marked `more` always live in that menu, after any that didn't fit.
  * It measures the filters in an invisible copy of the row and refits whenever its width changes.
  */
-function OverflowBar({ items }: { items: { key: string; active: boolean; node: ReactNode }[] }) {
+function OverflowBar({ items }: { items: { key: string; active: boolean; node: ReactNode; more?: boolean }[] }) {
+  const inline = items.filter((i) => !i.more);
+  const always = items.filter((i) => i.more);
   const box = useRef<HTMLDivElement>(null);
   const measure = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState(items.length);
+  const [fit, setFit] = useState(inline.length);
   const [open, setOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   useDismiss(open, moreRef, () => setOpen(false));
@@ -140,17 +143,17 @@ function OverflowBar({ items }: { items: { key: string; active: boolean; node: R
     const m = measure.current;
     if (!el || !m) return;
     const kids = [...m.children] as HTMLElement[];
-    const widths = kids.slice(0, items.length).map((k) => k.offsetWidth);
-    const more = kids[items.length]?.offsetWidth ?? 0;
+    const widths = kids.slice(0, inline.length).map((k) => k.offsetWidth);
+    const more = kids[inline.length]?.offsetWidth ?? 0;
     const gap = 6;
     const span = (n: number) => widths.slice(0, n).reduce((a, w) => a + w, 0) + Math.max(n - 1, 0) * gap;
     const room = el.clientWidth;
-    let n = items.length;
-    if (span(n) > room) {
+    let n = inline.length;
+    if (span(n) + (always.length > 0 ? gap + more : 0) > room) {
       n = 0;
-      while (n < items.length && span(n + 1) + gap + more <= room) n++;
+      while (n < inline.length && span(n + 1) + gap + more <= room) n++;
       // Never a menu of one: if only the last would go, move the one before it too.
-      if (items.length - n === 1) n = Math.max(n - 1, 0);
+      if (always.length === 0 && inline.length - n === 1) n = Math.max(n - 1, 0);
     }
     setFit((cur) => (cur === n ? cur : n));
   };
@@ -162,8 +165,8 @@ function OverflowBar({ items }: { items: { key: string; active: boolean; node: R
   }, []);
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(leaveTimer.current), []);
-  const shown = items.slice(0, fit);
-  const hidden = items.slice(fit);
+  const shown = inline.slice(0, fit);
+  const hidden = [...inline.slice(fit), ...always];
   const activeHidden = hidden.filter((i) => i.active).length;
   return (
     <div className="task-filters" ref={box}>
@@ -199,9 +202,9 @@ function OverflowBar({ items }: { items: { key: string; active: boolean; node: R
           )}
         </div>
       )}
-      {/* The measuring copy: every filter as it would show inline, plus the More button. */}
+      {/* The measuring copy: every filter that can show inline, as it would, plus the More button. */}
       <div className="task-filters-measure" ref={measure} aria-hidden inert>
-        {items.map((i) => (
+        {inline.map((i) => (
           <div key={i.key} className="filter-slot">
             {i.node}
           </div>
@@ -300,6 +303,11 @@ function RecommendedToggle({ on, onChange }: { on: boolean; onChange: (on: boole
   );
 }
 
+const PROJECT_KINDS: [ProjectKind, string][] = [
+  ["project", "Projects"],
+  ["workstream", "Workstreams"],
+];
+
 const PROJECT_STATUSES: [ProjectStatus, string][] = [
   ["blocked", "Blocked"],
   ["at_risk", "At risk"],
@@ -322,15 +330,36 @@ const PROJECT_ROLES: [Raci, string][] = [
   ["informed", "Informed"],
 ];
 
-/** Status, priority and RACI role filters for the Projects column. */
+/**
+ * Status and priority filters for the Projects column, with type (project or workstream) and your
+ * RACI role under More filters.
+ */
 export function ProjectFilters({ filter, onChange }: { filter: ProjectFilter; onChange: (f: ProjectFilter) => void }) {
-  return (
-    <div className="task-filters">
-      <MultiFilter label="Filter projects by status" anyLabel="Any status" values={filter.statuses} options={PROJECT_STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />
-      <MultiFilter label="Filter projects by priority" anyLabel="Any priority" values={filter.priorities} options={PROJECT_PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />
-      <MultiFilter label="Filter projects by your RACI role" anyLabel="Any role" values={filter.roles} options={PROJECT_ROLES} onChange={(roles) => onChange({ ...filter, roles })} />
-    </div>
-  );
+  const items = [
+    {
+      key: "status",
+      active: filter.statuses.length > 0,
+      node: <MultiFilter label="Filter projects by status" anyLabel="Any status" values={filter.statuses} options={PROJECT_STATUSES} onChange={(statuses) => onChange({ ...filter, statuses })} />,
+    },
+    {
+      key: "priority",
+      active: filter.priorities.length > 0,
+      node: <MultiFilter label="Filter projects by priority" anyLabel="Any priority" values={filter.priorities} options={PROJECT_PRIORITIES} onChange={(priorities) => onChange({ ...filter, priorities })} />,
+    },
+    {
+      key: "kind",
+      active: filter.kinds.length > 0,
+      more: true,
+      node: <MultiFilter label="Filter by projects or workstreams" anyLabel="Any type" values={filter.kinds} options={PROJECT_KINDS} onChange={(kinds) => onChange({ ...filter, kinds })} />,
+    },
+    {
+      key: "role",
+      active: filter.roles.length > 0,
+      more: true,
+      node: <MultiFilter label="Filter projects by your RACI role" anyLabel="Any role" values={filter.roles} options={PROJECT_ROLES} onChange={(roles) => onChange({ ...filter, roles })} />,
+    },
+  ];
+  return <OverflowBar items={items} />;
 }
 
 /** Source, status, priority, due date, Demian assistance and Recommended filters for All tasks. */

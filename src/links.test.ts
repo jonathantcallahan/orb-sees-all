@@ -9,7 +9,7 @@ describe("links", () => {
     expect(linkKind("https://docs.google.com/spreadsheets/d/1")).toBe("sheets");
     expect(linkKind("https://docs.google.com/presentation/d/1")).toBe("slides");
     expect(linkKind("https://drive.google.com/file/d/1")).toBe("drive");
-    expect(linkKind("https://example.atlassian.net/browse/CPS-6931")).toBe("jira");
+    expect(linkKind("https://example.atlassian.net/browse/PAY-6931")).toBe("jira");
     expect(linkKind("https://example.atlassian.net/wiki/spaces/X/pages/1")).toBe("confluence");
     expect(linkKind("https://github.com/o/r/pull/7")).toBe("github");
     expect(linkKind("https://example.com/x")).toBe("web");
@@ -17,7 +17,7 @@ describe("links", () => {
   });
 
   it("names untitled links", () => {
-    expect(fallbackTitle("https://example.atlassian.net/browse/CPS-6931")).toBe("CPS-6931");
+    expect(fallbackTitle("https://example.atlassian.net/browse/PAY-6931")).toBe("PAY-6931");
     expect(fallbackTitle("https://github.com/o/repo/pull/7")).toBe("repo#7");
     expect(fallbackTitle("https://www.example.com/x")).toBe("example.com");
     expect(fallbackTitle("https://example.slack.com/archives/C1/p1")).toBe("Slack thread");
@@ -27,18 +27,18 @@ describe("links", () => {
     const links = collectLinks(
       [
         { url: "https://example.slack.com/archives/C1/p1" },
-        { url: "https://example.atlassian.net/browse/CPS-1", title: "Export ticket" },
-        { url: "https://example.slack.com/archives/C1/p1", title: "Ben's ask" },
+        { url: "https://example.atlassian.net/browse/PAY-1", title: "Export ticket" },
+        { url: "https://example.slack.com/archives/C1/p1", title: "Kim's ask" },
         { url: null },
       ],
-      ["See https://example.atlassian.net/browse/CPS-1, and https://docs.google.com/document/d/9/edit."],
+      ["See https://example.atlassian.net/browse/PAY-1, and https://docs.google.com/document/d/9/edit."],
     );
     expect(links.map((l) => l.url)).toEqual([
       "https://example.slack.com/archives/C1/p1",
-      "https://example.atlassian.net/browse/CPS-1",
+      "https://example.atlassian.net/browse/PAY-1",
       "https://docs.google.com/document/d/9/edit",
     ]);
-    expect(links[0].title).toBe("Ben's ask");
+    expect(links[0].title).toBe("Kim's ask");
     expect(links[1].title).toBe("Export ticket");
     expect(links[2].title).toBe("Doc");
   });
@@ -47,8 +47,8 @@ describe("links", () => {
 describe("link titles", () => {
   it("replaces titles that only name a channel or URL", () => {
     const links = collectLinks([
-      { url: "https://example.slack.com/archives/C1/p1", title: "#tmp-asset-pricing" },
-      { url: "https://example.slack.com/archives/C1/p2", title: "tmp-asset-pricing" },
+      { url: "https://example.slack.com/archives/C1/p1", title: "#tmp-shop-pricing" },
+      { url: "https://example.slack.com/archives/C1/p2", title: "tmp-shop-pricing" },
       { url: "https://example.slack.com/archives/C1/p3", title: "https://example.slack.com/archives/C1/p3" },
       { url: "https://example.slack.com/archives/C1/p4", title: "Pricing decision thread" },
     ]);
@@ -59,10 +59,10 @@ describe("link titles", () => {
 describe("withoutChannels", () => {
   it("drops channel names from titles", async () => {
     const { withoutChannels } = await import("./links");
-    expect(withoutChannels("Pricing thread in #tmp-asset-pricing")).toBe("Pricing thread");
-    expect(withoutChannels("#asset-store-eng: launch date")).toBe("launch date");
-    expect(withoutChannels("Ben's ask on #general")).toBe("Ben's ask");
-    expect(withoutChannels("CPS-6931 export ticket")).toBe("CPS-6931 export ticket");
-    expect(collectLinks([{ url: "https://example.slack.com/archives/C1/p1", title: "#tmp-asset-pricing" }])[0].title).toBe("Slack thread");
+    expect(withoutChannels("Pricing thread in #tmp-shop-pricing")).toBe("Pricing thread");
+    expect(withoutChannels("#shop-eng: launch date")).toBe("launch date");
+    expect(withoutChannels("Kim's ask on #general")).toBe("Kim's ask");
+    expect(withoutChannels("PAY-6931 export ticket")).toBe("PAY-6931 export ticket");
+    expect(collectLinks([{ url: "https://example.slack.com/archives/C1/p1", title: "#tmp-shop-pricing" }])[0].title).toBe("Slack thread");
   });
 });

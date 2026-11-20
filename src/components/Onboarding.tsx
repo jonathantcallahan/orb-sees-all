@@ -3,7 +3,9 @@ import * as db from "../db";
 import { learnRole } from "../jobs";
 import { spinOrb } from "../orbEvents";
 import { runCli } from "../cli";
-import { CONNECTORS, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
+import { projectConnectors, projectConnectorsReady, saveProjectConnectors, setAreaOn } from "../features";
+import { markProjectsUpgradeDone } from "../projectsUpgrade";
+import { CONNECTORS, projectConnectorsOf, runSetupChecks, type ConnectorCheck, type SetupReport } from "../setup";
 import { OnboardingGuide, StepStack, type GuideKind } from "./OnboardingGuide";
 import { ScrambleText } from "./common";
 import { PressureBlob } from "./PressureBlob";
@@ -47,7 +49,8 @@ const TOOLS_LIMIT_MS = 120_000;
  * one that needs you. Checking the tools takes a few seconds, so that has its line. Where a step needs
  * you to do something outside the app (sign in, connect a tool), it says so. Claude works out your
  * role itself, so there's nothing to fill in. Then a greeting and a single Start, which opens the app
- * and begins loading everything.
+ * and begins loading everything. Projects needs Jira and GitHub, so on a first run without both it
+ * starts off (it can be turned on in Settings once they're set up); a replay leaves it as it is.
  */
 /** How long the closing greeting takes to unscramble; Start appears once it has. */
 const GREETING_MS = 2800;
@@ -105,7 +108,16 @@ function SimulationBar({ sim, onChange, onEnd }: { sim: Simulated; onChange: (s:
   );
 }
 
-export function Onboarding({ onDone, simulate = false }: { onDone: () => void; simulate?: boolean }) {
+export function Onboarding({
+  onDone,
+  simulate = false,
+  firstRun = false,
+}: {
+  onDone: () => void;
+  simulate?: boolean;
+  /** The first run, not a replay: only then does Start set whether Projects starts on. */
+  firstRun?: boolean;
+}) {
   const [line, setLine] = useState("Demian");
   const [greeting, setGreeting] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -163,6 +175,9 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
           if (!live()) return;
           report.current = r;
           finished = true;
+          // Kept for Settings' Projects switch; a simulation changes nothing.
+          const connectors = projectConnectorsOf(r);
+          if (connectors && !simulate) saveProjectConnectors(connectors);
         });
 
         // Installed and signed in are quick to check and say nothing when they pass: the guide opens on
@@ -304,7 +319,20 @@ export function Onboarding({ onDone, simulate = false }: { onDone: () => void; s
           </button>
         )}
         {ready && (
-          <button className="cta-primary onboarding-start" onClick={onDone} autoFocus>
+          <button
+            className="cta-primary onboarding-start"
+            onClick={() => {
+              // On a first run without Jira and GitHub, Projects starts off. A replay or a simulation changes nothing.
+              const connectors = projectConnectors();
+              if (firstRun && !simulate && connectors) {
+                if (!projectConnectorsReady(connectors)) setAreaOn("projects", false);
+                // Settled here, so the upgrade check (see projectsUpgrade) doesn't run again.
+                markProjectsUpgradeDone();
+              }
+              onDone();
+            }}
+            autoFocus
+          >
             Start
           </button>
         )}

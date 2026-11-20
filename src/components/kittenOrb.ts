@@ -25,8 +25,9 @@
  * turns. It gives off a little light of its own, more where the light falls full on it, and
  * lights the glass around it.
  *
- * Gem and cross turn together about the upright axis through their top and bottom points, leaning
- * only toward the cursor (see PressureBlob). The shared effects (a finished task's ripple, an
+ * Gem and cross turn together about the upright axis through their top and bottom points. While
+ * they follow the cursor they stop turning and tip over to point the nearest of the cross's points
+ * at it, standing back up once it leaves (see PressureBlob). The shared effects (a finished task's ripple, an
  * update's hit, the spikes) move its surface like the other orbs', and under stress it warms
  * toward magenta.
  *

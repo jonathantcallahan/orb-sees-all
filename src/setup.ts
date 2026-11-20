@@ -54,7 +54,7 @@ export const CONNECTORS: { id: string; label: string; purpose: string; required:
   { id: "zoom", label: "Zoom", purpose: "Meeting summaries", required: false, server: "claude.ai Zoom for Claude" },
   { id: "granola", label: "Granola", purpose: "Meeting notes, for project updates", required: false, server: "claude.ai Granola" },
   { id: "amplitude", label: "Amplitude", purpose: "Product analytics for planning", required: false, server: "claude.ai Amplitude" },
-  { id: "jira", label: "Jira", purpose: "Tickets when planning and checking tasks", required: false, server: "mcp-jira" },
+  { id: "jira", label: "Atlassian Rovo", purpose: "Jira tickets and epics, and requirements docs in Confluence", required: false, server: "claude.ai Atlassian Rovo" },
 ];
 
 /** The "init" line of a stream-json transcript: the session's tools and MCP servers. */
@@ -114,6 +114,35 @@ const PROBE_ARGS = [
   "--tools",
   "",
 ];
+
+/**
+ * What Projects needs, from a full setup check: the Jira connector connected and GitHub signed in.
+ * Null until both were checked, and while Jira is still connecting (setup doesn't wait for an
+ * optional connector), so a slow start isn't taken for a missing one.
+ */
+export function projectConnectorsOf(r: SetupReport): { jira: boolean; github: boolean } | null {
+  if (!r.connectors || !r.gh) return null;
+  const jira = r.connectors.find((c) => c.id === "jira")?.state;
+  if (jira === "pending") return null;
+  return { jira: jira === "connected", github: r.gh.ok };
+}
+
+/**
+ * Just what Projects needs, for Settings' Projects switch: GitHub signed in (gh), and the Jira
+ * connector connected, from one probe like setup's (looked at again once while it's still connecting).
+ * Null when it couldn't tell: the probe didn't run, or Jira was still connecting.
+ */
+export async function checkProjectConnectors(run: CliRunner = runCli, stream: StreamingCliRunner = runCliStreaming): Promise<{ jira: boolean; github: boolean } | null> {
+  const gh = run("gh", ["auth", "status"]).catch(() => null);
+  let jira: ConnectorState | null = null;
+  for (let attempt = 0; attempt < 2 && (attempt === 0 || jira === "pending"); attempt++) {
+    const probe = await stream("claude", PROBE_ARGS, undefined, undefined, { limits: PROBE_LIMITS }).catch(() => null);
+    const init = findInit(probe?.stdout ?? "");
+    jira = init ? (connectorChecks(init.mcp_servers ?? []).find((c) => c.id === "jira")?.state ?? "missing") : null;
+  }
+  if (jira === null || jira === "pending") return null;
+  return { jira: jira === "connected", github: (await gh)?.code === 0 };
+}
 
 /** Runs every check in order, reporting progress; later checks are skipped when an earlier one fails. */
 export async function runSetupChecks(

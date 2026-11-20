@@ -1,25 +1,30 @@
+import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "../features";
+import { ensureProjectsUpgrade, projectsUpgradeSettled } from "../projectsUpgrade";
 import { invoke } from "@tauri-apps/api/core";
-import { activeChannels, mergeProfile, newRelatedChannels, planDiscovery, projectContext, projectName, projectStatus, slackTarget, slackThread } from "../projects";
+import type { z } from "zod";
+import { codeScope, placeLeftovers, unplacedRequirements, withEpicCreated, withInitiativeApplied, withItemCreated, withItemMoved, withRequirementIssue, withStoryApplied } from "../plan";
+import { projectChatKey, projectOfChat, projectRecordText } from "../projectChat";
+import { activeChannels, activeEpics, channelSharers, jiraSite, readChannels, mergeProfile, withCloudJiraLinks, newRelatedChannels, planDiscovery, projectContext, projectName, projectKind, projectPriority, projectStatus, guideTitle, pathToShip, shipTarget, requirementCounts, requirementRows, requirementsDue, slackTarget, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
-import { runClaude, runSessionTurn, TOOLS } from "../claude";
+import { ASK_PERMISSION_MODE, CHAT_PERMISSION_MODE, notesPrompt, runClaude, runSessionTurn, TOOLS } from "../claude";
+import { askInChat, clearAsks, dropAsk, setNoAutoMode } from "../chatAsks";
 import * as db from "../db";
-import { createDocPrompt, createEventPrompt, createTicketPrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, sendToChannelPrompt, setUserProfile } from "../prompts";
-import { GLOBAL_ACTION_DOCS, GLOBAL_TASK_RULES, globalChatPrompt, sessionMarker } from "../openInClaude";
+import { applyInitiativePrompt, applyStoryPrompt, createDocPrompt, createEpicPrompt, createEventPrompt, createItemPrompt, createTicketPrompt, moveIssuePrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, requirementsPrompt, sendToChannelPrompt, setUserProfile, unplacedNote } from "../prompts";
+import { actionDocsVersion, globalActionDocs, globalChatPrompt, globalTaskRules, hasOldActionDocs, projectChatPrompt, sessionMarker, tddChatNote, tddChatPrompt, updatedActionDocs } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
-import { codeRequests, connectSession, currentSessionSteps, latestNotes, listSessions, linkSession, parseActions, parseTaskLinks, withChatLinks, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
-import { adhocPrompt, assessPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
+import { changedParts, codeRequests, connectSession, sentHashes, turnNote, type TurnPart, currentSessionSteps, latestNotes, listSessions, linkSession, parseActions, parseTaskLinks, withChatLinks, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
+import { adhocPrompt, assessPrompt, tddDraftPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
-import { parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmOutcome } from "../selfDm";
-import { AdhocSnapshot, Distilled, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
-import { blockerKey, longTitled, sinceWhen, stateOf } from "../tasks";
+import { afterMissedRead, parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmOutcome } from "../selfDm";
+import { AdhocSnapshot, Distilled, EpicChildren, EpicCreated, InitiativeApplied, ItemCreated, StoryApplied, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, RequirementsRead, TddDraft, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { blockerKey, longTitled, sinceWhen, stateOf, workedOn } from "../tasks";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { codeFor, codeNote, githubReposOf, projectOfTask, resolveCheckout, type CodeSource } from "../code";
 import { acceptedMerges } from "../duplicates";
 import { acceptedSessionMatches, nextScanSince, scanCandidates, scanEntry, scanSkips } from "../sessionScan";
 import { JobQueue } from "./queue";
-import { collectRepoState } from "./repos";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
 
 export const queue = new JobQueue(3);
@@ -96,15 +101,20 @@ async function logged<T>(job: string, scope: string | null, fn: () => Promise<{ 
 async function userId(): Promise<string> {
   const id = await db.getSetting("slack_user_id");
   if (id) return id;
-  await discoverProjects();
-  return (await db.getSetting("slack_user_id"))!;
+  // Learning the role reads the Slack profile; with Projects off there's no finding projects, which is the other way.
+  if (!projectsOn()) await learnRole();
+  else await discoverProjects();
+  const found = await db.getSetting("slack_user_id");
+  if (!found) throw new Error("Couldn't find your Slack user.");
+  return found;
 }
 
 export function discoverProjects(): Promise<void> {
   return track("discover", (status) =>
     logged("discover", null, async () => {
-      const [projects, known] = await Promise.all([db.listProjects(), db.listProjectChannels()]);
+      const [projects, known, knownEpics] = await Promise.all([db.listProjects(), db.listProjectChannels(), db.listProjectEpics()]);
       const live = projects.filter((p) => p.state === "tracked" || p.state === "suggested");
+      const ignored = new Set(projects.filter((p) => p.state === "ignored").map((p) => p.channel_id));
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: discoveryPrompt({
@@ -113,21 +123,23 @@ export function discoverProjects(): Promise<void> {
             name: projectName(p),
             aliases: p.profile?.aliases ?? [],
             channels: activeChannels(p).map((c) => c.name),
+            epics: activeEpics(p).map((e) => e.epic_key),
           })),
           // Unlinked channels, and every channel of a project the user ignored.
-          skip: known
-            .filter((c) => c.role === "excluded" || projects.find((p) => p.channel_id === c.project_id)?.state === "ignored")
-            .map((c) => c.name),
+          skip: known.filter((c) => c.role === "excluded" || ignored.has(c.project_id)).map((c) => c.name),
+          // The same for epics.
+          skipEpics: knownEpics.filter((e) => e.excluded || ignored.has(e.project_id)).map((e) => e.epic_key),
         }),
         schema: Discovery,
-        tools: TOOLS.slackRead,
-        // Sorting channels into projects; the cheaper model is fine here.
+        // Slack for channels, Jira for epics.
+        tools: [...TOOLS.slackRead, ...TOOLS.jiraRead],
+        // Sorting channels and epics into projects; the cheaper model is fine here.
         model: "sonnet",
-        // Paging through every channel, plus a look inside the unclear ones.
-        maxTurns: 40,
+        // Paging through every channel and a look inside the unclear ones, then the epic searches.
+        maxTurns: 50,
       });
       await db.setSetting("slack_user_id", data.user_id);
-      await db.applyDiscovery(planDiscovery(data.projects, known, new Set(projects.map((p) => p.channel_id))));
+      await db.applyDiscovery(planDiscovery(data.projects, known, new Set(projects.map((p) => p.channel_id)), knownEpics));
       return { value: undefined, costUsd };
     }),
   );
@@ -145,7 +157,8 @@ async function loadTaskIndex(): Promise<IndexEntry[]> {
     db.getDescriptionOverrides(),
     db.getNotDuplicates(),
   ]);
-  const visible = projects.filter((p) => !p.hidden);
+  // With Projects off, its tasks are hidden, so new work isn't matched (or merged) against them.
+  const visible = projectsOn() ? projects.filter((p) => !p.hidden) : [];
   const nameOf = new Map(visible.map((p) => [p.channel_id, projectName(p)]));
   const entries = buildIndex(
     [
@@ -187,20 +200,84 @@ async function recordRefinements(tasks: { id: string; refines?: string | null; d
   }
 }
 
+/**
+ * Reads a project's guiding doc into its requirements (see requirementsPrompt) when it's due, or
+ * always with force. A failure is recorded on the requirements rather than thrown, so it never stops
+ * a refresh. Runs inside whatever job calls it, showing under "requirements:<id>" meanwhile.
+ */
+async function readGuide(project: db.Project, force: boolean): Promise<number | undefined> {
+  const doc = project.docs?.doc;
+  // A workstream has no requirements doc to read.
+  if (!doc || projectKind(project) === "workstream" || !requirementsDue(project, new Date(), force)) return undefined;
+  const key = `requirements:${project.channel_id}`;
+  setStatus(key, `Reading ${guideTitle(project) ?? doc.title}`);
+  try {
+    const same = project.requirements?.link === doc.link && !project.requirements.unreadable ? project.requirements : null;
+    const { data, costUsd } = await runClaude({
+      prompt: requirementsPrompt({
+        doc: { link: doc.link, title: guideTitle(project) ?? doc.title },
+        previous: same
+          ? { requirements: same.requirements.map(({ id, text, section }) => ({ id, text, section })), docUpdated: force ? null : same.docUpdated }
+          : null,
+      }),
+      schema: RequirementsRead,
+      tools: TOOLS.driveRead,
+      model: await model(),
+    });
+    await db.saveRequirementsRead(project.channel_id, doc, data);
+    return costUsd;
+  } catch (e) {
+    await db.saveRequirementsError(project.channel_id, doc, (e as Error).message);
+    return undefined;
+  } finally {
+    setStatus(key, null);
+    bump();
+  }
+}
+
+/** Reads a project's guiding doc again now, whether or not it changed (Read again in its details). */
+export function readRequirements(projectId: string): Promise<void> {
+  return track(`requirements:${projectId}`, () =>
+    logged("requirements", projectId, async () => {
+      const project = await db.getProject(projectId);
+      return { value: undefined, costUsd: project ? await readGuide(project, true) : undefined };
+    }),
+  );
+}
+
+/**
+ * Links (or with null removes) a project's guiding doc, then refreshes the project: the refresh reads
+ * the doc's requirements first, then finds how far along each one is.
+ */
+export async function linkProjectDoc(projectId: string, doc: { link: string; title: string; kind?: string | null } | null): Promise<void> {
+  await db.setProjectDoc(projectId, doc);
+  bump();
+  if (doc) refreshProject(projectId).catch(() => {});
+}
+
 export async function refreshProject(channelId: string): Promise<void> {
   // Resolve before taking a queue slot: discovery needs a slot of its own.
   const uid = await userId();
   return track(`project:${channelId}`, (status) =>
     logged("project", channelId, async () => {
-      const project = await db.getProject(channelId);
+      const allProjects = await db.listProjects();
+      const project = allProjects.find((p) => p.channel_id === channelId);
       if (!project) throw new Error(`Unknown project ${channelId}`);
       try {
-        if (project.local_repos.length || project.gh_repos.length) status("Checking repos and PRs");
-        const repoState =
-          project.local_repos.length || project.gh_repos.length
-            ? await collectRepoState(project.local_repos, project.gh_repos)
-            : null;
-        if (repoState) await db.saveRepoState(channelId, repoState);
+        // Its open pull requests: only those its tickets name, from its feed as the last refresh left it.
+        const pullRequests = ((await db.getProjectTracking())[channelId]?.items ?? [])
+          .filter((i) => i.kind === "pr" && (i.state === "open" || i.state === "draft"))
+          .map(({ title, url, state, review, checks }) => ({ title, url, state, review: review ?? null, checks: checks ?? null }));
+
+        // Its guiding doc's requirements, read again when they're due, so this refresh can say how
+        // far along each one is.
+        const readCost = await readGuide(project, false);
+        const withDoc = readCost === undefined ? project : ((await db.getProject(channelId)) ?? project);
+        const doc = withDoc.docs?.doc ?? null;
+        const rows = requirementRows(withDoc);
+        // The requirements its plan has to place, each on the issue that delivers it.
+        const guided = doc && projectKind(project) !== "workstream" ? rows.map(({ requirement }) => requirement) : [];
+        const descoped = (progress: { id: string; status: string }[]) => progress.filter((p) => p.status === "descoped").map((p) => p.id);
 
         const startedAt = new Date();
         // This project's own tasks are already in its previous snapshot; the index adds everything else.
@@ -219,46 +296,342 @@ export async function refreshProject(channelId: string): Promise<void> {
         onStatus: status,
           prompt: projectPrompt({
             index,
-            channels: activeChannels(project),
+            // Its own channels, then ones it shares with other projects, and which projects those are.
+            channels: readChannels(project).map(({ channel_id, name }) => ({ channel_id, name })),
+            sharing: [...channelSharers(project, allProjects)].map(([channel_id, others]) => ({
+              channel_id,
+              name: readChannels(project).find((c) => c.channel_id === channel_id)?.name ?? channel_id,
+              with: others,
+            })),
             userId: uid,
             previous,
             profile: project.profile,
             excluded: project.channels.filter((c) => c.role === "excluded").map((c) => c.channel_id),
             learning,
             lastRefreshedAt: project.last_refreshed_at,
-            repoState,
+            pullRequests,
             now: startedAt,
             statusSetByUser:
               project.status_override && (!project.last_refreshed_at || project.status_override.at > project.last_refreshed_at) ? project.status_override : null,
+            kindSetByUser: project.kind_choice?.kind ?? null,
+            prioritySetByUser: project.priority_choice?.level ?? null,
+            kind: projectKind(project),
+            epics: activeEpics(project).map((e) => ({ key: e.epic_key, title: e.title })),
+            excludedEpics: project.epics.filter((e) => e.excluded).map((e) => e.epic_key),
+            // Newly linked epics, or no path of epics with their issues yet: their issues are read in
+            // full, not just what changed.
+            readAllChildren:
+              !project.snapshot?.path?.steps.some((s) => s.items?.length) || activeEpics(project).some((e) => !project.last_refreshed_at || e.at > project.last_refreshed_at!),
+            shipSetByUser: project.ship_choice && (!project.last_refreshed_at || project.ship_choice.at > project.last_refreshed_at) ? project.ship_choice : null,
+            // Until its plan keeps its own dependencies, the ones its old map found carry over.
+            dependencies: project.snapshot?.path?.steps.some((s) => s.items?.some((i) => i.waits_on?.length)) ? [] : await db.oldMapDependencies(channelId),
+            guide: doc && projectKind(project) !== "workstream"
+              ? {
+                  title: guideTitle(withDoc) ?? doc.title,
+                  link: doc.link,
+                  requirements: rows.map(({ requirement: r }) => ({ id: r.id, text: r.text, section: r.section })),
+                  progress: rows.flatMap(({ requirement: r, progress: pr }) => (pr ? [{ id: r.id, status: pr.status, note: pr.note }] : [])),
+                }
+              : null,
           }),
           schema: ProjectRefresh,
-          // Jira too, to find the project's epics, and Granola for its meetings.
-          tools: [...TOOLS.slackRead, ...TOOLS.jiraRead, ...TOOLS.granolaRead],
+          // Jira too, to find the project's epics, Confluence to give a requirements doc found there
+          // by its link on the cloud site, and Granola for its meetings.
+          tools: [...TOOLS.slackRead, ...TOOLS.jiraRead, ...TOOLS.confluenceRead, ...TOOLS.granolaRead],
           model: await model(),
+          // A plan that leaves requirements out is asked once more to place them.
+          recheck: guided.length
+            ? (d) => {
+                const missing = unplacedRequirements(d.path, guided.map((r) => r.id), descoped(d.requirements_progress));
+                if (!missing.length) return null;
+                status("Placing the requirements the plan left out");
+                return unplacedNote(guided.filter((r) => missing.includes(r.id)));
+              }
+            : undefined,
         });
-        const { profile: found, related_channels, epics, ...snapshot } = data;
+        const { profile: found, related_channels, epics, requirements_progress, ...read } = data;
         // What's known builds up: the refresh's profile folds into the last one (kept in history),
         // with the user's own names for the project among its aliases.
         if (project.profile) await db.archiveProfile(channelId, project.profile);
-        const profile = mergeProfile(project.profile, found, project.focus?.aliases ?? []);
+        // Jira links from before the move to the cloud site point at the same issues on the epics' site.
+        const site = jiraSite([...epics.map((e) => e.link), ...project.epics.map((e) => e.link)]);
+        const fixed = withCloudJiraLinks(read, mergeProfile(project.profile, found, project.focus?.aliases ?? []), site);
+        // Any it still left out go in the epic with the rest of their section of the doc.
+        const snapshot = guided.length && fixed.snapshot.path ? { ...fixed.snapshot, path: placeLeftovers(fixed.snapshot.path, guided, descoped(requirements_progress)) } : fixed.snapshot;
+        const profile = fixed.profile;
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
         await db.saveProjectSnapshot(channelId, snapshot, profile, startedAt.toISOString());
+        // Who's on it, in the people record that spans projects: their part in this one and their face.
+        await db.recordPeople(channelId, profile.people, startedAt.toISOString());
+        if (doc && rows.length && projectKind(project) !== "workstream") await db.saveRequirementsProgress(channelId, doc.link, requirements_progress);
+        // Epics it found join it the same way: never one linked elsewhere or that the user unlinked.
+        for (const e of epics) await db.linkEpic(channelId, { key: e.key, title: e.title, link: e.link }, "discovered");
         // Channels the project turned up in join it, unless they're already linked somewhere or the user unlinked them.
         for (const c of newRelatedChannels(related_channels, await db.listProjectChannels())) await db.linkChannel(channelId, c, "discovered");
         // Its tracking feed: the epics just found, and its repos' PRs and branches (read locally with gh).
         status("Checking GitHub");
-        const links = [...profile.resources.map((r) => r.link), ...snapshot.recent_updates.map((u) => u.link), ...snapshot.my_tasks.map((t) => t.link)];
-        await db.saveProjectTracking(channelId, await collectTracking(projectRepos(project.gh_repos, links), epics));
+        // The repos of the pull requests and branches its tickets link too, so the plan can show their state.
+        const ticketCode = (snapshot.path?.steps ?? []).flatMap((s) => [...(s.code ?? []), ...(s.items ?? []).flatMap((i) => i.code ?? [])]);
+        const links = [...profile.resources.map((r) => r.link), ...snapshot.recent_updates.map((u) => u.link), ...snapshot.my_tasks.map((t) => t.link), ...ticketCode];
+        // Its code: what names its work's keys in its repos, and what its plan links.
+        const scope = codeScope(snapshot.path, [...epics, ...activeEpics(project).map((e) => ({ key: e.epic_key }))]);
+        await db.saveProjectTracking(channelId, await collectTracking(projectRepos(project.gh_repos, links), epics, scope));
         await recordRefinements(data.my_tasks, index);
         await keepDismissed(data.my_tasks, channelId);
-        return { value: undefined, costUsd };
+        return { value: undefined, costUsd: costUsd + (readCost ?? 0) };
       } catch (e) {
         await db.saveProjectError(channelId, (e as Error).message);
         throw e;
       }
     }),
   );
+}
+
+/**
+ * Drafts a TDD for a project that has no requirements doc (see tddDraftPrompt), for the user to
+ * review. Nothing is created until they do (see createProjectDoc).
+ */
+export async function draftProjectTdd(projectId: string): Promise<void> {
+  // Why the last try failed, for the draft's chat and its button to say (see tddDraftError).
+  setStatus(tddDraftError(projectId), null);
+  return draftTdd(projectId).catch((e: Error) => {
+    setStatus(tddDraftError(projectId), e.message);
+    throw e;
+  });
+}
+
+/** The status key that holds why drafting a project's TDD last failed (read with useJobStatus). */
+export const tddDraftError = (projectId: string) => `tdd-error:${projectId}`;
+
+function draftTdd(projectId: string): Promise<void> {
+  return track(`tdd:${projectId}`, (status) =>
+    logged("tdd", projectId, async () => {
+      const project = (await db.listProjects()).find((p) => p.channel_id === projectId);
+      if (!project) throw new Error(`Unknown project ${projectId}`);
+      const p = project.profile;
+      const ship = shipTarget(project);
+      const { data, costUsd } = await runClaude({
+        onStatus: status,
+        prompt: tddDraftPrompt({
+          name: projectName(project),
+          purpose: p?.goal || project.snapshot?.description || null,
+          context: projectContext(project).map((e) => e.text),
+          people: (p?.people ?? []).map((x) => ({ name: x.name, role: x.role })),
+          path: (pathToShip(project)?.steps ?? []).map((s) => ({ what: s.what, status: s.status, owners: s.owners, track: s.track })),
+          ship: ship ? { what: ship.what, date: ship.date } : null,
+          epics: activeEpics(project).map((e) => ({ key: e.epic_key, title: e.title })),
+          channels: readChannels(project).map(({ channel_id, name }) => ({ channel_id, name })),
+          resources: (p?.resources ?? []).map((r) => ({ title: r.title, link: r.link })),
+          decisions: p?.decisions ?? [],
+        }),
+        schema: TddDraft,
+        tools: [...TOOLS.slackRead, ...TOOLS.jiraRead, ...TOOLS.driveRead, ...TOOLS.granolaRead],
+        model: await model(),
+        maxTurns: 60,
+      });
+      await db.saveDocDraft(projectId, { at: new Date().toISOString(), title: data.title.trim() || `${projectName(project)} TDD`, markdown: data.markdown, sources: data.sources });
+      bump();
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/**
+ * Creates the TDD the user reviewed (and maybe edited) in their Google Drive, and links it as the
+ * project's requirements doc, which reads its requirements.
+ */
+export async function createProjectDoc(projectId: string, title: string, markdown: string): Promise<void> {
+  return track(`tdd-create:${projectId}`, (status) =>
+    logged("doc", projectId, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: (s) => status(s === "Working" ? "Creating the doc" : s),
+        prompt: createDocPrompt(title, markdown),
+        schema: SentMessage,
+        tools: TOOLS.docCreate,
+        model: "sonnet",
+        maxTurns: 6,
+      });
+      if (!data.sent || !data.link) throw new Error(data.error ?? "Google Drive didn't create the doc");
+      await dropTddDraft(projectId);
+      await linkProjectDoc(projectId, { link: data.link, title, kind: "TDD" });
+      return { value: undefined, costUsd };
+    }),
+  );
+}
+
+/**
+ * The status key of a change Demian proposed in a project's plan being made in Jira (read with
+ * useJobStatus): one at a time per project.
+ */
+export const planApplyKey = (projectId: string) => `plan-apply:${projectId}`;
+/** Kept for the epic button's name; the same key. */
+export const epicCreateKey = planApplyKey;
+
+/** Runs one reviewed plan change in Jira, then records it in the project's path. */
+function applyInJira<T extends { sent: boolean; error?: string | null }>(
+  projectId: string,
+  working: string,
+  run: { prompt: string; schema: z.ZodType<T>; turns: number },
+  done: (data: T) => Promise<void>,
+): Promise<T> {
+  return track(planApplyKey(projectId), (status) =>
+    logged("plan-apply", projectId, async () => {
+      const { data, costUsd } = await runClaude({
+        onStatus: (s) => status(s === "Working" ? working : s),
+        prompt: run.prompt,
+        schema: run.schema,
+        tools: TOOLS.planApply,
+        model: "sonnet",
+        maxTurns: run.turns,
+      });
+      if (!data.sent) throw new Error(data.error ?? "Jira didn't make the change");
+      await done(data);
+      bump();
+      return { value: data, costUsd };
+    }),
+  );
+}
+
+/**
+ * Creates an epic Demian proposed, as the user reviewed it, in Jira (see createEpicPrompt): then it's
+ * one of the project's epics, and the path shows it as created, with the stories the user ticked in it.
+ */
+export function createProposedEpic(
+  projectId: string,
+  what: string,
+  epic: { projectKey: string; summary: string; description: string; move: string[]; parent?: string | null },
+): Promise<EpicCreated> {
+  return applyInJira(projectId, "Creating the epic in Jira", { prompt: createEpicPrompt(epic), schema: EpicCreated, turns: 10 + epic.move.length }, async (data) => {
+    if (!data.key) throw new Error(data.error ?? "Jira didn't create the epic");
+    const link = data.link ?? null;
+    await db.linkEpic(projectId, { key: data.key, title: epic.summary, link }, "user");
+    await db.updatePath(projectId, (path) => withEpicCreated(path, what, { key: data.key!, link }, epic.summary, data.moved));
+  });
+}
+
+/**
+ * Creates a story or task Demian proposed, as the user reviewed it, in Jira (see createItemPrompt):
+ * work in no ticket (by its id or title), or the story for a requirement no issue delivers (by the
+ * requirement, in the epic of that name). Then the path shows its ticket, in its epic when it went in one.
+ */
+export function createProposedItem(
+  projectId: string,
+  which: { id?: string | null; title: string } | { requirement: string; step: string | null },
+  item: Parameters<typeof createItemPrompt>[0],
+): Promise<ItemCreated> {
+  return applyInJira(projectId, `Creating the ${item.issueType.toLowerCase()} in Jira`, { prompt: createItemPrompt(item), schema: ItemCreated, turns: 6 }, async (data) => {
+    if (!data.key) throw new Error(data.error ?? "Jira didn't create it");
+    const ticket = { key: data.key, link: data.link ?? null };
+    await db.updatePath(projectId, (path) =>
+      "requirement" in which
+        ? withRequirementIssue(path, which.step, which.requirement, { ...ticket, title: item.summary, type: item.issueType, parent: data.parent ?? null })
+        : withItemCreated(path, which, ticket, data.parent ?? null, item.description),
+    );
+  });
+}
+
+/**
+ * Puts an initiative of the plan in Jira, as the user reviewed it (see applyInitiativePrompt): a
+ * proposed one, or a Jira epic that's an initiative's worth of work, with the epics under it. The
+ * epics it creates become the project's, and the path shows it all as applied.
+ */
+export function applyInitiative(
+  projectId: string,
+  initiativeId: string,
+  change: Parameters<typeof applyInitiativePrompt>[0],
+): Promise<InitiativeApplied> {
+  const moves = change.newEpics.reduce((n, e) => n + e.move.length, 0) + change.epics.length;
+  return applyInJira(projectId, "Making the change in Jira", { prompt: applyInitiativePrompt(change), schema: InitiativeApplied, turns: 12 + 2 * change.newEpics.length + moves }, async (data) => {
+    if (!data.key) throw new Error(data.error ?? "Jira didn't create the initiative");
+    for (const e of data.epics) await db.linkEpic(projectId, { key: e.key, title: e.name, link: e.link ?? null }, "user");
+    await db.updatePath(projectId, (path) => withInitiativeApplied(path, initiativeId, { key: data.key!, link: data.link ?? null }, data.epics, data.moved));
+  });
+}
+
+/**
+ * Makes a story-sized Jira epic a story in the epic the plan puts it in, as the user reviewed it (see
+ * applyStoryPrompt). It's no longer one of the project's epics.
+ */
+export function applyStory(projectId: string, change: { key: string; into: string; replace: boolean }): Promise<StoryApplied> {
+  return applyInJira(projectId, "Making the change in Jira", { prompt: applyStoryPrompt(change), schema: StoryApplied, turns: change.replace ? 16 : 6 }, async (data) => {
+    await db.unlinkEpic(projectId, change.key);
+    await db.updatePath(projectId, (path) => withStoryApplied(path, change.key, { key: data.key ?? change.key, link: data.link ?? null }, change.into));
+  });
+}
+
+/** Moves an issue into the epic the plan puts it in, as the user reviewed it. */
+export function moveIntoEpic(projectId: string, key: string, into: string): Promise<z.infer<typeof SentMessage>> {
+  return applyInJira(projectId, `Moving ${key}`, { prompt: moveIssuePrompt(key, into), schema: SentMessage, turns: 5 }, async () => {
+    await db.updatePath(projectId, (path) => withItemMoved(path, key, into));
+  });
+}
+
+/** A TDD draft's chat, keyed by its project: "tddchat:<project id>". */
+export const TDD_CHAT = "tddchat:";
+export const tddChatKey = (projectId: string) => `${TDD_CHAT}${projectId}`;
+
+/**
+ * The draft's file, as its chat works on it: written from the stored draft when they differ (the
+ * user edited it by hand since), and where it is. Throws when there's no draft any more.
+ */
+async function tddDraftFile(projectId: string): Promise<string> {
+  const draft = (await db.listProjects()).find((p) => p.channel_id === projectId)?.doc_draft;
+  if (!draft) throw new Error("The TDD draft is gone: it was created or thrown away.");
+  return invoke<string>("write_draft", { name: projectId, text: draft.markdown });
+}
+
+/** What the chat may do to the draft's file, and nothing else: read and change it. */
+export const draftFileRules = (path: string) => ["Read", "Edit", "Write"].map((tool) => `${tool}(/${path})`);
+
+/** The draft's file as its chat is leaving it, while a turn runs (shown live), or null. */
+export const readTddDraftFile = (projectId: string) => invoke<string | null>("read_draft", { name: projectId });
+
+/** Keeps what the chat changed in the draft's file as the draft. */
+async function keepTddDraftEdits(projectId: string): Promise<void> {
+  const [text, draft] = await Promise.all([readTddDraftFile(projectId), db.listProjects().then((ps) => ps.find((p) => p.channel_id === projectId)?.doc_draft)]);
+  if (!draft || text == null || !text.trim() || text === draft.markdown) return;
+  await db.saveDocDraft(projectId, { ...draft, markdown: text, updated: new Date().toISOString() });
+  bump();
+}
+
+/** The draft is done with (created, or thrown away): it goes, with its chat and the chat's file. */
+async function dropTddDraft(projectId: string): Promise<void> {
+  await db.deleteDocDraft(projectId);
+  await db.deleteSessionLink(tddChatKey(projectId));
+  await invoke("remove_draft", { name: projectId }).catch(() => {});
+}
+
+/** Discard on a TDD draft. */
+export async function discardTddDraft(projectId: string): Promise<void> {
+  await dropTddDraft(projectId);
+  bump();
+}
+
+/**
+ * Starts a TDD draft's chat with the user's first message: a session that changes the draft's file
+ * as they ask (see tddChatNote); resolves once it's linked, while the first turn runs on.
+ */
+export async function startTddChat(projectId: string, message: string, onTurn: () => void): Promise<void> {
+  const project = (await db.listProjects()).find((p) => p.channel_id === projectId);
+  const draft = project?.doc_draft;
+  if (!project || !draft) throw new Error("The TDD draft is gone: it was created or thrown away.");
+  const key = tddChatKey(projectId);
+  await linkSession(key);
+  await db.updateSessionLink(key, { topic: true });
+  bump();
+  const prompt = tddChatPrompt(
+    {
+      key,
+      name: projectName(project),
+      purpose: project.profile?.goal || project.snapshot?.description || null,
+      epics: activeEpics(project).map((e) => ({ key: e.epic_key, title: e.title })),
+      channels: readChannels(project).map(({ channel_id, name }) => ({ channel_id, name })),
+      sources: draft.sources,
+    },
+    message,
+  );
+  runTaskSession(key, prompt, true).then(onTurn, onTurn);
 }
 
 export async function refreshAdhoc(): Promise<void> {
@@ -269,8 +642,20 @@ export async function refreshAdhoc(): Promise<void> {
       const previous = await db.getStoredAdhoc();
       const startedAt = new Date();
       const index = await loadTaskIndex();
-      const [learning, descriptions, priorities] = await Promise.all([learningFor(null, ["tasks", "priority"]), db.getDescriptionOverrides(), db.getPriorityOverrides()]);
-      const projects = (await db.listProjects()).filter((p) => !p.hidden);
+      const [learning, descriptions, priorities, states, plans] = await Promise.all([
+        learningFor(null, ["tasks", "priority"]),
+        db.getDescriptionOverrides(),
+        db.getPriorityOverrides(),
+        db.getTaskStates(),
+        db.getTaskPlans(),
+      ]);
+      // With Projects off, projects aren't refreshed, so their channels' tasks are found here too; with
+      // Updates off there's no inbox or news, so messages waiting on a reply are tasks.
+      const withProjects = projectsOn();
+      const withUpdates = updatesOn();
+      // Tasks the user has worked on stay tasks when the refresh sorts quick replies into the inbox.
+      const worked = previous.tasks.map((t) => t.id).filter((id) => workedOn(id, states, plans, descriptions, priorities));
+      const projects = withProjects ? (await db.listProjects()).filter((p) => !p.hidden) : [];
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: adhocPrompt({
@@ -279,6 +664,9 @@ export async function refreshAdhoc(): Promise<void> {
           previous: previous.tasks.map((t) => asUserHasIt(t, descriptions, priorities)),
           previousReplies: previous.replies,
           learning,
+          projects: withProjects,
+          updates: withUpdates,
+          worked,
           projectChannels: projects.flatMap((p) => activeChannels(p).map((c) => c.name)),
           lastRefreshedAt: previous.refreshed_at,
           now: startedAt,
@@ -306,7 +694,8 @@ export function refreshCalendar(): Promise<void> {
         prompt: calendarPrompt({
           date: localDate(new Date()),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          projectNames: projects.filter((p) => !p.hidden).map((p) => projectName(p)),
+          // With Projects off there are none to tie meetings to.
+          projectNames: projectsOn() ? projects.filter((p) => !p.hidden).map((p) => projectName(p)) : [],
         }),
         schema: CalendarDay,
         tools: [...TOOLS.calendarRead, ...TOOLS.slackRead, ...TOOLS.gmailRead],
@@ -416,6 +805,8 @@ export function checkWatchedTopic(id: string): Promise<void> {
  * conditional actions are only looked into while still open.
  */
 export async function checkWatchedTopics(): Promise<void> {
+  // Off in Settings: none are checked.
+  if (!watchedTopicsOn()) return;
   const states = await db.getTaskStates();
   const topics = (await db.listWatchedTopics()).filter((t) => stillWatched(stateOf(states, t.id)));
   await Promise.allSettled(topics.map((t) => checkWatchedTopic(t.id)));
@@ -445,14 +836,26 @@ export async function pollSelfDm(now = new Date()): Promise<void> {
   const state = parseSelfDmState(await db.getSetting("self_dm_state"));
   const oldest = selfDmOldest(state, now);
   try {
-    const read = await runClaude({
-      prompt: selfDmPrompt(uid, oldest),
-      schema: SelfDmPoll,
-      tools: TOOLS.selfDmRead,
-      // A mechanical read, every few minutes: the cheapest model.
-      model: "haiku",
-      maxTurns: 8,
-    });
+    let read: Awaited<ReturnType<typeof runClaude<SelfDmPoll>>>;
+    try {
+      read = await runClaude({
+        prompt: selfDmPrompt(uid, oldest),
+        schema: SelfDmPoll,
+        tools: TOOLS.selfDmRead,
+        // A mechanical read, every few minutes: the cheapest model. Room to look for the Slack
+        // connector again while it's still connecting.
+        model: "haiku",
+        maxTurns: 10,
+      });
+      if (read.data.unreachable) throw new Error(`Slack wasn't reachable: ${read.data.unreachable}`);
+    } catch (e) {
+      // Nothing was read: the next check reads from the same place. It's logged only once the reads
+      // keep failing (see afterMissedRead).
+      const missed = afterMissedRead(state, (e as Error).message);
+      if (missed.log) await db.logFinish(await db.logStart("selfdm", null), { error: missed.log });
+      await db.setSetting("self_dm_state", JSON.stringify(missed.state));
+      return;
+    }
     const { messages, state: next } = takeFromPoll(state, read.data, oldest, now, read.costUsd);
     if (messages.length === 0) {
       await db.setSetting("self_dm_state", JSON.stringify(next));
@@ -809,7 +1212,8 @@ export function checkTask(taskId: string, task: CheckTaskInput["task"], otherTas
 /** Has Claude dig into whether a blocker is real and whether it was already solved somewhere else. */
 export function checkBlocker(
   projectName: string,
-  channelId: string,
+  /** The project's main Slack channel; null for a project with no channel. */
+  channelId: string | null,
   blocker: Blocker,
   reminder?: { at: string; link: string | null } | null,
   kind: "blocker" | "active" = "blocker",
@@ -905,6 +1309,7 @@ export const STOPPED_BY_YOU = "You stopped it.";
 /** Stop in a chat: ends the turn under way, and everything it started. */
 export function stopTaskSession(taskId: string) {
   turnStops.get(taskId)?.abort();
+  clearAsks(taskId);
 }
 
 function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promise<void> {
@@ -924,7 +1329,12 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
       await db.updateSessionLink(taskId, { lastError: null });
       try {
         const global = taskId.startsWith("global:");
+        // A project's chat: the Demian chat, centered on that project (see projectChat.ts).
+        const chatProjectId = projectOfChat(taskId);
         const watched = taskId.startsWith(WATCH_CHAT) ? await db.getWatchedTopic(taskId.slice(WATCH_CHAT.length)) : null;
+        // A TDD draft's chat works on the draft's file, written from the draft as it stands now.
+        const tddFor = taskId.startsWith(TDD_CHAT) ? taskId.slice(TDD_CHAT.length) : null;
+        const draftPath = tddFor ? await tddDraftFile(tddFor) : null;
         /** A task's own chat, with a plan to keep current (not the Demian chat, a watched topic, or a chat about something else). */
         const taskChat = !global && !watched && !link?.topic;
         // Once the plan has moved on from the opening prompt's (the session restated it, or Orb
@@ -943,10 +1353,12 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         // already on hand (it spans them all, so it doesn't clone).
         // A task filed under no project gets the same as the Demian chat, so a question only the code
         // answers never finds it missing.
-        const own = global
-          ? null
-          : watched
-            ? ((await db.listProjects()).find((p) => p.channel_id === watched.projectId) ?? null)
+        const own = chatProjectId
+          ? ((await db.listProjects()).find((p) => p.channel_id === chatProjectId) ?? null)
+          : global
+            ? null
+            : watched || tddFor
+            ? ((await db.listProjects()).find((p) => p.channel_id === (watched ? watched.projectId : tddFor)) ?? null)
             : await projectOfTask(taskId);
         const everyProject = !own;
         const codeProjects = everyProject ? (await db.listProjects()).filter((p) => p.state === "tracked") : [own];
@@ -954,27 +1366,49 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         // Plus code the session asked for along the way ("[orb] code …"), while it's still on disk.
         const onDisk = link?.code?.length ? await invoke<string[]>("existing_dirs", { paths: link.code.map((c) => c.dir) }).catch(() => []) : [];
         const code = [...projectCode, ...(link?.code ?? []).filter((c) => onDisk.includes(c.dir) && !projectCode.some((p) => p.dir === c.dir))];
-        const context = [
-          taskId.startsWith("global:")
-            ? await globalContext(link)
-            : watched
-              ? WATCH_CHAT_CONTEXT
-              : [
-                  taskChat ? await taskChangesNote(taskId, own, link) : "",
-                  steps
-                    ? shown?.rechecked
-                      ? `I re-checked your steps against our conversation, so my planner's list, and its step numbers, may differ from the ones you've been using. From now on, number every [orb] report against this list, not your earlier one:\n${steps}`
-                      : `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
-                    : "",
-                  taskChat ? PLAN_REMINDER : "",
-                ]
+        // What the planner tells the chat with this turn, in parts. The first turn has them all in its
+        // system prompt. Claude Code keeps that system prompt when a chat is resumed and ignores a new
+        // one, so a resumed turn gets the parts that changed since in its message, as a note the chat
+        // doesn't show (see turnNote).
+        const parts: TurnPart[] = [
+          { key: "notes", text: notesPrompt() },
+          // A Demian chat begun with an older list of the changes it can propose is given the current one.
+          { key: "docs", text: global && hasOldActionDocs(link) ? updatedActionDocs() : "" },
+          {
+            key: "planner",
+            text: global
+              ? [await globalContext(link), chatProjectId && own ? projectRecordText(own, ((await db.getProjectTracking())[own.channel_id]?.items ?? []).filter((i) => i.kind !== "epic")) : ""]
                   .filter(Boolean)
-                  .join("\n\n"),
-          lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "",
-          codeNote(code, everyProject ? [] : codeProjects),
-        ]
-          .filter(Boolean)
-          .join("\n\n") || undefined;
+                  .join("\n\n")
+              : watched
+                ? WATCH_CHAT_CONTEXT
+                : draftPath
+                  ? tddChatNote(draftPath)
+                  : [
+                    taskChat ? await taskChangesNote(taskId, own, link) : "",
+                    steps
+                      ? shown?.rechecked
+                        ? `I re-checked your steps against our conversation, so my planner's list, and its step numbers, may differ from the ones you've been using. From now on, number every [orb] report against this list, not your earlier one:\n${steps}`
+                        : `My planner now shows these steps; number your [orb] reports against this list:\n${steps}`
+                      : "",
+                    taskChat ? PLAN_REMINDER : "",
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n"),
+          },
+          { key: "lessons", text: lessons.length ? `What my corrections have taught you about how I like plans and messages:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "" },
+          { key: "code", text: codeNote(code, everyProject ? [] : codeProjects) },
+        ];
+        const resumed = !!link?.sessionId;
+        // runSessionTurn puts the standing notes in the system prompt itself.
+        const context = resumed
+          ? undefined
+          : parts
+              .filter((p) => p.key !== "notes")
+              .map((p) => p.text)
+              .filter(Boolean)
+              .join("\n\n") || undefined;
+        const told = resumed ? turnNote(changedParts(parts, link?.sent)) : "";
         // The reply as it's written, for the chat to show live: at most every 80ms, and always the
         // latest text in the end (Claude Code sends a reply in quick bursts, so a dropped update can be
         // most of it).
@@ -997,16 +1431,55 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         // docs (it can't call Drive itself) keeps saying so from its own history otherwise.
         // What the chat had already written, so only this turn's changes to its task are made after it.
         const blocksBefore = taskChat ? (await chatBlocks(taskId).catch(() => [])).length : 0;
-        const asked = [prompt, DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : "", PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
-        const turn = await runSessionTurn({ signal: stopper.signal, prompt: asked, tools: sessionTools(byUser), ...SESSION_MODEL, resume: link?.sessionId, cwd: link?.cwd, onStatus: status, context, onText, dirs: code.map((c) => c.dir) }).finally(() => {
+        // Not in a TDD draft's chat, where "doc" and "ticket" mean the draft and the tickets it cites,
+        // and the doc is created from the planner.
+        const reminders = draftPath
+          ? []
+          : [DOC_ASK.test(prompt) ? DOC_REMINDER : "", EVENT_ASK.test(prompt) ? EVENT_REMINDER : "", TICKET_ASK.test(prompt) ? TICKET_REMINDER : ""];
+        const asked = [prompt, told, ...reminders, PREFERENCE_ASK.test(prompt) ? PREFERENCE_REMINDER : ""].filter(Boolean).join("\n\n");
+        // Auto mode's check decides the tools the chat wasn't given, unless the user would rather be
+        // asked about each (the chat_auto_mode setting, "off"). Whatever it can't decide, and every
+        // one where auto mode isn't available, is asked in the chat (see chatAsks).
+        const permissionMode = (await db.getSetting("chat_auto_mode")) === "off" ? ASK_PERMISSION_MODE : CHAT_PERMISSION_MODE;
+        const turn = await runSessionTurn({
+          signal: stopper.signal,
+          prompt: asked,
+          // A TDD chat also reads meetings, which the draft drew on.
+          tools: draftPath ? [...sessionTools(byUser), ...TOOLS.granolaRead] : sessionTools(byUser),
+          ...SESSION_MODEL,
+          resume: link?.sessionId,
+          cwd: link?.cwd,
+          onStatus: status,
+          context,
+          onText,
+          dirs: code.map((c) => c.dir),
+          permissionMode,
+          allowRules: draftPath ? [...(link?.allowRules ?? []), ...draftFileRules(draftPath)] : link?.allowRules,
+          onAsk: async (ask) => {
+            const answer = await askInChat(taskId, ask);
+            // Kept with the chat, so its later turns may do the same without asking.
+            if (answer === "always" && ask.rules.length)
+              await db.updateSessionLink(taskId, (current) => ({ allowRules: [...new Set([...(current.allowRules ?? []), ...ask.rules])] })).catch(() => {});
+            return answer;
+          },
+          onAskGone: (id) => dropAsk(taskId, id),
+          // Auto mode asked for and not given: Claude Code asks about everything instead, and the chat says why.
+          onMode: (mode) => setNoAutoMode(taskId, permissionMode === CHAT_PERMISSION_MODE && mode !== CHAT_PERMISSION_MODE),
+        }).finally(() => {
           // The whole reply goes out before it's cleared, so the chat holds all of it until the
           // transcript's copy arrives.
           window.clearTimeout(flush);
           if (latest) setStatus(liveKey, latest);
           window.setTimeout(() => setStatus(liveKey, null), 60);
+          clearAsks(taskId);
+          setNoAutoMode(taskId, false);
         });
         if (turn.sessionId) await db.updateSessionLink(taskId, { sessionId: turn.sessionId });
+        // What the turn changed in the draft is kept, even when it ended badly.
+        if (tddFor) await keepTddDraftEdits(tddFor).catch(() => {});
         if (turn.error) throw new Error(turn.error);
+        // Told: the next turn is told only what changes after this.
+        await db.updateSessionLink(taskId, { sent: sentHashes(parts) });
         // The changes it made to its task this turn (its description, title, project, links, notes).
         if (taskChat) await applyChatChanges(taskId, blocksBefore).catch(() => {});
         // Code it asked to read: added for its next turns, and it's told so it carries on. That turn
@@ -1016,6 +1489,8 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
         return { value: undefined, costUsd: turn.costUsd };
       } catch (e) {
         const stopped = (e as Error).message === "Stopped";
+        // A TDD chat stopped partway keeps the edits it made before it stopped.
+        if (taskId.startsWith(TDD_CHAT)) await keepTddDraftEdits(taskId.slice(TDD_CHAT.length)).catch(() => {});
         await db.updateSessionLink(taskId, { lastError: stopped ? STOPPED_BY_YOU : (e as Error).message });
         throw e;
       }
@@ -1084,7 +1559,7 @@ async function addRequestedCode(taskId: string): Promise<string | null> {
   await db.updateSessionLink(taskId, { code, codeAsked: [...(link.codeAsked ?? []), ...fresh] });
   return [
     ORB_NOTE,
-    found.length ? `you can read ${found.map((f) => `${f.label} (${f.dir})`).join(", ")} now, read-only, with Read, Grep and Glob; reads there that were refused will work if you try them again.` : "",
+    found.length ? `you can read ${found.map((f) => `${f.label} (${f.dir})`).join(", ")} now with Read, Grep and Glob; reads there that were refused will work if you try them again.` : "",
     missing.length
       ? `I couldn't find ${missing.map((m) => `"${m}"`).join(", ")} as a code checkout on this computer or a GitHub repo I can copy. Ask me for it by its GitHub owner/name if you know it, or tell the user which repo you need so they can add it to a project in Settings.`
       : "",
@@ -1099,9 +1574,33 @@ const CONTEXT_ITEMS = 3;
 /** The same for a blocked or at-risk project. */
 const CONTEXT_ITEMS_URGENT = 8;
 
+/** How many people the global chat's context lists from the people record. */
+const CONTEXT_PEOPLE = 40;
+
+/**
+ * Who's on the tracked projects, from the people record: each person's part in each project and what
+ * they're doing on it, the most central first, for the global chat to answer who's doing what.
+ */
+function peopleSection(people: db.PersonRecord[], projects: db.Project[]): string {
+  const names = new Map(projects.filter((p) => p.state === "tracked").map((p) => [p.channel_id, projectName(p)]));
+  const lines = people
+    .map((person) => {
+      const parts = Object.entries(person.projects).filter(([id]) => names.has(id));
+      return { person, parts, weight: Math.max(0, ...parts.map(([, x]) => x.importance)) };
+    })
+    .filter((x) => x.parts.length)
+    .sort((a, b) => b.weight - a.weight || b.parts.length - a.parts.length)
+    .slice(0, CONTEXT_PEOPLE)
+    .map(({ person, parts }) => `- ${person.name}: ${parts.map(([id, x]) => `${x.role} on ${names.get(id)}${x.working_on ? ` (${x.working_on})` : ""}`).join("; ")}`);
+  return lines.length ? `People on my projects, and what they're doing on them:\n${lines.join("\n")}` : "";
+}
+
 /** What the planner shows right now, for the global chat's next turn, so it works from current ids. */
 async function globalContext(link: SessionLink | undefined): Promise<string> {
-  const [projects, reading, adhoc, manual, states, profile, notes, aliases, moved, sessions] = await Promise.all([
+  // Only what the areas that are on hold: no projects with Projects off, no briefing with Updates off.
+  const withProjects = projectsOn();
+  const withUpdates = updatesOn();
+  const [allProjects, reading, adhoc, manual, states, profile, notes, aliases, moved, sessions, people] = await Promise.all([
     db.listProjects(),
     db.getReading(),
     db.getAdhoc(),
@@ -1112,12 +1611,18 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
     db.getTaskAliases(),
     db.getProjectOverrides(),
     db.getSessionLinks(),
+    db.listPeople(),
   ]);
+  const projects = withProjects ? allProjects : [];
   const open = (id: string) => !["done"].includes(states.get(id)?.status ?? "todo") && !states.get(id)?.dismissed;
   const projectLines = projects
     .filter((p) => p.state !== "merged")
     .map((p) => {
-      const channels = p.channels.filter((c) => c.role !== "excluded").map((c) => `#${c.name} (${c.channel_id})`).join(", ");
+      const channels =
+        readChannels(p)
+          .map((c) => `#${c.name} (${c.channel_id}${c.shared ? ", shared from another project" : ""})`)
+          .join(", ") || "none (no Slack channel)";
+      const epicList = activeEpics(p).map((e) => `${e.epic_key} (${e.title})`).join(", ");
       const shown = projectStatus(p);
       const setByMe = p.status_override && shown === p.status_override.status && p.status_override.at > (p.last_refreshed_at ?? "");
       const status = shown ? ` — ${shown}${setByMe ? " (set by me)" : p.snapshot ? `: ${p.snapshot.status_reason}` : ""}` : "";
@@ -1135,7 +1640,20 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
         .map((c) => `${c.text}${c.by === "you" ? " (mine)" : ""}`)
         .join("; ");
       const repos = [...p.local_repos, ...githubReposOf(p)];
-      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}${status}${context ? `. Context: ${context}` : ""}. Code: ${repos.length ? repos.join(", ") : "none mapped"}${items.length ? `\n  Open: ${items.join("; ")}` : ""}`;
+      // Project or workstream, and a project's requirements doc and how far along its requirements are.
+      const kind = projectKind(p);
+      const counts = requirementCounts(requirementRows(p));
+      const doc = p.docs?.doc
+        ? ` Requirements doc: ${guideTitle(p)} (${p.docs.doc.link})${counts.total ? `, ${counts.done} of ${counts.total} requirements done` : ""}.`
+        : kind === "project"
+          ? " No requirements doc linked."
+          : "";
+      const kindNote = kind ? ` A ${kind}${p.kind_choice ? " (set by me)" : ""}.` : "";
+      const priority = projectPriority(p);
+      const priorityNote = priority ? ` Priority ${priority.level}${priority.byYou ? " (set by me)" : ""}.` : "";
+      const ship = p.snapshot?.path?.ship;
+      const shipNote = kind === "project" && ship ? ` Ships: ${ship.what || "?"}${ship.date ? ` on ${ship.date}` : ", no date named"}.` : "";
+      return `- ${projectName(p)} [id ${p.channel_id}, ${p.state}] channels: ${channels}. Epics: ${epicList || "none"}${status}.${kindNote}${priorityNote}${shipNote}${doc}${context ? ` Context: ${context}.` : ""} Code: ${repos.length ? repos.join(", ") : "none mapped"}${items.length ? `\n  Open: ${items.join("; ")}` : ""}`;
     });
   const calendar = await db.getCalendarDay(localDate(new Date()));
   // Each task as its card shows it: one merged into another isn't listed on its own (its card is the
@@ -1172,12 +1690,13 @@ async function globalContext(link: SessionLink | undefined): Promise<string> {
   };
   return [
     // The current changes and rules, every turn: a chat open since before one was added still knows it.
-    `The changes you can propose, as [orb] action blocks (the current list, which replaces any earlier one):\n${GLOBAL_ACTION_DOCS}\n\n${GLOBAL_TASK_RULES}`,
+    `The changes you can propose, as [orb] action blocks (the current list, which replaces any earlier one):\n${globalActionDocs()}\n\n${globalTaskRules()}`,
     "What my planner shows right now:",
     `About me: ${profile?.trim() || "(not set)"}`,
     notes.length ? `Corrections I've already given:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
-    `Projects (tracked ones are on the board; suggested and ignored ones aren't):\n${projectLines.join("\n") || "(none)"}`,
-    reading ? `Today's briefing: ${reading.text}` : "",
+    withProjects ? `Projects (tracked ones are on the board; suggested and ignored ones aren't):\n${projectLines.join("\n") || "(none)"}` : "",
+    withProjects ? peopleSection(people, projects) : "",
+    reading && withUpdates ? `Today's briefing: ${reading.text}` : "",
     `My open tasks (use these ids in task changes):\n${byRelevance(tasks).slice(0, 120).map(taskLine).join("\n") || "(none)"}`,
     link?.applied && Object.keys(link.applied).length
       ? `Changes you proposed that I've applied (the rest I haven't, or turned down):\n${Object.values(link.applied).map((a) => `- ${a.summary}. ${a.result}`).join("\n")}`
@@ -1282,8 +1801,22 @@ export async function globalChatKey(fresh = false): Promise<string> {
 /** Starts the global chat's session with the user's first message; resolves once it's linked. */
 export async function startGlobalChat(key: string, message: string, onTurn: () => void): Promise<void> {
   await linkSession(key);
+  // Its opening prompt carries the changes it can propose, as they are now.
+  await db.updateSessionLink(key, { openedDocs: actionDocsVersion() });
   bump();
   runTaskSession(key, globalChatPrompt(key, message), true).then(onTurn, onTurn);
+}
+
+/**
+ * Starts a project's chat (see projectChat.ts) with the user's first message; resolves once it's
+ * linked, while the first answer is written.
+ */
+export async function startProjectChat(project: db.Project, message: string, onTurn: () => void): Promise<void> {
+  const key = projectChatKey(project.channel_id);
+  await linkSession(key);
+  await db.updateSessionLink(key, { openedDocs: actionDocsVersion() });
+  bump();
+  runTaskSession(key, projectChatPrompt(key, { name: projectName(project), id: project.channel_id }, message), true).then(onTurn, onTurn);
 }
 
 /** Continues a task's working session with the user's answer to what it asked. */
@@ -1379,7 +1912,8 @@ export function refreshTracking(projectId: string): Promise<void> {
     const prior = stored[projectId];
     const links = [...(project.profile?.resources ?? []).map((r) => r.link), ...(project.snapshot?.recent_updates ?? []).map((u) => u.link)];
     const repos = projectRepos(project.gh_repos, [...links, ...(prior?.repos ?? []).map((r) => `https://github.com/${r}`)]);
-    await db.saveProjectTracking(projectId, await collectTracking(repos, prior?.epics ?? []));
+    const scope = codeScope(project.snapshot?.path, [...(prior?.epics ?? []), ...activeEpics(project).map((e) => ({ key: e.epic_key }))]);
+    await db.saveProjectTracking(projectId, await collectTracking(repos, prior?.epics ?? [], scope));
     bump();
   });
 }
@@ -1446,7 +1980,8 @@ export function refreshReading(): Promise<void> {
       const now = new Date();
       const today = localDate(now);
       const [projects, adhoc, manual, assessments, states, priorityOverrides, dueOverrides, userId] = await Promise.all([
-        db.listProjects(),
+        // With Projects off, the briefing leaves projects out: they aren't refreshed or shown.
+        projectsOn() ? db.listProjects() : Promise.resolve([] as db.Project[]),
         db.getAdhoc(),
         db.listManualTasks(),
         db.getAssessments(),
@@ -1536,6 +2071,9 @@ export function learnRole(): Promise<string> {
       await db.setSetting("user_profile_at", String(Date.now()));
       const name = data.name?.trim();
       if (name) await db.setSetting("user_name", name);
+      // Finding projects also learns it, but not while Projects is off.
+      const slackId = data.user_id?.trim();
+      if (slackId && !(await db.getSetting("slack_user_id"))) await db.setSetting("slack_user_id", slackId);
       return { value: role, costUsd };
     }),
   );
@@ -1608,18 +2146,33 @@ export function refreshAll(): Promise<void> {
       }
       // What the latest corrections teach goes into this refresh's prompts.
       await maybeDistill().catch(() => {});
-      status("Finding your project channels");
-      try {
-        await discoverProjects();
-      } catch {
-        // Still refresh the projects we already know about.
+      // Each area is refreshed only while it's on (see features): projects to find and refresh, the
+      // task list (and the inbox and news in Updates, which come from the same read of Slack and
+      // email), and the briefing. After an upgrade, Projects is first turned off if Jira or GitHub is
+      // missing, so this refresh doesn't read projects that are about to go.
+      if (!projectsUpgradeSettled()) status("Checking Jira and GitHub");
+      await ensureProjectsUpgrade();
+      const withProjects = projectsOn();
+      const withUpdates = updatesOn();
+      const readMessages = tasksOn() || withUpdates;
+      if (withProjects) {
+        status("Finding your project channels");
+        try {
+          await discoverProjects();
+        } catch {
+          // Still refresh the projects we already know about.
+        }
       }
-      const projects = (await db.listProjects()).filter((p) => !p.hidden);
-      status(`Refreshing ${projects.length} project${projects.length === 1 ? "" : "s"}, your calendar and tasks`);
+      const projects = withProjects ? (await db.listProjects()).filter((p) => !p.hidden) : [];
+      const what = [
+        projects.length ? `${projects.length} project${projects.length === 1 ? "" : "s"}` : "",
+        "your calendar",
+        readMessages ? (tasksOn() ? "tasks" : "messages") : "",
+      ].filter(Boolean);
+      status(`Refreshing ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}`);
       await Promise.allSettled([
         refreshCalendar(),
-        refreshAdhoc(),
-        assessPendingTasks(),
+        ...(readMessages ? [refreshAdhoc(), assessPendingTasks()] : []),
         checkWatchedTopics(),
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
@@ -1631,11 +2184,15 @@ export function refreshAll(): Promise<void> {
       // Refreshes ran side by side, so two may have added the same work; and this catches any already there.
       status("Merging duplicate tasks");
       await dedupeTasks().catch(() => {});
-      // The reading summarizes everything above, so it goes last.
-      status("Writing the daily briefing");
-      await refreshReading().catch(() => {});
+      // The reading summarizes everything above, so it goes last. It's in Updates.
+      if (withUpdates) {
+        status("Writing the daily briefing");
+        await refreshReading().catch(() => {});
+      }
       // Once, for tasks written before titles had a length rule.
       await shortenLongTitles().catch(() => {});
+      // When it finished, for Refresh's menu.
+      await db.setSetting("last_full_refresh_at", new Date().toISOString());
     },
     false,
   );
