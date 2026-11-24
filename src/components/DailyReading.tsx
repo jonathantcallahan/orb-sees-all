@@ -31,6 +31,11 @@ function collectUpdates(projects: Project[], news: NewsItem[]): Update[] {
   return [...fromProjects, ...fromNews].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 }
 
+/** The updates still to read: not dismissed, and not moved to the inbox (`inbox` holds its ids). */
+export function openUpdates(projects: Project[], news: NewsItem[], states: Map<string, TaskState>, inbox: Set<string>): Update[] {
+  return collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed && !inbox.has(u.key));
+}
+
 /** "Open thread" for Slack, "Open email" for Gmail, "Open" for anything else. */
 function sourceLabel(link: string): string {
   if (link.includes("slack.com")) return "Open thread";
@@ -203,7 +208,7 @@ export function DailyReading({
   useEffect(() => localStorage.setItem("updates-open", updatesOpen ? "1" : "0"), [updatesOpen]);
   const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
-  const updates = collectUpdates(projects, news).filter((u) => !stateOf(states, u.key).dismissed && !inbox.has(u.key));
+  const updates = openUpdates(projects, news, states, inbox);
 
   return (
     <>

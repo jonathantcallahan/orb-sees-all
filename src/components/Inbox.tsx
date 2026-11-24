@@ -30,10 +30,7 @@ export function Inbox({
   busy?: boolean;
   onChange: () => void;
 }) {
-  const open = replies.filter((r) => {
-    const st = stateOf(states, r.id);
-    return !st.done && !st.dismissed && !taskIds.has(r.id);
-  });
+  const open = openReplies(replies, states, taskIds);
   if (open.length === 0) return null;
 
   return (
@@ -53,6 +50,14 @@ export function Inbox({
       </div>
     </section>
   );
+}
+
+/** The inbox's messages still waiting: not done or dismissed, and not on the task list (`taskIds`). */
+export function openReplies(replies: QuickReply[], states: Map<string, TaskState>, taskIds: Set<string>): QuickReply[] {
+  return replies.filter((r) => {
+    const st = stateOf(states, r.id);
+    return !st.done && !st.dismissed && !taskIds.has(r.id);
+  });
 }
 
 /** One inbox row. Draft response opens the reply chat (which picks up where it left off if reopened). */

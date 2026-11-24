@@ -112,6 +112,7 @@ To change things later:
    - Channels named `#tmp-*` go straight onto the board, and a project can also come from its Jira epics. Other channels and epics that look like projects are kept as suggestions: Settings → **Projects** lists them, and the Demian chat can track one.
    - Settings → **Projects** lists each project's channels. You can unlink a channel or merge two projects there.
    - A project's pull requests and branches are the ones on GitHub that name its Jira tickets, read with `gh`.
+4. **Updates:** once you've read every update and your inbox is empty, a painting hangs in their place: a public-domain painting from the [Cleveland Museum of Art's Open Access collection](https://openaccess-api.clevelandart.org/), a new one each day. Hover over its label and click ↻ for another, or click its title to open it on the museum's site.
 
 Each refresh is a Claude Code run, and it counts toward your claude.ai plan's usage. Settings shows the cost of recent refreshes.
 

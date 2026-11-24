@@ -1,7 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { Kbd, RefreshButton, ScrambleText, Spinner, updatedText } from "./components/common";
-import { DailyReading } from "./components/DailyReading";
+import { DailyReading, openUpdates } from "./components/DailyReading";
+import { ArtWall } from "./components/ArtWall";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { UpdateButton } from "./components/UpdateButton";
@@ -19,7 +20,7 @@ import { ProjectDue } from "./components/ProjectRecord";
 import { revealTask } from "./components/TaskCard";
 import { WatchedTopics } from "./components/WatchedTopics";
 import { needsYou } from "./watched";
-import { Inbox } from "./components/Inbox";
+import { Inbox, openReplies } from "./components/Inbox";
 import { ChatDockProvider, InDock, type ChatDock } from "./components/chatDock";
 import { TddChat, tddChatProject } from "./components/TddChat";
 import { useAreasOn, type Area } from "./features";
@@ -308,6 +309,10 @@ export default function App() {
     data.taskStates,
   );
 
+  // What's in the Updates area's inbox, and the messages already on the task list (kept out of it).
+  const replyIds = new Set(data.adhoc.replies.map((r) => r.id));
+  const adhocTaskIds = new Set(data.adhoc.tasks.map((t) => t.id));
+
   // The project whose TDD chat is open in the Projects area's column, if any.
   const chatProject = data.projects.find((p) => p.channel_id === tddChatProject(projectChat)) ?? null;
 
@@ -369,12 +374,15 @@ export default function App() {
                     projects={withProjects ? data.projects : []}
                     news={data.adhoc.news}
                     states={data.taskStates}
-                    inbox={new Set(data.adhoc.replies.map((r) => r.id))}
+                    inbox={replyIds}
                     busy={running.includes("reading")}
                     updatesBusy={running.some((k) => k.startsWith("project:") || k === "adhoc")}
                     onChange={reload}
                   />
-                  <Inbox replies={data.adhoc.replies} states={data.taskStates} taskIds={new Set(data.adhoc.tasks.map((t) => t.id))} busy={running.includes("adhoc")} onChange={reload} />
+                  <Inbox replies={data.adhoc.replies} states={data.taskStates} taskIds={adhocTaskIds} busy={running.includes("adhoc")} onChange={reload} />
+                  {/* Both clear: a painting fills the space they leave. */}
+                  {openUpdates(withProjects ? data.projects : [], data.adhoc.news, data.taskStates, replyIds).length === 0 &&
+                    openReplies(data.adhoc.replies, data.taskStates, adhocTaskIds).length === 0 && <ArtWall />}
                 </section>
                 <section className="detail-pane chat-dock" ref={setDockTarget}>
                   {!dockOwner && <p className="muted small chat-dock-empty">Click Explain on an Update or Draft on an Inbox item to open a chat here</p>}
