@@ -1087,19 +1087,26 @@ fn hide_window_buttons(window: &tauri::WebviewWindow) {
 /// square unless it's that shape, but show a custom icon (the kind pasted in Get Info) as drawn, so
 /// the app sets one on itself, as Steam does. On every launch: an update replaces the whole app, and
 /// an install over it can leave an older custom icon behind.
+///
+/// The Dock takes a running app's icon when it opens, before this runs, so after an update it would
+/// show the built-in icon (Moss) until the next launch. Setting the running app's icon fixes that.
 #[cfg(target_os = "macos")]
 fn set_round_icon() {
-    use objc2::AllocAnyThread;
-    use objc2_app_kit::{NSImage, NSWorkspace, NSWorkspaceIconCreationOptions};
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage, NSWorkspace, NSWorkspaceIconCreationOptions};
     use objc2_foundation::{NSData, NSString};
+    let data = NSData::with_bytes(include_bytes!("../icons/round.png"));
+    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else { return };
+    if let Some(mtm) = MainThreadMarker::new() {
+        // Safety: a valid image, set on the main thread.
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
+    }
     // The app around the running program (Demian.app/Contents/MacOS/Demian). In development the
     // program isn't in one.
     let Some(app) = std::env::current_exe().ok().and_then(|exe| exe.ancestors().nth(3).map(Path::to_path_buf)) else { return };
     if !app.extension().is_some_and(|ext| ext == "app") {
         return;
     }
-    let data = NSData::with_bytes(include_bytes!("../icons/round.png"));
-    let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else { return };
     // Fails quietly where the app can't be written to; it keeps its usual icon.
     NSWorkspace::sharedWorkspace().setIcon_forFile_options(
         Some(&image),

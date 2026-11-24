@@ -11,6 +11,13 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.7.3",
+    date: "2026-11-24",
+    notes: [
+      "Fix: after an update, the Dock and the app switcher show Demian's round icon again, not the older one it had before.",
+    ],
+  },
+  {
     version: "0.7.2",
     date: "2026-11-24",
     notes: [
