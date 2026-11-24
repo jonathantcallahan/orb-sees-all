@@ -1,6 +1,7 @@
 import { ATLASSIAN_RULE, PLAN_RULES, STEP_RULE, WRITING_RULES } from "./baseLessons";
 import { z } from "zod";
 import { runCliStreaming, type RunInput, type StreamingCliRunner } from "./cli";
+import { isMac } from "./platform";
 
 // Read-only connector tools. Nothing here can send, post, draft or edit.
 const SLACK = "mcp__claude_ai_Slack__";
@@ -180,11 +181,77 @@ const RUN_SETTINGS = JSON.stringify({
 });
 
 /**
+ * Folders below home that macOS guards: it asks the user before an app reads them, and blames the
+ * app that started whatever read them, so a chat's command counts as Demian.
+ */
+const GUARDED_FOLDERS = String.raw`Library|Desktop|Documents|Downloads|Music|Movies|Pictures|Library/(Containers|Group[\ ]+Containers|Mail|Messages|Safari|Mobile[\ ]+Documents|CloudStorage)`;
+
+/** Not part of a path: what may come just before or after one. */
+const NOT_PATH = String.raw`[^[:alnum:]_.@+*?/~-]`;
+
+/**
+ * What a chat may not search or list as a whole (extended regexes, for grep -Ei: macOS paths ignore
+ * case): the home folder or a guarded folder in it, /Users or /Volumes, and the whole disk for a
+ * search command. A file or folder further down (~/Downloads/report.pdf, ~/day-planner) is fine.
+ */
+const SCAN_PATTERNS = [
+  String.raw`(^|[^[:alnum:]_.@+*?/~$-])(~|\$HOME|\$\{HOME\}|/Users/[[:alnum:]._-]+)(/(${GUARDED_FOLDERS}))?(/?\**(${NOT_PATH}|$)|/\*\*)`,
+  String.raw`(^|[^[:alnum:]_.@+*?/~$-])/(Users|Volumes)(${NOT_PATH}|$)`,
+  String.raw`(^|[^[:alnum:]_-])(find|fd|du|rg|grep|mdfind|locate|tree)[[:space:]]([^;&|]*[[:space:]])?/([[:space:]]|$)`,
+];
+
+/** Running the program inside an app bundle, which makes the app Demian's for macOS. */
+const APP_PATTERN = String.raw`\.app/Contents/MacOS/`;
+
+const SCAN_REFUSED =
+  "Demian blocked this: it reaches the whole home folder, the whole disk, or a folder macOS guards (Desktop, Documents, Downloads, Music, Movies, Pictures, Library and the app data in it). Touching those from a Demian chat makes macOS ask the user to let Demian in. Search a specific project folder, or the folders this chat was given; if you need a file somewhere else, ask the user for its exact path.";
+const APP_REFUSED =
+  "Demian blocked this: it starts an app by running the program inside its .app bundle, and macOS then asks the user to let Demian into everything that app touches (contacts, calendars, files). Do not start apps or browsers from a chat; if something needs checking in one, ask the user.";
+
+/** Text as one sh word, in single quotes. */
+function shQuote(text: string): string {
+  return `'${text.replace(/'/g, `'\\''`)}'`;
+}
+
+/** A PreToolUse hook's reply that refuses the call, with the reason Claude sees, quoted for sh. */
+function refusal(reason: string): string {
+  return shQuote(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
+}
+
+/**
+ * A PreToolUse hook (sh, macOS) that refuses a tool call whose `keys` in tool_input start an app's
+ * program or search a whole folder macOS guards (see SCAN_PATTERNS). plutil reads the JSON Claude
+ * Code passes on stdin. Anything else goes ahead, to auto mode's check as before.
+ */
+function guardHook(keys: string[]): string {
+  return [
+    "t=$(cat)",
+    `s=$(for k in ${keys.join(" ")}; do printf '%s\\n' "$t" | /usr/bin/plutil -extract "tool_input.$k" raw -o - - 2>/dev/null; echo; done)`,
+    `if printf '%s\\n' "$s" | grep -Eq ${shQuote(APP_PATTERN)}; then printf '%s' ${refusal(APP_REFUSED)}; exit 0; fi`,
+    `if printf '%s\\n' "$s" | grep -Eiq ${SCAN_PATTERNS.map((p) => `-e ${shQuote(p)}`).join(" ")}; then printf '%s' ${refusal(SCAN_REFUSED)}; exit 0; fi`,
+  ].join("; ");
+}
+
+/**
  * A chat's settings: the same login, but reads outside its folders aren't blocked. Like any other
  * use of a tool it wasn't given, auto mode's check decides each one, or the chat asks you (see
- * runSessionTurn).
+ * runSessionTurn). On macOS, a hook first refuses commands and searches that would sweep the home
+ * folder or start an app (see guardHook): macOS charges what a chat touches to Demian, and asks
+ * the user about each guarded folder it reaches.
  */
-const CHAT_RUN_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" } });
+export function chatRunSettings(mac: boolean): string {
+  const guarded: [string, string[]][] = [
+    ["Bash", ["command"]],
+    ["Grep", ["path"]],
+    ["Glob", ["path", "pattern"]],
+  ];
+  return JSON.stringify({
+    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" },
+    ...(mac ? { hooks: { PreToolUse: guarded.map(([matcher, keys]) => ({ matcher, hooks: [{ type: "command", command: guardHook(keys) }] })) } } : {}),
+  });
+}
+
+const CHAT_RUN_SETTINGS = chatRunSettings(isMac);
 
 // Belt and braces: built-in tools that could touch the machine, or send what a run has read to an
 // address of its choosing (WebFetch), are denied outright in background runs. Chats may use them

@@ -42,6 +42,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
+      # Signs the macOS app with Demian's own certificate (self-signed, so not Apple's), which lets
+      # macOS keep the user's answers to its privacy prompts across updates. Tauri's own import
+      # (APPLE_CERTIFICATE) only takes Apple certificates, so it goes in a keychain here and Tauri
+      # gets just the identity's name. See scripts/signing-certificate.md.
+      - name: Import the signing certificate
+        if: runner.os == 'macOS'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$CERTIFICATE" ]; then
+            echo "No MACOS_CERTIFICATE secret: the app is signed ad hoc."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -f pkcs12 -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/signing.p12"
+          security find-identity -p codesigning "$KEYCHAIN" | grep '"Demian Code Signing"' >/dev/null
+          echo "APPLE_SIGNING_IDENTITY=Demian Code Signing" >> "$GITHUB_ENV"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

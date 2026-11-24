@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 /** The few places the app talks or behaves differently on Windows than on macOS. */
 export const isWindows = typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
 
+/** macOS, where the system asks before an app reads guarded folders (see chatRunSettings). */
+export const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+
 /** The shortcut modifier as shown in hints: "⌘" on macOS, "Ctrl+" on Windows. */
 export const MOD = isWindows ? "Ctrl+" : "⌘";
 

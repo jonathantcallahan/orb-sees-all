@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import envelope from "./__fixtures__/project-envelope.json";
-import { describeTool, extractJson, findEnvelope, runClaude, runSessionTurn } from "./claude";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { chatRunSettings, describeTool, extractJson, findEnvelope, runClaude, runSessionTurn } from "./claude";
 import type { StreamingCliRunner as CliRunner } from "./cli";
 import { ProjectSnapshot, SelfDmPoll } from "./schema";
 
@@ -591,5 +593,71 @@ describe("Jira and Confluence through Atlassian's Rovo connector", () => {
     expect(ATLASSIAN_RULE).toMatch(/never by the old link's page id/);
     expect(texts[3]).toContain("getConfluencePage");
     expect(texts[3]).not.toContain("Confluence pages can't be read here");
+  });
+});
+
+describe("chat guard", () => {
+  type Hook = { matcher: string; hooks: { type: string; command: string }[] };
+  const hooks = (mac: boolean): Hook[] => JSON.parse(chatRunSettings(mac)).hooks?.PreToolUse ?? [];
+
+  it("guards Bash, Grep and Glob on macOS only, and keeps the login override", () => {
+    expect(hooks(true).map((h) => h.matcher)).toEqual(["Bash", "Grep", "Glob"]);
+    expect(hooks(false)).toEqual([]);
+    expect(JSON.parse(chatRunSettings(true)).env).toEqual({ ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "" });
+  });
+
+  // Runs the real hook the way Claude Code does: the call as JSON on stdin, a refusal as JSON on stdout.
+  const decide = (tool: string, input: Record<string, string>): string => {
+    const hook = hooks(true).find((h) => h.matcher === tool)!;
+    const stdin = JSON.stringify({ cwd: "/Users/ana/Library/Application Support/com.orb.app/work", transcript_path: "/Users/ana/.claude/projects/x.jsonl", tool_name: tool, tool_input: input });
+    const out = spawnSync("/bin/sh", ["-c", hook.hooks[0].command], { input: stdin, encoding: "utf8" });
+    expect(out.status).toBe(0);
+    return out.stdout ? JSON.parse(out.stdout).hookSpecificOutput.permissionDecision : "allow";
+  };
+  const bash = (command: string) => decide("Bash", { command, description: "d" });
+
+  it.skipIf(!existsSync("/usr/bin/plutil"))("refuses sweeps of the home folder, guarded folders and the disk", () => {
+    for (const command of [
+      'find /private/tmp /Users/ana -name "flow*.html" 2>/dev/null | head',
+      "find '/Users/ana' -maxdepth 2",
+      "ls ~",
+      "cd ~ && find . -name x",
+      'find ~/Documents -name "*.pdf"',
+      'grep -r foo "$HOME/Downloads/"',
+      "du -sh ${HOME}/*",
+      "rg foo /Users/ana/Library",
+      "ls ~/Library/Containers",
+      "find / -name foo 2>/dev/null",
+      "find /Users -name x",
+      // macOS paths ignore case.
+      "find ~/desktop -name x",
+      "ls /users/ana",
+    ])
+      expect(bash(command), command).toBe("deny");
+    expect(decide("Glob", { pattern: "**/compass-ui*", path: "/Users/ana" })).toBe("deny");
+    expect(decide("Glob", { pattern: "/Users/ana/**/compass-ui*" })).toBe("deny");
+    expect(decide("Grep", { pattern: "x", path: "/Users/ana/" })).toBe("deny");
+  });
+
+  it.skipIf(!existsSync("/usr/bin/plutil"))("refuses starting an app's program", () => {
+    expect(bash('C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; "$C" --headless --screenshot')).toBe("deny");
+  });
+
+  it.skipIf(!existsSync("/usr/bin/plutil"))("lets through work in specific folders", () => {
+    for (const command of [
+      "git -C /Users/ana/day-planner status",
+      "ls ~/.claude/projects | head",
+      'cd "/Users/ana/Library/Application Support/com.orb.app/work" && ls -la flow*.html',
+      "ls ~/Downloads/report.pdf",
+      'awk "{print \\$1 / 1024}" sizes.txt',
+      'echo "a/b" | tr / -',
+      'find . -path "*/Library/*" -name x',
+      'grep -rn "/Users/" src | head',
+      'open -a "Google Chrome" https://example.com',
+      "echo ~/day-planner",
+    ])
+      expect(bash(command), command).toBe("allow");
+    expect(decide("Glob", { pattern: "**/*.ts", path: "/Users/ana/day-planner/src" })).toBe("allow");
+    expect(decide("Grep", { pattern: "\\$HOME", path: "/Users/ana/day-planner" })).toBe("allow");
   });
 });

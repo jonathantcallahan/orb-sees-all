@@ -13,6 +13,12 @@ if [ -f ~/.tauri/orb.key ]; then
 else
   UPDATER='{"bundle":{"createUpdaterArtifacts":false}}'
 fi
+# Sign with Demian's own certificate when it's in the keychain (see scripts/signing-certificate.md),
+# so macOS keeps your answers to its privacy prompts from one build to the next. Without it, the
+# build is signed ad hoc, and macOS asks again after every install.
+if security find-identity -p codesigning 2>/dev/null | grep -q '"Demian Code Signing"'; then
+  export APPLE_SIGNING_IDENTITY="Demian Code Signing"
+fi
 # Homebrew's rustup doesn't put cargo on PATH.
 command -v cargo >/dev/null || PATH="$(dirname "$(rustup which cargo)"):$PATH"
 if [ -d local/icons ]; then
