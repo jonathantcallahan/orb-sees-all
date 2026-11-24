@@ -11,6 +11,18 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.7.1",
+    date: "2026-11-23",
+    notes: [
+      "Create as draft, beside Send when you review a Slack message: it's saved in your Slack drafts, in that conversation, for you to send from Slack.",
+      "A task you finish stays in Today until you move it out, including ones carried over from earlier days and finished meeting prep. Refreshes no longer bring finished tasks back as open.",
+      "Blocked keeps its color when you're not pointing at the card, and stays in the title row, like Working and Human.",
+      "In a project's details, Work's heading shows full screen and the requirements bar on one line. The issue list is headed Jira Issues, and every epic starts closed.",
+      "Restarting a pomodoro series clears its focus time from the calendar. Restarting the timer clears only the part done of the block it starts over.",
+      "Fixes: reading your Demian DM no longer keeps asking Claude when it couldn't read it. Messages to a thread no longer say \"the thread in thread in\". Faces that overlap show their initials centered.",
+    ],
+  },
+  {
     version: "0.7.0",
     date: "2026-11-20",
     notes: [
