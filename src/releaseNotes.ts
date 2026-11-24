@@ -11,6 +11,14 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.7.2",
+    date: "2026-11-24",
+    notes: [
+      "On a Mac, Demian now remembers your answers when macOS asks to let it into a folder or control Spotify and Music, from one update to the next. This update asks once more; after that, your answers stick.",
+      "Chats no longer search your whole home folder or folders like Documents, Downloads, Music and Photos, and no longer start apps like Chrome, which set off those macOS prompts. They look in a specific folder, or ask you where a file is.",
+    ],
+  },
+  {
     version: "0.7.1",
     date: "2026-11-23",
     notes: [
