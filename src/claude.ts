@@ -132,6 +132,8 @@ export const TOOLS = {
   selfDmReply: [`${SLACK}slack_add_reaction`, `${SLACK}slack_send_message`],
   /** The one write tool, used only to post a reminder the user wrote and clicked Send on. */
   slackSend: [`${SLACK}slack_send_message`],
+  /** Saving a message as a draft in its Slack conversation, for the user to send there: used only when they review it and click Create as draft. */
+  slackDraft: [`${SLACK}slack_send_message_draft`],
   /** Opening a group DM, used only to send a message the user reviewed and clicked Send on to several people. */
   slackGroupDm: [`${SLACK}slack_create_conversation`],
   /** Creating a Google Doc, used only for a doc the user reviewed and clicked Create on. */
@@ -470,6 +472,12 @@ export interface ClaudeOptions<T> {
    * doesn't parse, the first reply is.
    */
   recheck?(data: T): string | null;
+  /**
+   * What a reply with no JSON object in it means (none, or only braces in its prose that don't parse),
+   * for a run where that's an answer in itself: taken as is, with no retry. The self-DM read's: Claude saying in words that it couldn't read the DM,
+   * where asking again for "the corrected JSON" only gets a refusal to make up a result.
+   */
+  noJson?(reply: string): T;
 }
 
 const quoted = (text: string, max = 40) => {
@@ -588,9 +596,18 @@ export function extractJson(text: string): unknown {
   return JSON.parse(text.slice(start, end + 1));
 }
 
+/** Why a run stopped on an error, in words, when its result doesn't say: from the result line's subtype. */
+function stopReason(subtype: string | undefined): string {
+  if (subtype === "error_max_turns") return "ran out of turns before finishing";
+  if (subtype === "error_during_execution") return "stopped on an error while working";
+  return "stopped on an error";
+}
+
 interface Envelope {
   is_error: boolean;
   result: string;
+  /** "success", or which error it stopped on ("error_max_turns", "error_during_execution"). */
+  subtype?: string;
   total_cost_usd?: number;
   duration_ms?: number;
   session_id?: string;
@@ -674,7 +691,7 @@ async function callOnce(
   );
   const envelope = findEnvelope(out.stdout);
   if (!envelope) throw new Error(`claude exited ${out.code}: ${(out.stderr || out.stdout).slice(-500)}`);
-  if (envelope.is_error) throw new Error(`claude: ${envelope.result}`);
+  if (envelope.is_error) throw new Error(`claude: ${envelope.result || stopReason(envelope.subtype)}`);
   return envelope;
 }
 
@@ -697,7 +714,16 @@ export async function runClaude<T>(opts: ClaudeOptions<T>, run: StreamingCliRunn
     let problem: string;
     let rejected = "Your reply was rejected";
     try {
-      const parsed = opts.schema.safeParse(extractJson(envelope.result));
+      const reply = envelope.result ?? "";
+      let json: unknown;
+      try {
+        json = extractJson(reply);
+      } catch (e) {
+        // No JSON in it (braces in its prose don't make it JSON): taken as noJson says, if it says.
+        if (opts.noJson) return { data: opts.noJson(reply), costUsd, durationMs };
+        throw e;
+      }
+      const parsed = opts.schema.safeParse(json);
       const recheck = parsed.success && attempt === 0 ? (opts.recheck?.(parsed.data) ?? null) : null;
       if (parsed.success && !recheck) return { data: parsed.data, costUsd, durationMs };
       if (parsed.success) {

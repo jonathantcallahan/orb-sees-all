@@ -904,7 +904,9 @@ export function sendDestination(send: { to: string; label?: string }): string {
   const id = send.to.match(/\/archives\/([A-Z0-9]+)/)?.[1] ?? "";
   // A group DM or DM by its people, never "#mpdm-…" or a pound sign (see channelLabel).
   const label = send.label && (/^#?mpdm-/.test(send.label) || /^[DG]/.test(id) ? channelLabel({ name: send.label, channel_id: id.startsWith("D") ? id : undefined }).replace(/^#/, "") : send.label);
-  if (label) return thread ? `the thread in ${label}` : label;
+  // A session that already called it a thread ("thread in #launch") isn't told "the thread in thread
+  // in"; a channel whose name starts with "thread" ("thread-reviews") still is one.
+  if (label) return thread ? (/^(the )?thread in\b/i.test(label) ? label.replace(/^(the )?thread in/i, "the thread in") : `the thread in ${label}`) : label;
   if (!thread) {
     const target = slackTarget(send.to);
     return target.kind === "person"

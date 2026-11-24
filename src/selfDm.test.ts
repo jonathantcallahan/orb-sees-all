@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { setAreaOn } from "./features";
-import { afterMissedRead, emptySelfDmState, parseSelfDmState, SELF_DM_DEFAULT, SELF_DM_MISSES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmState } from "./selfDm";
+import { afterMissedRead, emptySelfDmState, parseSelfDmState, SELF_DM_DEFAULT, SELF_DM_MISSES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, unreadReason, type SelfDmState } from "./selfDm";
 import { SelfDmPoll } from "./schema";
 import { SELF_DM_READ_TOOL, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt } from "./prompts";
 import { TOOLS } from "./claude";
@@ -181,5 +181,21 @@ describe("instructions from the user's own DM", () => {
     expect(p).toContain("exactly as written");
     expect(p).toContain("nowhere else");
     expect(p.match(/channel_id "(\w+)"/g)?.every((c) => c === 'channel_id "U123"')).toBe(true);
+  });
+});
+
+describe("unreadReason", () => {
+  it("keeps the first sentence or two of a reply that says in words why the DM wasn't read", () => {
+    expect(
+      unreadReason("I couldn't read the DM. The Slack read was denied because this session is running in don't-ask mode.\n\nI haven't tried another route."),
+    ).toBe("I couldn't read the DM. The Slack read was denied because this session is running in don't-ask mode.");
+    expect(unreadReason("The Slack connector timed out")).toBe("The Slack connector timed out");
+  });
+
+  it("says so when the reply is empty, and keeps a long one short", () => {
+    expect(unreadReason("  ")).toBe("Claude didn't say what it found");
+    const long = unreadReason(`${"word ".repeat(80)}end.`);
+    expect(long.length).toBe(240);
+    expect(long.endsWith("…")).toBe(true);
   });
 });

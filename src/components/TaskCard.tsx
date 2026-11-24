@@ -404,6 +404,12 @@ function DueDate({ task, onChange }: { task: CardTask; onChange: () => void }) {
   );
 }
 
+/**
+ * A status change that keeps the task where it shows. Meeting prep you haven't touched is in Today
+ * without its saved state saying so (see TaskColumn); this says so, so it stays there once it's done.
+ */
+const keepingPlace = (task: { todayOn: string | null }, patch: { status: TaskStatus }) => (task.todayOn ? { todayOn: task.todayOn, ...patch } : patch);
+
 /** A dismissal, recorded with what the task was, so a refresh doesn't raise it again. */
 function recordDismiss(task: CardTask) {
   // Dismissing a watched topic is unwatching it, not a lesson about tasks.
@@ -449,7 +455,7 @@ function StatusSelect({
         onChange={async (e) => {
           // Dismiss lives in the same menu: it hides the task rather than setting a status.
           const dismiss = e.target.value === DISMISS;
-          await setTaskState(task.id, dismiss ? { dismissed: true } : { status: e.target.value as TaskStatus });
+          await setTaskState(task.id, dismiss ? { dismissed: true } : keepingPlace(task, { status: e.target.value as TaskStatus }));
           if (!dismiss) await onPicked?.();
           onChange();
           if (dismiss) recordDismiss(task);
@@ -836,6 +842,8 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   };
   const [error, setError] = useState<string | null>(null);
   const sending = useJobStatus(`handoff:${taskId}`);
+  // Saving it as a Slack draft rather than sending it (see sendHandoff).
+  const [drafting, setDrafting] = useState(false);
   const doc = send.kind === "doc";
   const event = send.kind === "event";
   const ticket = send.kind === "ticket";
@@ -863,6 +871,18 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
   const ticketWhere = ticket ? [field("project"), field("type"), field("epic") && `in ${field("epic")}`].filter(Boolean).join(" · ") || undefined : undefined;
   // What it is, the same way for every kind: an eyebrow saying what's ready, then what it is or where
   // it goes, on one line (all of it on hover).
+  const go = async (asDraft: boolean) => {
+    if (!text.trim()) return;
+    try {
+      setError(null);
+      setDrafting(asDraft);
+      await sendHandoff(taskId, send, text.trim(), asDraft);
+      setOpen(false);
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
   const eyebrow = problem ? "Can't send this yet" : doc ? "Ready to create a Google Doc" : event ? "Ready to create an event" : ticket ? "Ready to file a Jira ticket" : send.to.startsWith("http") ? "Ready to reply" : "Ready to send";
   const title = creates ? send.to : `${where.charAt(0).toUpperCase()}${where.slice(1)}`;
   return (
@@ -896,7 +916,7 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
           </button>
         ) : (
           <button className="cta-primary" disabled={!!sending} onClick={() => setOpen(true)}>
-            {sending ? (creates ? "Creating…" : "Sending…") : creates ? "Review & create" : "Review & send"}
+            {sending ? (creates ? "Creating…" : drafting ? "Saving draft…" : "Sending…") : creates ? "Review & create" : "Review & send"}
           </button>
         )}
       </div>
@@ -915,7 +935,7 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
           sendLabel={doc ? "Create doc" : ticket ? "File ticket" : event ? (invites ? "Create & invite" : "Create event") : "Send"}
           tall={doc}
           text={text}
-          status={sending ? `${sending}…` : error ? `Couldn't ${creates ? "create it" : "send"}: ${error}` : null}
+          status={sending ? `${sending}…` : error ? `Couldn't ${creates ? "create it" : drafting ? "save the draft" : "send"}: ${error}` : null}
           failed={!!error && !sending}
           busy={!!sending}
           onChange={edit}
@@ -924,17 +944,9 @@ function HandoffRow({ taskId, send, onChange }: { taskId: string; send: PendingS
             flush();
             setOpen(false);
           }}
-          onSend={async () => {
-            if (!text.trim()) return;
-            try {
-              setError(null);
-              await sendHandoff(taskId, send, text.trim());
-              setOpen(false);
-              onChange();
-            } catch (e) {
-              setError((e as Error).message);
-            }
-          }}
+          onSend={() => go(false)}
+          // A Slack message can wait in your Slack drafts instead, in the same conversation.
+          secondary={creates ? undefined : { label: "Create as draft", title: "Saves it in your Slack drafts, in that conversation, for you to send from Slack", onClick: () => go(true) }}
           actions={
             send.to.startsWith("http") ? (
               <ExternalLink href={send.to} className="link-button small more-link">
@@ -1930,7 +1942,7 @@ export function TaskCard({
     wasBlocked.current = anyBlocked;
     if (!sessionLink) return;
     const next = statusForBlockedSteps(anyBlocked, was, task.status);
-    if (next) setTaskState(task.id, { status: next }).then(onChange);
+    if (next) setTaskState(task.id, keepingPlace(task, { status: next })).then(onChange);
   }, [anyBlocked, !!sessionLink]);
   // The task is under way once Claude starts on the plan (you told it to go ahead in the chat): only
   // as that happens, so a task you set back to To do afterwards stays as you set it.
@@ -1939,7 +1951,7 @@ export function TaskCard({
   useEffect(() => {
     const justBegun = begun && !wasBegun.current;
     wasBegun.current = begun;
-    if (justBegun && task.status === "todo") setTaskState(task.id, { status: "in_progress" }).then(onChange);
+    if (justBegun && task.status === "todo") setTaskState(task.id, keepingPlace(task, { status: "in_progress" })).then(onChange);
   }, [begun]);
   const waitingIndex = outlineSteps.findIndex((st) => st.progress?.state === "waiting");
   const waitingStep = waitingIndex >= 0 ? outlineSteps[waitingIndex] : undefined;
@@ -1951,7 +1963,7 @@ export function TaskCard({
   useEffect(() => {
     const justFinished = allStepsDone && !wereAllDone.current;
     wereAllDone.current = allStepsDone;
-    if (justFinished && task.status !== "done") setTaskState(task.id, { status: "done" }).then(onChange);
+    if (justFinished && task.status !== "done") setTaskState(task.id, keepingPlace(task, { status: "done" })).then(onChange);
   }, [allStepsDone]);
   const needsInput = watch ? !!waitingStep : !!sessionLink?.sessionId && (!!waitingStep || toSend.length > 0);
   /**
@@ -2290,7 +2302,9 @@ export function TaskCard({
   const waitingFor = humanKey(waitingStep?.title, toSend.map((m) => m.key));
   const human = needsInput && !task.done && (!!watch || sessionLink?.humanSeen !== waitingFor);
   const working = !!sessionWorking && !task.done;
-  const pinStatus = human || working;
+  // Blocked shows as they do: it's held up, and what you'd look for.
+  const blocked = !watch && !task.done && task.status === "blocked";
+  const pinStatus = human || working || blocked;
   const status = (
     <StatusSelect
       task={task}
@@ -2339,7 +2353,7 @@ export function TaskCard({
           {!pinStatus && status}
         </span>
       )}
-      {/* Human or Working stays in the title row, folded or open: it's what you'd look for. */}
+      {/* Human, Working or Blocked stays in the title row, folded or open: it's what you'd look for. */}
       {pinStatus && status}
       {watch?.refresh ? (
         <span className={`card-refresh${watch.refresh.busy ? " busy" : ""}`} onClick={(e) => e.stopPropagation()}>

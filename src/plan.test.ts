@@ -6,7 +6,7 @@ vi.mock("./db", () => ({}));
 vi.mock("./jobs", () => ({}));
 vi.mock("./claude", () => ({}));
 
-const { codeLink, codeScope, dayOf, planMap, epicDescription, epicPeople, epicProgress, epicProjectKeys, epicSpan, initiativeSpan, initiativeStatus, openAtFirst, placeLeftovers, placeRequirements, planGroups, unplacedRequirements, planTimeline, proposedMove, at, withEpicCreated, withInitiativeApplied, withItemCreated, withItemMoved, withRequirementIssue, withStoryApplied, itemDescription, keysIn, placeCode, EPIC_DAYS } = await import("./plan");
+const { codeLink, codeScope, dayOf, planMap, epicDescription, epicPeople, epicProgress, epicProjectKeys, epicSpan, initiativeSpan, initiativeStatus, placeLeftovers, placeRequirements, planGroups, unplacedRequirements, planTimeline, proposedMove, at, withEpicCreated, withInitiativeApplied, withItemCreated, withItemMoved, withRequirementIssue, withStoryApplied, itemDescription, keysIn, placeCode, EPIC_DAYS } = await import("./plan");
 const { initials, nameHue } = await import("./faces");
 const { avatarIndex, importanceOf, mergePeople, mergeProfile, recordedPeople, withCloudJiraLinks } = await import("./projects");
 const { applyInitiativePrompt, applyStoryPrompt, createEpicPrompt, createItemPrompt, moveIssuePrompt, projectPrompt, unplacedNote } = await import("./prompts");
@@ -59,13 +59,6 @@ describe("a path of epics", () => {
     const now = dayOf("2026-11-17")!;
     const t = planTimeline([step({ start: "2026-03-01", date: "2026-04-01", status: "done" })], null, now)!;
     expect(t.from).toBeGreaterThanOrEqual(now - 45);
-  });
-
-  it("opens the epics underway at first, else the next one", () => {
-    const withItems = { items: [item("A", "next")] };
-    expect([...openAtFirst([step({ status: "done", ...withItems }), step({ status: "in_progress", ...withItems }), step({ status: "blocked", ...withItems })])]).toEqual([1, 2]);
-    expect([...openAtFirst([step({ status: "done", ...withItems }), step({ status: "next", ...withItems })])]).toEqual([1]);
-    expect([...openAtFirst([step({ status: "in_progress" })])]).toEqual([]);
   });
 
   it("moves its epics' and stories' Jira links onto the cloud site", () => {

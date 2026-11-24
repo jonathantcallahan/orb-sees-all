@@ -105,14 +105,6 @@ export function at(t: Pick<Timeline, "from" | "to">, day: number): number {
   return Math.min(100, Math.max(0, ((day - t.from) / (t.to - t.from + 1)) * 100));
 }
 
-/** The epics to show opened at first: the ones underway, else the first one still to come. */
-export function openAtFirst(steps: Pick<PathStep, "status" | "items">[]): Set<number> {
-  const on = steps.flatMap((s, i) => ((s.status === "in_progress" || s.status === "blocked") && s.items?.length ? [i] : []));
-  if (on.length) return new Set(on);
-  const next = steps.findIndex((s) => s.status === "next" && s.items?.length);
-  return new Set(next >= 0 ? [next] : []);
-}
-
 /** An issue's label in the key column: its Jira key, or that no ticket covers it yet. */
 export const itemKey = (item: Pick<PathItem, "key">) => item.key?.trim() || null;
 

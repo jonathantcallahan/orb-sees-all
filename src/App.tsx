@@ -406,6 +406,7 @@ export default function App() {
           adhoc={data.adhoc}
           manual={data.manual}
           calendar={data.calendar?.day ?? null}
+          earlierDays={data.earlierDays}
           projects={projects}
           filterProject={null}
           onClearFilter={() => {}}

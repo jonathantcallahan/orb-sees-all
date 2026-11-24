@@ -812,40 +812,61 @@ ${JSON_ONLY} Shape: {"key": string, "title": string, "status": string, "done": n
 
 /**
  * How a group DM is reached: anyone named is looked up first, then slack_create_conversation with
- * everyone's user IDs opens the group DM (Slack hands back the existing one), whose ID it posts to.
+ * everyone's user IDs opens the group DM (Slack hands back the existing one), whose ID it posts to
+ * (or, with `draft`, saves the draft in).
  */
-function groupDmStep(ids: string[], names: string[]): string {
+function groupDmStep(ids: string[], names: string[], draft = false): string {
+  const dont = draft ? "don't save it" : "don't post";
   const people = [...ids.map((id) => `the person with user ID ${id}`), ...names].join(", ");
   const find = names.length
-    ? ` First find ${names.length > 1 ? "each person named" : names[0]}: slack_search_users for ${names.map((n) => `"${n}"`).join(", ")}. For each name, use the one person whose name matches it; if no one does, or more than one could be them, don't post, and report the error naming who you found.`
+    ? ` First find ${names.length > 1 ? "each person named" : names[0]}: slack_search_users for ${names.map((n) => `"${n}"`).join(", ")}. For each name, use the one person whose name matches it; if no one does, or more than one could be them, ${dont}, and report the error naming who you found.`
     : "";
   const all = ids.length + names.length;
-  return `Send the message below as one Slack group DM to these ${all} people together: ${people}.${find} Then open the group DM: call slack_create_conversation once with user_ids set to all ${all} people's user IDs${ids.length ? ` (${ids.map((id) => `"${id}"`).join(", ")}${names.length ? " and the ones you found" : ""})` : ""} and no channel_name. You're added to it yourself, so leave your own ID out, and if it would hold more than 8 people, don't post and report the error. Slack gives back the group DM's channel_id, the existing one if there already is one: post to that.`;
+  return `${draft ? `Save the message below as a draft in one Slack group DM with these ${all} people` : `Send the message below as one Slack group DM to these ${all} people together`}: ${people}.${find} Then open the group DM: call slack_create_conversation once with user_ids set to all ${all} people's user IDs${ids.length ? ` (${ids.map((id) => `"${id}"`).join(", ")}${names.length ? " and the ones you found" : ""})` : ""} and no channel_name. You're added to it yourself, so leave your own ID out, and if it would hold more than 8 people, ${dont} and report the error. Slack gives back the group DM's channel_id, the existing one if there already is one: ${draft ? "save the draft in that" : "post to that"}.`;
 }
 
-export function sendToChannelPrompt(to: string, text: string): string {
+/**
+ * Saving the message as a draft instead of sending it: the one call that does it, and what Slack
+ * says when the conversation already holds one of the user's drafts (only one is allowed in each).
+ */
+const DRAFT_CALL = `Don't send it: call slack_send_message_draft exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. It waits in my Slack drafts for me to send myself. If Slack says there's already a draft there (attached_draft_exists), don't try again: report the error as "There's already a draft of yours in that conversation: send or delete it in Slack first".`;
+const DRAFT_REPLY = `After saving it, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. sent is true once the draft is saved; link is the channel_link the tool returned.`;
+
+/** Posts a reviewed message where its send line says, or with `draft` saves it as a draft there for the user to send. */
+export function sendToChannelPrompt(to: string, text: string, draft = false): string {
   const target = slackTarget(to);
+  const dont = draft ? "don't save it" : "don't post";
   const where =
     target.kind === "channel"
-      ? `Post the message below to the Slack channel #${target.name}. First find that channel's ID: slack_search_channels for its name (channel_types "public_channel,private_channel"), or slack_list_user_channels with name_prefix "${target.name}". Use the channel whose name matches exactly; if none does, don't post, and report the error.`
+      ? `${draft ? "Save the message below as a draft in" : "Post the message below to"} the Slack channel #${target.name}. First find that channel's ID: slack_search_channels for its name (channel_types "public_channel,private_channel"), or slack_list_user_channels with name_prefix "${target.name}". Use the channel whose name matches exactly; if none does, ${dont}, and report the error.`
       : target.kind === "user"
-        ? `Send the message below as a Slack DM to the person with user ID ${target.id}: use "${target.id}" as the channel_id, which sends it as a DM.`
+        ? `${draft ? "Save the message below as a draft Slack DM to" : "Send the message below as a Slack DM to"} the person with user ID ${target.id}: use "${target.id}" as the channel_id, which ${draft ? "puts it in your DM with them" : "sends it as a DM"}.`
         : target.kind === "person"
-          ? `Send the message below as a Slack DM to ${target.name}. First find them: slack_search_users for "${target.name}". Use the one person whose name matches it; if no one does, or more than one could be them, don't post, and report the error naming who you found. Then use their user ID as the channel_id, which sends it as a DM.`
+          ? `${draft ? "Save the message below as a draft Slack DM to" : "Send the message below as a Slack DM to"} ${target.name}. First find them: slack_search_users for "${target.name}". Use the one person whose name matches it; if no one does, or more than one could be them, ${dont}, and report the error naming who you found. Then use their user ID as the channel_id, which ${draft ? "puts it in your DM with them" : "sends it as a DM"}.`
           : target.kind === "group"
-            ? groupDmStep(target.ids, target.names)
-            : `Post the message below to the Slack conversation with channel_id "${target.kind === "conversation" ? target.id : to}".`;
-  return `${where} Call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread.
+            ? groupDmStep(target.ids, target.names, draft)
+            : `${draft ? "Save the message below as a draft in" : "Post the message below to"} the Slack conversation with channel_id "${target.kind === "conversation" ? target.id : to}".`;
+  return `${where} ${draft ? `${DRAFT_CALL} Do not save it anywhere else and do not put it in a thread.` : "Call slack_send_message exactly once, with that channel_id and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else and do not reply in a thread."}
 
 Message (between the markers):
 <<<MESSAGE
 ${text}
 MESSAGE>>>
 
-After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`;
+${draft ? DRAFT_REPLY : `After posting, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": string|null}. link is the posted message's permalink if the tool returned one.`}`;
 }
 
-export function sendReplyPrompt(channelId: string, threadTs: string, text: string): string {
+/** Posts a reviewed reply in its thread, or with `draft` saves it as a draft in that thread for the user to send. */
+export function sendReplyPrompt(channelId: string, threadTs: string, text: string, draft = false): string {
+  if (draft)
+    return `Save the reply below as a draft in a Slack thread, with channel_id "${channelId}" and thread_ts "${threadTs}". ${DRAFT_CALL.replace("with that channel_id", `with channel_id "${channelId}", thread_ts "${threadTs}"`)} Do not save it anywhere else.
+
+Reply (between the markers):
+<<<MESSAGE
+${text}
+MESSAGE>>>
+
+${DRAFT_REPLY}`;
   return `Post the reply below in a Slack thread by calling slack_send_message exactly once, with channel_id "${channelId}", thread_ts "${threadTs}", and the message text exactly as written: do not reword, shorten, add to, or reformat it. Do not post anywhere else.
 
 Reply (between the markers):

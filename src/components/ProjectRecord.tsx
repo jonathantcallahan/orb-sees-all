@@ -78,15 +78,19 @@ export function PathToShip({ project, onChange, taskStates }: { project: Project
   const [full, setFull] = useState(false);
   return (
     <section className="record-section">
+      {/* Work and full screen on the left, then how far along its requirements are, on one line. */}
       <div className="record-heading-row">
         <h4 className="record-heading">Work</h4>
-        <span className="path-tools">
-          {path && (
-            <button className="icon-button path-full-button" aria-label="Show work full screen" onClick={() => setFull(true)}>
-              <FullScreenIcon />
-            </button>
-          )}
-        </span>
+        {path && (
+          <button className="icon-button path-full-button" aria-label="Show work full screen" onClick={() => setFull(true)}>
+            <FullScreenIcon />
+          </button>
+        )}
+        {!!path?.steps.length && (
+          <div className="record-heading-bar">
+            <RequirementsBar project={project} />
+          </div>
+        )}
       </div>
       <PathBody project={project} view="plan" tasks={tasks} />
       <CodeNote project={project} />
@@ -159,7 +163,8 @@ function PathBody({ project, view, tasks, full = false }: { project: Project; vi
         <p className="muted small">The next refresh lays out the work from here to shipping.</p>
       ) : (
         <>
-          {path.steps.length > 0 && <RequirementsBar project={project} />}
+          {/* The details show the bar beside Work's heading instead. */}
+          {full && path.steps.length > 0 && <RequirementsBar project={project} />}
           {path.steps.length > 0 && (view === "plan" ? <PlanView key={project.channel_id} project={project} path={path} shipDate={ship?.date} full={full} /> : <DependencyView path={path} tasks={tasks} projectId={project.channel_id} />)}
         </>
       )}

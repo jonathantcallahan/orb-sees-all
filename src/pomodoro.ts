@@ -9,8 +9,9 @@
  *
  * It can be stopped from its menu (it reads 00:00 and its current block leaves the calendar, until
  * started again), and holds the task you're focusing on: one dragged into Today's "Active pomodoro
- * task". The focus time done today stays on the calendar whatever happens to the series: Stop,
- * either restart or new lengths keep what was done before starting over.
+ * task". The focus time done today stays on the calendar when the series is stopped or given new
+ * lengths. A restart clears what it starts over: Restart series the series' focus time, Restart
+ * timer the part done of the block it restarts (the sessions finished before it stay).
  *
  * Kept in localStorage, like the theme and the orb's look, so it shows from the first frame.
  */
@@ -187,7 +188,7 @@ const OLD_CLOCK_KEY = "pomodoro-clock";
 const STOPPED_KEY = "pomodoro-stopped";
 /** The id of the task you're focusing on. */
 const TASK_KEY = "pomodoro-task";
-/** Today's focus time from series since set aside (stopped, restarted), so it stays on the calendar. */
+/** Today's focus time from series since set aside (stopped, given new lengths), so it stays on the calendar. */
 const DONE_KEY = "pomodoro-done";
 
 interface Stored {
@@ -256,10 +257,11 @@ const MIN_KEPT_MS = 60_000;
 
 /**
  * Today's focus time, with the series now running set aside: before it's stopped or replaced. The
- * part of the session it's in that's already done is kept, unless it's under a minute.
+ * part of the session it's in that's already done is kept (unless it's under a minute), or with
+ * `current` false left out, for the block that's starting over.
  */
-function setAside(s: Stored, now: number): [number, number][] {
-  const running = s.clock ? focusDone(s.clock, s.settings, now, true).filter(([from, to]) => to - from >= MIN_KEPT_MS) : [];
+function setAside(s: Stored, now: number, current = true): [number, number][] {
+  const running = s.clock ? focusDone(s.clock, s.settings, now, current).filter(([from, to]) => to - from >= MIN_KEPT_MS) : [];
   return today([...s.done, ...running]);
 }
 
@@ -291,19 +293,25 @@ export function togglePomodoroPause() {
   save({ ...s, clock: s.clock.pausedAt === null ? pauseClock(s.clock, now) : resumeClock(s.clock, now) });
 }
 
-/** Starts the series over from its first focus session (or starts one, when stopped). */
+/**
+ * Starts the series over from its first focus session (or starts one, when stopped). The series'
+ * focus time leaves the calendar with it; what's from series stopped before stays.
+ */
 export function restartPomodoro() {
   const s = current();
   const now = Date.now();
-  if (s.settings.on) save({ ...s, clock: startClock(now), done: setAside(s, now) });
+  if (s.settings.on) save({ ...s, clock: startClock(now), done: s.done });
 }
 
-/** Starts the block it's in over from its full length, running; stopped, starts a series. */
+/**
+ * Starts the block it's in over from its full length, running; stopped, starts a series. The part
+ * done of the block leaves the calendar; the focus sessions finished before it stay.
+ */
 export function restartPomodoroBlock() {
   const s = current();
   if (!s.settings.on) return;
   const now = Date.now();
-  save({ ...s, clock: s.clock ? restartBlockClock(s.clock, s.settings, now) : startClock(now), done: setAside(s, now) });
+  save({ ...s, clock: s.clock ? restartBlockClock(s.clock, s.settings, now) : startClock(now), done: setAside(s, now, false) });
 }
 
 /**

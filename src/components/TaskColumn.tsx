@@ -4,7 +4,8 @@ import { isWindows, MOD } from "../platform";
 import { addManualTask, type AdhocStore, type ManualTask, type MergedTask, type Project, type StoredPlan } from "../db";
 import { assessPendingTasks } from "../jobs";
 import type { CalendarDay, ManualAssessment, Priority } from "../schema";
-import { applyOrder, applyTaskState, formatMinutes, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
+import { doneStaysSince } from "../todayDone";
+import { applyOrder, applyTaskState, formatMinutes, inToday, isFiltering, taskEstimate, matchesFilter, myBlockingIds, reorder, splitToday, taskPriority, type TaskState, PRIORITY_RANK, type TaskFilter, type TaskSource } from "../tasks";
 import { localDate } from "../scheduler";
 import { projectName, projectPriority } from "../projects";
 import { CloseIcon, Kbd, Spinner } from "./common";
@@ -141,6 +142,7 @@ export function TaskColumn({
   adhoc,
   manual,
   calendar,
+  earlierDays = [],
   projects,
   filterProject,
   onClearFilter,
@@ -177,6 +179,8 @@ export function TaskColumn({
   manual: ManualTask[];
   /** Today's meetings; their prep items are tasks too. */
   calendar: CalendarDay | null;
+  /** Earlier days' calendars, for their finished prep that's still in Today. */
+  earlierDays?: CalendarDay[];
   /** Visible projects; their open tasks for the user show here with a project badge. */
   projects: Project[];
   /** When set, only this project's tasks are shown. */
@@ -328,22 +332,37 @@ export function TaskColumn({
   // until you move it. It shares its id with the meeting card's prep checklist, so ticking either
   // ticks both.
   const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const rawPrep = filterProject
-    ? []
-    : (calendar?.events ?? [])
-        .filter((ev) => ev.my_response !== "declined")
-        // Prep for a meeting that's over is moot: it goes, unless you're in the middle of it.
-        .flatMap((ev) =>
-          ev.prep.filter((p) => new Date(ev.end) > new Date() || taskStates.get(p.id)?.status === "in_progress").map((p) => ({
+  // An earlier day's prep shows only once finished and still in Today (see inToday): that day's prep
+  // went at midnight otherwise, but a finished task stays until you move it out.
+  const since = doneStaysSince();
+  const stillInToday = (id: string) => {
+    const st = taskStates.get(id);
+    return !!st?.done && !st.dismissed && inToday(st, today, since);
+  };
+  const dayOf = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  const prepOf = (day: CalendarDay, earlier: boolean) =>
+    day.events
+      .filter((ev) => ev.my_response !== "declined")
+      // Prep for a meeting that's over is moot: it goes, unless you're in the middle of it, or
+      // finished it (a finished task stays in Today until you move it out).
+      .flatMap((ev) =>
+        ev.prep
+          .filter((p) => (earlier ? stillInToday(p.id) : new Date(ev.end) > new Date() || taskStates.get(p.id)?.status === "in_progress" || !!taskStates.get(p.id)?.done))
+          .map((p) => ({
             id: p.id,
             title: p.title,
             link: p.link ?? null,
-            description: `To prepare for "${ev.title}" at ${time(ev.start)}${ev.summary ? `: ${ev.summary}` : "."}`,
-            due: dueFor(p.id, calendar!.date),
+            description: `To prepare for "${ev.title}" ${earlier ? `on ${dayOf(ev.start)} ` : ""}at ${time(ev.start)}${ev.summary ? `: ${ev.summary}` : "."}`,
+            due: dueFor(p.id, day.date),
             source: "meeting" as const,
             recommended: isRecommended(p.id),
           })),
-        );
+      );
+  const todaysPrep = calendar ? prepOf(calendar, false) : [];
+  const todaysIds = new Set(todaysPrep.map((p) => p.id));
+  const rawPrep = filterProject
+    ? []
+    : [...todaysPrep, ...earlierDays.filter((d) => d.date !== calendar?.date).flatMap((d) => prepOf(d, true).filter((p) => !todaysIds.has(p.id)))];
 
   // The same work from several sources (or merged by hand) shows once, under its canonical id.
   type Raw = (typeof rawMine)[number] | (typeof rawProjects)[number] | (typeof rawInbox)[number];
@@ -353,7 +372,7 @@ export function TaskColumn({
   const foldedInbox = folded[2] as Folded<(typeof rawInbox)[number]>[];
   // A task just dragged into or out of Today shows in its new place right away.
   const split = <T extends { id: string; todayOn: string | null; done: boolean }>(list: T[]) => {
-    const { planned, rest } = splitToday(list, today);
+    const { planned, rest } = splitToday(list, today, since);
     const movedIn = rest.filter((t) => pendingZone[t.id] === "today").map((t) => ({ ...t, carriedFrom: null }));
     return {
       planned: [...planned.filter((t) => pendingZone[t.id] !== "rest"), ...movedIn],

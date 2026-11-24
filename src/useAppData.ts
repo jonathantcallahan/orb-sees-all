@@ -9,13 +9,16 @@ import type { ChatAsk } from "./claude";
 import { enqueueStep, isChatJob, stepMs, type FeedItem } from "./statusFeed";
 import { localDate } from "./scheduler";
 import type { CalendarDay, ManualAssessment } from "./schema";
-import type { TaskState } from "./tasks";
+import { carriedDoneDays, type TaskState } from "./tasks";
+import { doneStaysSince } from "./todayDone";
 
 export interface AppData {
   projects: db.Project[];
   adhoc: db.AdhocStore;
   manual: db.ManualTask[];
   calendar: { day: CalendarDay; refreshed_at: string } | null;
+  /** Earlier days' calendars, for their finished meeting prep that's still in Today (see carriedDoneDays). */
+  earlierDays: CalendarDay[];
   taskStates: Map<string, TaskState>;
   plans: Map<string, db.StoredPlan>;
   assessments: Map<string, ManualAssessment>;
@@ -76,7 +79,10 @@ async function loadAll(): Promise<AppData> {
     db.getSeen(),
     db.getSetting("unread_started"),
   ]);
-  return { projects, adhoc, manual, calendar, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, dueOverrides, projectOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom, seen, unreadStarted: !!unreadStarted };
+  // Meeting prep is only in its own day's calendar: a finished one stays in Today until you move it
+  // out, so the days such tasks were planned for are read too.
+  const earlierDays = await db.getCalendarDays(carriedDoneDays(taskStates, localDate(new Date()), doneStaysSince()));
+  return { projects, adhoc, manual, calendar, earlierDays, taskStates, plans, assessments, reading, reminders, blockerChecks, descriptionOverrides, taskChecks, sessionLinks, priorityOverrides, dueOverrides, projectOverrides, taskAliases, refinedDescriptions, notDuplicates, lastFullRefresh, taskBriefs, watched, mergedFrom, seen, unreadStarted: !!unreadStarted };
 }
 
 /** Everything the dashboard shows, reloaded whenever a job finishes or `reload` is called. */

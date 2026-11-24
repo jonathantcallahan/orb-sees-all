@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { setTaskState } from "../db";
+import { localDate } from "../scheduler";
 import { dayRange, layoutDay, nowOffset } from "../calendar";
 import type { CalendarDay, CalendarEvent } from "../schema";
 import { stateOf, type Pressure, type TaskState } from "../tasks";
@@ -136,7 +137,9 @@ function MeetingCard({
                     checked={done}
                     aria-label={p.title}
                     onChange={async (e) => {
-                      await setTaskState(p.id, { status: e.target.checked ? "done" : "todo" });
+                      // Prep you haven't touched is in Today without saying so (see TaskColumn): it says so
+                      // now, so it stays there once it's done.
+                      await setTaskState(p.id, { status: e.target.checked ? "done" : "todo", ...(states.has(p.id) ? {} : { todayOn: localDate(new Date()) }) });
                       onChange();
                     }}
                   />
@@ -338,7 +341,8 @@ function PomodoroBlock({ range }: { range: DayRange }) {
 
 /**
  * Today's finished focus sessions on the calendar, under the meetings: steady fields of dots, like
- * the done part of the current block. They stay when the series is stopped or started over.
+ * the done part of the current block. They stay when the series is stopped; a restart clears what
+ * it starts over (see pomodoro).
  */
 function FocusDone({ range }: { range: DayRange }) {
   const done = usePomodoroFocusDone();

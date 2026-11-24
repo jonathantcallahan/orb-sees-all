@@ -974,8 +974,10 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* A review window's editor: as tall as its text (set in ComposeModal), shrinking to fit the screen and
    scrolling only then. */
 .compose-editor { flex: 0 1 auto; resize: none; overflow-y: auto; }
-/* The draft box has its own border, so its footer needs no divider. */
-.compose-editor + .plan-modal-actions { border-top: 0; padding-top: 0; }
+/* Where it goes (and Open thread) under the draft box, then the buttons under a line that runs from
+   one side of the window to the other, past the window's padding. */
+.compose-note { display: flex; gap: 14px; align-items: baseline; }
+.plan-modal-actions.compose-actions { margin: 0 -20px; padding: 12px 20px 0; }
 .remind-status { margin-right: auto; }
 
 /* Multi-select filter: a pill that opens a checklist */
@@ -1058,15 +1060,15 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 .automation .suggestion { color: var(--muted); }
 
 /* Badges stay gray until you hover their card, so color draws the eye only where you're looking,
-   except Working and Human, which keep their color so work under way and work waiting on you show
-   at a glance. The
+   except Working, Human and Blocked, which keep their color so work under way, work waiting on you
+   and work held up show at a glance. The
    same in a project's details beside the list: its tags, link icons and Project context link stay gray
    until you hover the details. They're grayed by swapping the colors they're drawn with for grays,
    not with a grayscale filter: WebKit can cut the last row of pixels off a filtered element. Only
    the link icons, whose colors are drawn into them, keep the filter. */
 .card :is(.badge, .pill, .chip, .owner, .source, .p-badge),
 .project-detail-pane :is(.badge, .pill, .chip, .understanding-link) { transition: color 0.15s ease, background-color 0.15s ease; }
-.card:not(:hover) :is(.badge:not(.status-badge:is(.working, .human)), .pill, .chip, .owner, .source, .p-badge),
+.card:not(:hover) :is(.badge:not(.status-badge:is(.working, .human, .blocked)), .pill, .chip, .owner, .source, .p-badge),
 .project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .understanding-link) {
   --red: var(--muted); --amber: var(--muted); --green: var(--muted); --accent: var(--muted);
   --red-bg: var(--grey-bg); --amber-bg: var(--grey-bg); --green-bg: var(--grey-bg); --blocking-bg: var(--blocking-gray);
@@ -2376,9 +2378,13 @@ a.plan-title:hover { color: var(--text); text-decoration: underline; }
 .avatar { flex: none; display: inline-grid; place-items: center; border-radius: 50%; object-fit: cover; background: var(--grey-bg); box-sizing: border-box; }
 .avatar-initials { background: hsl(var(--hue, 210) 40% 46%); color: #fff; font-weight: 600; line-height: 1; user-select: none; }
 .avatar-more { background: var(--grey-bg); color: var(--muted); font-size: 9px; font-weight: 600; }
-.face-stack { display: inline-flex; align-items: center; border-radius: 999px; }
-.face-stack .avatar { box-shadow: 0 0 0 1.5px var(--bg); }
-.face-stack .avatar + .avatar { margin-left: -5px; }
+/* Each face overlaps the one before it, with a ring of the page's color between them. The face under
+   another shows its initials in the middle of what's left of it, not of the whole circle, where the
+   next face would cover them. */
+.face-stack { --face-overlap: 5px; --face-ring: 1.5px; display: inline-flex; align-items: center; border-radius: 999px; }
+.face-stack .avatar { box-shadow: 0 0 0 var(--face-ring) var(--bg); }
+.face-stack .avatar + .avatar { margin-left: calc(-1 * var(--face-overlap)); }
+.face-stack .avatar-initials:not(:last-child) { padding-right: calc(var(--face-overlap) + var(--face-ring)); }
 .face-stack:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .face-stack-names { list-style: none; margin: 0; padding: 0; }
 
@@ -2423,7 +2429,8 @@ a.plan-title:hover { color: var(--text); text-decoration: underline; }
 .person-card-name { min-width: 0; }
 .person-card p { margin: 0; }
 
-.record-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.record-heading-row { display: flex; align-items: center; gap: 2px; }
+.record-heading-bar { flex: 1; min-width: 0; margin-left: 8px; }
 .path-tools { display: inline-flex; align-items: center; gap: 6px; }
 /* Work's Plan / Dependencies switch is 18px tall, a badge's height, rather than Settings' 24px. */
 .path-tools .segmented { padding: 1px; gap: 1px; }

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import envelope from "./__fixtures__/project-envelope.json";
 import { describeTool, extractJson, findEnvelope, runClaude, runSessionTurn } from "./claude";
 import type { StreamingCliRunner as CliRunner } from "./cli";
-import { ProjectSnapshot } from "./schema";
+import { ProjectSnapshot, SelfDmPoll } from "./schema";
 
 const MIN_SNAPSHOT = JSON.stringify({
   description: "d",
@@ -62,6 +62,43 @@ describe("runClaude", () => {
     const [, retryArgs, , retryInput] = run.mock.calls[1];
     expect(retryArgs.slice(0, 2)).toEqual(["--resume", "s1"]);
     expect(retryInput?.stdin).toContain("status");
+  });
+
+  it("gives a draft run the draft tool alone, never the one that sends", async () => {
+    const { TOOLS, deniedTools } = await import("./claude");
+    expect(TOOLS.slackDraft).toEqual(["mcp__claude_ai_Slack__slack_send_message_draft"]);
+    const denied = deniedTools(TOOLS.slackDraft);
+    expect(denied).toContain("mcp__claude_ai_Slack__slack_send_message");
+    expect(denied).not.toContain("mcp__claude_ai_Slack__slack_send_message_draft");
+  });
+
+  it("takes a reply with no JSON as noJson says, without asking again", async () => {
+    const run = vi.fn<CliRunner>(async () => reply("I couldn't read the DM. The Slack read was denied."));
+    const result = await runClaude({ prompt: "p", schema: SelfDmPoll, tools: [], noJson: (r) => ({ unreachable: r, latest_ts: null, messages: [] }) }, run);
+    expect(result.data).toEqual({ unreachable: "I couldn't read the DM. The Slack read was denied.", latest_ts: null, messages: [] });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes a reply whose only braces are in its prose as having no JSON", async () => {
+    const run = vi.fn<CliRunner>(async () => reply("I couldn't read {D0123}: the Slack read was denied."));
+    const result = await runClaude({ prompt: "p", schema: SelfDmPoll, tools: [], noJson: (r) => ({ unreachable: r, latest_ts: null, messages: [] }) }, run);
+    expect(result.data.unreachable).toBe("I couldn't read {D0123}: the Slack read was denied.");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("still asks again about JSON that doesn't fit, with noJson set", async () => {
+    const run = vi
+      .fn<CliRunner>()
+      .mockResolvedValueOnce(reply('{"messages": "none"}'))
+      .mockResolvedValueOnce(reply('{"unreachable": null, "latest_ts": "1.2", "messages": []}'));
+    const result = await runClaude({ prompt: "p", schema: SelfDmPoll, tools: [], noJson: () => ({ unreachable: "x", latest_ts: null, messages: [] }) }, run);
+    expect(result.data.latest_ts).toBe("1.2");
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("says why a run stopped when its result doesn't", async () => {
+    const run = vi.fn<CliRunner>(async () => ({ code: 0, stdout: JSON.stringify({ type: "result", is_error: true, subtype: "error_max_turns" }), stderr: "" }));
+    await expect(runClaude({ prompt: "p", schema: ProjectSnapshot, tools: [] }, run)).rejects.toThrow("claude: ran out of turns before finishing");
   });
 
   it("sends the prompt on stdin, never on the command line", async () => {

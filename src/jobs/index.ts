@@ -16,9 +16,10 @@ import { changedParts, codeRequests, connectSession, sentHashes, turnNote, type 
 import { adhocPrompt, assessPrompt, tddDraftPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
-import { afterMissedRead, parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, type SelfDmOutcome } from "../selfDm";
+import { afterMissedRead, parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, unreadReason, type SelfDmOutcome } from "../selfDm";
 import { AdhocSnapshot, Distilled, EpicChildren, EpicCreated, InitiativeApplied, ItemCreated, StoryApplied, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, RequirementsRead, TddDraft, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
-import { blockerKey, longTitled, sinceWhen, stateOf, workedOn } from "../tasks";
+import { blockerKey, keepDoneInToday, longTitled, sinceWhen, stateOf, stillOpen, workedOn } from "../tasks";
+import { doneStaysSince } from "../todayDone";
 import { readingContext } from "../reading";
 import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } from "../feedback";
 import { codeFor, codeNote, githubReposOf, projectOfTask, resolveCheckout, type CodeSource } from "../code";
@@ -284,13 +285,15 @@ export async function refreshProject(channelId: string): Promise<void> {
         const own = new Set((project.snapshot?.my_tasks ?? []).map((t) => t.id));
         const index = (await loadTaskIndex()).filter((e) => !own.has(e.id));
         // What the user has taught it about this project, and its tasks as the user has them.
-        const [learning, descriptions, priorities] = await Promise.all([
+        const [learning, descriptions, priorities, statesBefore] = await Promise.all([
           learningFor(channelId, ["projects", "tasks", "priority"]),
           db.getDescriptionOverrides(),
           db.getPriorityOverrides(),
+          db.getTaskStates(),
         ]);
+        // Its tasks still open: the ones you finished stay in Today regardless (see stillOpen).
         const previous = project.snapshot
-          ? { ...project.snapshot, my_tasks: project.snapshot.my_tasks.map((t) => asUserHasIt(t, descriptions, priorities)) }
+          ? { ...project.snapshot, my_tasks: stillOpen(project.snapshot.my_tasks, statesBefore).map((t) => asUserHasIt(t, descriptions, priorities)) }
           : null;
         const { data, costUsd } = await runClaude({
         onStatus: status,
@@ -359,9 +362,12 @@ export async function refreshProject(channelId: string): Promise<void> {
         // Any it still left out go in the epic with the rest of their section of the doc.
         const snapshot = guided.length && fixed.snapshot.path ? { ...fixed.snapshot, path: placeLeftovers(fixed.snapshot.path, guided, descoped(requirements_progress)) } : fixed.snapshot;
         const profile = fixed.profile;
+        // A task you finished stays in Today until you move it out, even once the refresh stops listing it.
+        const states = await db.getTaskStates();
+        const myTasks = keepDoneInToday(project.snapshot?.my_tasks ?? [], snapshot.my_tasks, states, localDate(new Date()), doneStaysSince());
         // Record when this refresh started, so the next one's window covers
         // anything posted while this one ran.
-        await db.saveProjectSnapshot(channelId, snapshot, profile, startedAt.toISOString());
+        await db.saveProjectSnapshot(channelId, { ...snapshot, my_tasks: myTasks }, profile, startedAt.toISOString());
         // Who's on it, in the people record that spans projects: their part in this one and their face.
         await db.recordPeople(channelId, profile.people, startedAt.toISOString());
         if (doc && rows.length && projectKind(project) !== "workstream") await db.saveRequirementsProgress(channelId, doc.link, requirements_progress);
@@ -653,15 +659,17 @@ export async function refreshAdhoc(): Promise<void> {
       // Updates off there's no inbox or news, so messages waiting on a reply are tasks.
       const withProjects = projectsOn();
       const withUpdates = updatesOn();
+      // What it's told is still open: not the tasks you finished, which stay in Today regardless.
+      const open = stillOpen(previous.tasks, states);
       // Tasks the user has worked on stay tasks when the refresh sorts quick replies into the inbox.
-      const worked = previous.tasks.map((t) => t.id).filter((id) => workedOn(id, states, plans, descriptions, priorities));
+      const worked = open.map((t) => t.id).filter((id) => workedOn(id, states, plans, descriptions, priorities));
       const projects = withProjects ? (await db.listProjects()).filter((p) => !p.hidden) : [];
       const { data, costUsd } = await runClaude({
         onStatus: status,
         prompt: adhocPrompt({
           index,
           userId: uid,
-          previous: previous.tasks.map((t) => asUserHasIt(t, descriptions, priorities)),
+          previous: open.map((t) => asUserHasIt(t, descriptions, priorities)),
           previousReplies: previous.replies,
           learning,
           projects: withProjects,
@@ -677,7 +685,9 @@ export async function refreshAdhoc(): Promise<void> {
         // Reading every DM and mention thread, plus skimming wider channels for news.
         maxTurns: 100,
       });
-      await db.saveAdhoc({ tasks: data.tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
+      // A task you finished stays in Today until you move it out, even once the refresh stops listing it.
+      const tasks = keepDoneInToday(previous.tasks, data.tasks, await db.getTaskStates(), localDate(new Date()), doneStaysSince());
+      await db.saveAdhoc({ tasks, replies: data.replies, news: data.news, refreshed_at: startedAt.toISOString() });
       await recordRefinements(data.tasks, index);
       await keepDismissed(data.tasks, null);
       return { value: undefined, costUsd };
@@ -846,6 +856,9 @@ export async function pollSelfDm(now = new Date()): Promise<void> {
         // connector again while it's still connecting.
         model: "haiku",
         maxTurns: 10,
+        // Told it couldn't read the DM (a refused or missing Slack tool), Claude sometimes says so in
+        // words rather than in the JSON: nothing was read, so it's a missed read, in its own words.
+        noJson: (reply) => ({ unreachable: unreadReason(reply), latest_ts: null, messages: [] }),
       });
       if (read.data.unreachable) throw new Error(`Slack wasn't reachable: ${read.data.unreachable}`);
     } catch (e) {
@@ -1833,9 +1846,11 @@ export async function continueTaskSession(taskId: string, message: string, byUse
 
 /**
  * Posts a Slack message a working session handed over, as the user wrote or approved it, then
- * records it as sent (finishing its step) and tells the session so it carries on.
+ * records it as sent (finishing its step) and tells the session so it carries on. With `draft`, a
+ * Slack message is saved as a draft in its conversation instead, for the user to send from Slack:
+ * Demian's part is done all the same.
  */
-export function sendHandoff(taskId: string, send: PendingSend, text: string): Promise<void> {
+export function sendHandoff(taskId: string, send: PendingSend, text: string, draft = false): Promise<void> {
   return track(`handoff:${taskId}`, (status) =>
     logged("send", taskId, async () => {
       // Never posts where the card didn't say it would: the card blocks these too.
@@ -1844,12 +1859,15 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
       const doc = send.kind === "doc";
       const event = send.kind === "event";
       const ticket = send.kind === "ticket";
+      // Only a Slack message can wait as a draft.
+      const asDraft = draft && !doc && !event && !ticket;
+      const slackWrite = asDraft ? TOOLS.slackDraft : TOOLS.slackSend;
       const thread = doc || event || ticket ? null : slackThread(send.to);
       // Several people: the group DM is opened first, after looking up anyone named.
       const group = doc || event || ticket || thread ? null : slackTarget(send.to);
       const groupDm = group?.kind === "group" ? group : null;
       const { data, costUsd } = await runClaude({
-        onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : ticket ? "Filing the ticket" : "Posting to Slack") : s),
+        onStatus: (s) => status(s === "Working" ? (doc ? "Creating the doc" : event ? "Creating the event" : ticket ? "Filing the ticket" : asDraft ? "Saving the draft in Slack" : "Posting to Slack") : s),
         prompt: doc
           ? createDocPrompt(send.to, text)
           : event
@@ -1857,8 +1875,8 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
             : ticket
               ? createTicketPrompt(send.to, text)
               : thread
-                ? sendReplyPrompt(thread.channelId, thread.threadTs, text)
-                : sendToChannelPrompt(send.to, text),
+                ? sendReplyPrompt(thread.channelId, thread.threadTs, text, asDraft)
+                : sendToChannelPrompt(send.to, text, asDraft),
         schema: SentMessage,
         // A channel by name needs looking up first.
         tools: doc
@@ -1868,21 +1886,21 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
             : ticket
               ? TOOLS.ticketCreate
               : thread
-                ? TOOLS.slackSend
-                : [...TOOLS.slackSend, ...(groupDm ? TOOLS.slackGroupDm : []), ...TOOLS.slackRead],
+                ? slackWrite
+                : [...slackWrite, ...(groupDm ? TOOLS.slackGroupDm : []), ...TOOLS.slackRead],
         model: "sonnet",
         maxTurns: ticket ? 10 : groupDm ? 8 + groupDm.names.length : 6,
       });
       if (!data.sent)
         throw new Error(
-          (ticket && data.error ? ticketFailure(data.error, text) : data.error) ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : ticket ? "Jira didn't create the ticket" : "Slack didn't accept the message"),
+          (ticket && data.error ? ticketFailure(data.error, text) : data.error) ?? (doc ? "Google Drive didn't create the doc" : event ? "Google Calendar didn't create the event" : ticket ? "Jira didn't create the ticket" : asDraft ? "Slack didn't save the draft" : "Slack didn't accept the message"),
         );
       const link = (await db.getSessionLinks())[taskId];
       // Its link, kept with the step it finished, for a chip beside that step.
       // The step it finished, by title too: the chip stays beside that step if the steps are renumbered later.
       const stepTitle = send.step && link ? (await currentSessionSteps(link).catch(() => null))?.plan[send.step - 1]?.title : undefined;
       const artifact = data.link
-        ? [{ ...(send.step ? { step: send.step } : {}), ...(stepTitle ? { stepTitle } : {}), url: data.link, title: doc || event || ticket ? send.to : `Message in ${sendDestination(send)}` }]
+        ? [{ ...(send.step ? { step: send.step } : {}), ...(stepTitle ? { stepTitle } : {}), url: data.link, title: doc || event || ticket ? send.to : `${asDraft ? "Draft" : "Message"} in ${sendDestination(send)}` }]
         : [];
       await db.updateSessionLink(taskId, {
         sentKeys: [...(link?.sentKeys ?? []), send.key],
@@ -1891,13 +1909,13 @@ export function sendHandoff(taskId: string, send: PendingSend, text: string): Pr
         artifacts: [...(link?.artifacts ?? []), ...artifact],
         ...(send.step ? { doneSteps: [...(link?.doneSteps ?? []), send.step] } : {}),
       });
-      const edited = text !== send.text ? ` I edited it first; this is what ${doc || event || ticket ? "it says" : "went out"}:\n\n${text}` : "";
+      const edited = text !== send.text ? ` I edited it first; this is what ${doc || event || ticket || asDraft ? "it says" : "went out"}:\n\n${text}` : "";
       // How the user rewrote Claude's draft says something about how they write.
       if (text !== send.text)
         db.logFeedback({ kind: "message_edit", subject: "message", subject_id: taskId, before: { to: send.to, text: send.text }, after: { text } }).catch(() => {});
       continueTaskSession(
         taskId,
-        `${doc ? `I created the Google Doc "${send.to}"` : ticket ? `I filed the Jira ticket "${send.to}"${data.error ? ` (${data.error})` : ""}` : event ? `I created the event "${send.to}" and sent its invites${data.moved ? `, moved to ${data.moved} since the reviewed time was no longer free for everyone` : ""}` : `I sent the message to ${sendDestination(send)}${send.to.startsWith("http") ? ` (${send.to})` : ""}`}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`,
+        `${doc ? `I created the Google Doc "${send.to}"` : ticket ? `I filed the Jira ticket "${send.to}"${data.error ? ` (${data.error})` : ""}` : event ? `I created the event "${send.to}" and sent its invites${data.moved ? `, moved to ${data.moved} since the reviewed time was no longer free for everyone` : ""}` : `I ${asDraft ? "saved" : "sent"} the message to ${sendDestination(send)}${send.to.startsWith("http") ? ` (${send.to})` : ""}${asDraft ? " as a Slack draft, to send myself" : ""}`}${data.link ? ` (${data.link})` : ""}.${edited}\n\nCarry on with the next step.`,
       ).catch(() => {});
       return { value: undefined, costUsd };
     }),

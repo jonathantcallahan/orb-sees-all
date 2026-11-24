@@ -59,6 +59,18 @@ export function afterMissedRead(state: SelfDmState, error: string): { state: Sel
   return { state: { ...state, misses, lastError: error }, log: misses === SELF_DM_MISSES || error !== state.lastError ? error : null };
 }
 
+/**
+ * Why the DM wasn't read, from a reply that says so in words instead of in the JSON asked for: its
+ * first sentence or two, on one line. Nothing was read either way, so it counts as a missed read.
+ */
+export function unreadReason(reply: string): string {
+  const text = reply.replace(/\s+/g, " ").trim();
+  if (!text) return "Claude didn't say what it found";
+  const two = text.match(/^(.+?[.!?])(\s+.+?[.!?])?(\s|$)/);
+  const reason = two ? `${two[1]}${two[2] ?? ""}` : text;
+  return reason.length > 240 ? `${reason.slice(0, 239)}…` : reason;
+}
+
 /** After this many failed tries at the same messages, they're skipped, so one Demian can't read isn't retried forever. */
 export const SELF_DM_TRIES = 3;
 

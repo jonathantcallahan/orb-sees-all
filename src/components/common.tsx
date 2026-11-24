@@ -162,6 +162,7 @@ export function ComposeModal({
   onSend,
   actions,
   sendLabel = "Send",
+  secondary,
   tall = false,
 }: {
   heading: string;
@@ -179,6 +180,8 @@ export function ComposeModal({
   actions?: ReactNode;
   /** The primary button's label; Send by default. */
   sendLabel?: string;
+  /** Another way to send it, as a button just before the primary one (Create as draft). */
+  secondary?: { label: string; title?: string; onClick: () => void };
   /** A taller editor, for a whole document. */
   tall?: boolean;
 }) {
@@ -232,12 +235,20 @@ export function ComposeModal({
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onSend?.();
           }}
         />
-        <footer className="plan-modal-actions edit-actions">
+        <div className="compose-note">
           <span className={`small ${failed ? "error" : "muted"} remind-status`}>{status ?? note}</span>
           {actions}
+        </div>
+        {/* The buttons sit under a line that runs the window's full width. */}
+        <footer className="plan-modal-actions edit-actions compose-actions">
           <button className="cta-ghost" disabled={busy} onClick={onCancel}>
             {onSend ? "Cancel" : "Close"}
           </button>
+          {secondary && (
+            <button className="cta-ghost" disabled={busy || !text.trim()} onClick={secondary.onClick} title={secondary.title}>
+              {secondary.label}
+            </button>
+          )}
           {onSend && (
             <button className="cta-primary" disabled={busy || !text.trim()} onClick={onSend} title={`${sendLabel} (${MOD}↩)`}>
               {sendLabel}

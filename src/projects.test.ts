@@ -193,6 +193,19 @@ describe("send targets", () => {
     expect(named).toContain('slack_search_users for "Ana Lee"');
     expect(named).toContain("and the ones you found");
   });
+
+  it("saves a draft instead of sending, wherever the message goes", async () => {
+    const { sendToChannelPrompt } = await import("./prompts");
+    for (const to of ["#refunds", "Ana Lee", "@U0123ABCD", "C0123ABCD", "U0123ABCD, @U0456EFGH"]) {
+      const p = sendToChannelPrompt(to, "Hi", true);
+      expect(p).toContain("slack_send_message_draft exactly once");
+      expect(p).not.toContain("Call slack_send_message exactly once");
+      expect(p).toContain("attached_draft_exists");
+      expect(p).toContain("<<<MESSAGE\nHi\nMESSAGE>>>");
+    }
+    expect(sendToChannelPrompt("Ana Lee", "Hi", true)).toContain("don't save it");
+    expect(sendToChannelPrompt("U0123ABCD, @U0456EFGH", "Hi", true)).toContain("save the draft in that");
+  });
 });
 
 describe("a project's priority", () => {

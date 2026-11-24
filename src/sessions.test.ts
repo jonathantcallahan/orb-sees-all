@@ -428,6 +428,13 @@ describe("where a message goes", () => {
     expect(sendDestination({ to: "https://example.slack.com/archives/D0456/p1700000000000100" })).toBe("the thread in a DM");
     expect(sendDestination({ to: "https://example.slack.com/archives/C0789/p1700000000000100" })).toBe("the thread in a channel");
     expect(sendDestination({ to: "#launch-team" })).toBe("#launch-team");
+    // Not "the thread in thread in #launch-team" when the session already said thread.
+    const thread = "https://example.slack.com/archives/C0789/p1700000000000100";
+    expect(sendDestination({ to: thread, label: "thread in #launch-team" })).toBe("the thread in #launch-team");
+    expect(sendDestination({ to: thread, label: "the thread in #launch-team" })).toBe("the thread in #launch-team");
+    expect(sendDestination({ to: thread, label: "threads-and-yarn" })).toBe("the thread in threads-and-yarn");
+    expect(sendDestination({ to: thread, label: "thread-reviews" })).toBe("the thread in thread-reviews");
+    expect(sendDestination({ to: thread, label: "Thread in #launch-team" })).toBe("the thread in #launch-team");
   });
 });
 

@@ -28,6 +28,8 @@ export interface TaskState {
   todayOn: string | null;
   /** Derived from status, for code that only cares whether it's finished. */
   done: boolean;
+  /** When it was finished (its state's last change while done), or null while it's open. */
+  doneAt?: string | null;
 }
 
 export const DEFAULT_TASK_STATE: TaskState = { status: "todo", dismissed: false, todayOn: null, done: false };
@@ -68,31 +70,76 @@ export interface ViewTask {
 export function applyTaskState<T extends { id: string }>(
   tasks: T[],
   states: Map<string, TaskState>,
-): (T & { done: boolean; status: TaskStatus; todayOn: string | null })[] {
+): (T & { done: boolean; status: TaskStatus; todayOn: string | null; doneAt: string | null })[] {
   return tasks
     .map((t) => ({ t, st: stateOf(states, t.id) }))
     .filter(({ st }) => !st.dismissed)
-    .map(({ t, st }) => ({ ...t, done: st.done, status: st.status, todayOn: st.todayOn }))
+    .map(({ t, st }) => ({ ...t, done: st.done, status: st.status, todayOn: st.todayOn, doneAt: st.doneAt ?? null }))
     .sort((a, b) => Number(a.done) - Number(b.done));
 }
 
 /**
- * Splits tasks into today's plan and the rest. A task is in Today when it was
- * planned for today, or planned for an earlier day and still isn't done
- * (carriedFrom says which day). Tasks done on an earlier day drop out.
+ * Whether a task stays in Today: planned for today, or for an earlier day (carried over) and either
+ * not done or finished since `doneStaysSince`. Finished tasks stay until you move them out (which
+ * clears todayOn); ones finished before then had already left, back when a finished task left
+ * Today, and don't come back.
  */
-export function splitToday<T extends { todayOn: string | null; done: boolean }>(
+export function inToday(t: { todayOn: string | null; done: boolean; doneAt?: string | null }, today: string, doneStaysSince: string | null): boolean {
+  if (!t.todayOn || t.todayOn > today) return false;
+  if (t.todayOn === today || !t.done) return true;
+  return !!doneStaysSince && !!t.doneAt && t.doneAt >= doneStaysSince;
+}
+
+/**
+ * The earlier days that finished tasks still in Today were planned for (see inToday), oldest first:
+ * where to find the ones only that day's calendar holds, its meeting prep.
+ */
+export function carriedDoneDays(states: Map<string, TaskState>, today: string, doneStaysSince: string | null): string[] {
+  const days = new Set<string>();
+  for (const st of states.values())
+    if (st.done && !st.dismissed && st.todayOn && st.todayOn < today && inToday(st, today, doneStaysSince)) days.add(st.todayOn);
+  return [...days].sort();
+}
+
+/**
+ * Splits tasks into today's plan and the rest (see inToday): carriedFrom says which earlier day a
+ * task was planned for.
+ */
+export function splitToday<T extends { todayOn: string | null; done: boolean; doneAt?: string | null }>(
   tasks: T[],
   today: string,
+  doneStaysSince: string | null = null,
 ): { planned: (T & { carriedFrom: string | null })[]; rest: T[] } {
   const planned: (T & { carriedFrom: string | null })[] = [];
   const rest: T[] = [];
   for (const t of tasks) {
-    if (t.todayOn === today) planned.push({ ...t, carriedFrom: null });
-    else if (t.todayOn && t.todayOn < today && !t.done) planned.push({ ...t, carriedFrom: t.todayOn });
+    if (inToday(t, today, doneStaysSince)) planned.push({ ...t, carriedFrom: t.todayOn === today ? null : t.todayOn });
     else rest.push(t);
   }
   return { planned, rest };
+}
+
+/**
+ * The tasks a refresh is told are still open: the ones you haven't finished. A finished task stays in
+ * Today (see keepDoneInToday), but a refresh has nothing more to find about it, and told it was open it
+ * would keep listing it, even after you moved it out of Today.
+ */
+export function stillOpen<T extends { id: string }>(tasks: T[], states: Map<string, TaskState>): T[] {
+  return tasks.filter((t) => !stateOf(states, t.id).done);
+}
+
+/**
+ * A refresh's tasks, plus any it dropped that are finished and still in Today: a refresh lists only
+ * what's still to do, and a finished task stays in Today until you move it out (see inToday).
+ */
+export function keepDoneInToday<T extends { id: string }>(previous: T[], fresh: T[], states: Map<string, TaskState>, today: string, doneStaysSince: string | null): T[] {
+  const have = new Set(fresh.map((t) => t.id));
+  const kept = previous.filter((t) => {
+    if (have.has(t.id)) return false;
+    const st = stateOf(states, t.id);
+    return st.done && !st.dismissed && inToday(st, today, doneStaysSince);
+  });
+  return [...fresh, ...kept];
 }
 
 /** "45m", "1h", "1h 30m". */

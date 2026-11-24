@@ -111,7 +111,13 @@ export function PressureBlob({ pressure, look = "crystal", working = false }: { 
     // A look may give off its motes from inside its glass (Kitten's, off its cross): seen through
     // the glass, against it rather than the page.
     const motes = (orb as { motes?: OrbMotes }).motes ?? null;
-    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look], lightPage, motes ?? {});
+    // A look may say where its motes rise instead of its wave tips, and have them swing in and out
+    // rather than drift away (Ephedra: over her lightest areas, swinging).
+    const where = "moteWhere" in orb && orb.moteWhere === true;
+    const oscillate = "moteOscillate" in orb && orb.moteOscillate === true;
+    // A look may also set how far off its surface its motes sit (Ephedra's: close to it).
+    const gap = (orb as { moteGap?: [number, number] }).moteGap ?? motes?.gap;
+    const particles = buildParticles(orb.surface, uniforms, moteColor, renderer.getPixelRatio(), TIP[look], lightPage, { ...(motes ?? {}), gap, where, oscillate });
     if (motes) particles.points.layers.set(motes.layer);
     blob.add(particles.points);
     const paintMotes = () => {

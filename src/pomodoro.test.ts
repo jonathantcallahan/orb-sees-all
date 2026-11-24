@@ -110,6 +110,40 @@ describe("the pomodoro timer", () => {
   });
 });
 
+describe("restarting the timer", () => {
+  it("clears the series' focus on Restart series, and only the block's part on Restart timer", async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });
+    vi.useFakeTimers();
+    try {
+      const noon = new Date(2026, 10, 10, 12).getTime();
+      vi.setSystemTime(noon);
+      vi.resetModules();
+      const p = await import("./pomodoro");
+      p.setPomodoroSettings({ on: true, focusMin: 25, breakMin: 5 });
+      // Ten minutes into the first focus session: starting the series over leaves nothing of it.
+      vi.setSystemTime(noon + 10 * MIN);
+      p.restartPomodoro();
+      expect(JSON.parse(store.get("pomodoro-done")!)).toEqual([]);
+      // A whole session and ten minutes into the second: Restart timer keeps the first, not the second's part.
+      const start = noon + 10 * MIN;
+      vi.setSystemTime(start + 40 * MIN);
+      p.restartPomodoroBlock();
+      expect(JSON.parse(store.get("pomodoro-done")!)).toEqual([[start, start + 25 * MIN]]);
+      // A Stop still keeps what was done.
+      vi.setSystemTime(start + 50 * MIN);
+      p.stopPomodoro();
+      expect(JSON.parse(store.get("pomodoro-done")!)).toEqual([
+        [start, start + 25 * MIN],
+        [start + 40 * MIN, start + 50 * MIN],
+      ]);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("stopping the timer", () => {
   it("keeps the focus done before a Stop, but leaves no sliver from one just after starting", async () => {
     const store = new Map<string, string>();

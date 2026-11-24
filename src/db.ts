@@ -1029,6 +1029,14 @@ export async function getCalendarDay(date: string): Promise<{ day: CalendarDay; 
   return rows[0] ? { day: JSON.parse(rows[0].data), refreshed_at: rows[0].refreshed_at } : null;
 }
 
+/** The calendars saved for these days, as last refreshed, oldest first (days never fetched are left out). */
+export async function getCalendarDays(dates: string[]): Promise<CalendarDay[]> {
+  if (!dates.length) return [];
+  const params = dates.map((_, i) => "$" + (i + 1)).join(", ");
+  const rows = await (await db()).select<{ data: string }[]>(`SELECT data FROM calendar_days WHERE date IN (${params}) ORDER BY date`, dates);
+  return rows.map((r) => JSON.parse(r.data) as CalendarDay);
+}
+
 export async function saveCalendarDay(day: CalendarDay) {
   await (await db()).execute(
     "INSERT INTO calendar_days (date, data, refreshed_at) VALUES ($1, $2, $3) ON CONFLICT(date) DO UPDATE SET data = excluded.data, refreshed_at = excluded.refreshed_at",
@@ -1137,13 +1145,13 @@ export async function saveTaskPlan(taskId: string, plan: TaskPlan, costUsd: numb
 }
 
 export async function getTaskStates(): Promise<Map<string, TaskState>> {
-  const rows = await (await db()).select<{ task_id: string; status: TaskStatus | null; done: number; dismissed: number; today_on: string | null }[]>(
+  const rows = await (await db()).select<{ task_id: string; status: TaskStatus | null; done: number; dismissed: number; today_on: string | null; updated_at: string | null }[]>(
     "SELECT * FROM task_state",
   );
   return new Map(
     rows.map((r) => {
       const status = r.status ?? (r.done === 1 ? "done" : "todo");
-      return [r.task_id, { status, dismissed: r.dismissed === 1, todayOn: r.today_on, done: status === "done" }];
+      return [r.task_id, { status, dismissed: r.dismissed === 1, todayOn: r.today_on, done: status === "done", doneAt: status === "done" ? r.updated_at : null }];
     }),
   );
 }

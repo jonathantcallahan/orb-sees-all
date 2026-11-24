@@ -16,7 +16,6 @@ import {
   initiativeStatus,
   itemDescription,
   itemKey,
-  openAtFirst,
   placeCode,
   placeRequirements,
   planGroups,
@@ -776,12 +775,9 @@ export function PlanView({ project, path, shipDate, full = false }: { project: P
   const groups = planGroups(path);
   // The timeline is full screen's; the project's details show a Progress column instead.
   const t = full ? planTimeline(steps, shipDate) : null;
-  const [open, setOpen] = useState(() => {
-    const first = openAtFirst(steps);
-    const keys = [...first].map((i) => `s:${i}`);
-    for (const g of groups) if (g.initiative && g.steps.some((s) => first.has(s.index))) keys.push(`i:${g.initiative.id}`);
-    return new Set(keys);
-  });
+  // Every initiative and epic starts closed, each time the plan is shown: what you opened isn't kept
+  // once you leave the project.
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
   const toggle = (key: string) =>
     setOpen((o) => {
       const next = new Set(o);
@@ -839,7 +835,7 @@ export function PlanView({ project, path, shipDate, full = false }: { project: P
       <div className={`plan${t ? " with-timeline" : ""}${full ? "" : " with-progress"}`} role="table" aria-label="Plan">
         <div className="plan-row plan-head" role="row">
           <span className="plan-work" role="columnheader">
-            Work
+            Jira Issues
             {full && openable.length > 0 && (
               <button className="link-button small plan-all" onClick={() => setOpen(allOpen ? new Set() : new Set(openable))}>
                 {allOpen ? "Close all" : "Open all"}

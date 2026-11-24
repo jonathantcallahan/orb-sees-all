@@ -27,15 +27,43 @@ const RADIUS = 1.08;
 /** The inner orb's radius, as a fraction of the outer. */
 const INNER = 0.56;
 
-/** The surface for the motes: round, with a gentle swell so they rise from its brighter patches. */
+/**
+ * The fields' warp and strength (see FIELDS): how strongly the pastel color shows at a point, the rest
+ * being milky white. Apart, so the motes can find her lightest areas without the colors.
+ */
+const STRENGTH = /* glsl */ `
+vec3 fieldWarp(vec3 p, float t, float seed) {
+  // Gently warped and low in frequency, so the colors read as soft washes rather than marbling.
+  return p + 0.3 * vec3(snoise(p * 0.8 + vec3(seed, t * 0.12, 0.0)), snoise(p * 0.8 + vec3(t * 0.1, seed + 3.7, 1.3)), snoise(p * 0.8 + vec3(2.1, 0.0, seed - t * 0.11)));
+}
+float fieldStrength(vec3 w, float t, float seed) {
+  return smoothstep(-0.8, 0.6, snoise(w * 0.6 + seed * 2.9 - t * 0.07));
+}
+`;
+
+/**
+ * The surface for the motes: her body's, a plain sphere, so motes at its edge touch her. They rise
+ * only over her lightest areas, where her pastel fields show least and her milky white comes through,
+ * the same fields her body is painted with (her outer orb's: see the body's fragment), so they follow
+ * those areas as the fields flow. orbMoteWhere says how deep into a light area a point is: 0 at its
+ * edge, 1 in the middle of the lightest, easing in and out, so the motes over it make a smooth bump
+ * (see orbParticles). Finding it is about as much work as the other looks' wave tips, which it
+ * replaces here.
+ */
 const SURFACE = /* glsl */ `
 float orbSurface(vec3 n) {
-  return ${RADIUS.toFixed(3)} + 0.05 * snoise(normalize(n) * 1.8 + uTime * 0.1);
+  return ${RADIUS.toFixed(3)};
+}
+${STRENGTH}
+float orbMoteWhere(vec3 n) {
+  float t = uTime * mix(0.5, 1.4, uStress);
+  return 1.0 - smoothstep(0.05, 0.42, fieldStrength(fieldWarp(normalize(n) * 1.2, t, 0.0), t, 0.0));
 }
 `;
 
 /** Pastel fields, shared by the outer and inner orbs: a soft color for a point and a time. */
 const FIELDS = /* glsl */ `
+${STRENGTH}
 vec3 pastel(float x, float warm) {
   // Cool calm palette and a warmer stressed one, each a loop of soft colors.
   vec3 green = mix(vec3(0.62, 0.90, 0.62), vec3(0.95, 0.80, 0.52), warm);
@@ -53,11 +81,9 @@ vec3 pastel(float x, float warm) {
 // The fields at a point: domain-warped noise picks a place on the palette, and how strongly that
 // color shows (the rest is milky white).
 vec4 field(vec3 p, float t, float seed) {
-  // Gently warped and low in frequency, so the colors read as soft washes rather than marbling.
-  vec3 w = p + 0.3 * vec3(snoise(p * 0.8 + vec3(seed, t * 0.12, 0.0)), snoise(p * 0.8 + vec3(t * 0.1, seed + 3.7, 1.3)), snoise(p * 0.8 + vec3(2.1, 0.0, seed - t * 0.11)));
+  vec3 w = fieldWarp(p, t, seed);
   float hue = 0.5 + 0.5 * snoise(w * 0.5 + seed * 1.3 + t * 0.05);
-  float strength = smoothstep(-0.8, 0.6, snoise(w * 0.6 + seed * 2.9 - t * 0.07));
-  return vec4(pastel(hue * 1.2 + seed * 0.21, smoothstep(0.1, 1.0, uStress)), strength);
+  return vec4(pastel(hue * 1.2 + seed * 0.21, smoothstep(0.1, 1.0, uStress)), fieldStrength(w, t, seed));
 }
 `;
 
@@ -270,6 +296,12 @@ export function buildAuraOrb(uniforms: OrbUniforms) {
   return {
     group,
     surface: SURFACE,
+    // Her motes rise over her lightest areas, not her wave tips (see SURFACE), as bumps that swell
+    // and settle rather than drifting away.
+    moteWhere: true,
+    moteOscillate: true,
+    // Touching her at a light area's edge, and at most 0.11 over its middle.
+    moteGap: [0.004, 0.11] as [number, number],
     dispose: () => {
       haloGeometry.dispose();
       haloMaterial.dispose();

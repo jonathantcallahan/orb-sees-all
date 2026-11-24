@@ -6,7 +6,7 @@ import { nameFromChannel, projectName } from "./projects";
 import { readingContext } from "./reading";
 import { reminderText, sendReminderPrompt, toSlackMentions, windowStart } from "./prompts";
 import { shouldRunMorning } from "./scheduler";
-import { applyTaskState, compareProjects, describePressure, DEFAULT_TASK_STATE, formatMinutes, isFiltering, matchesFilter, type DueFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
+import { applyTaskState, compareProjects, describePressure, DEFAULT_TASK_STATE, formatMinutes, carriedDoneDays, keepDoneInToday, stillOpen, isFiltering, matchesFilter, type DueFilter, matchesProjectFilter, NO_FILTER, NO_PROJECT_FILTER, orbMood, pressure, splitToday, taskPriority, type EffectivePriority, type TaskFilter, type TaskState, LOAD_SCALE } from "./tasks";
 
 const st = ({ done = false, dismissed = false }: { done?: boolean; dismissed?: boolean }): TaskState => ({
   ...DEFAULT_TASK_STATE,
@@ -239,6 +239,64 @@ describe("splitToday", () => {
       ["e", null],
     ]);
     expect(rest.map((r) => r.id)).toEqual(["c", "d"]);
+  });
+
+  it("keeps a task finished since the switch in Today until it's moved out, but not older ones", () => {
+    const since = "2026-10-29T06:00:00.000Z";
+    const done = (id: string, todayOn: string | null, doneAt: string) => ({ id, todayOn, done: true, doneAt });
+    const { planned, rest } = splitToday(
+      [done("carried", "2026-10-20", "2026-10-29T09:00:00.000Z"), done("old", "2026-10-20", "2026-10-21T09:00:00.000Z"), done("moved-out", null, "2026-10-29T09:00:00.000Z"), done("later", "2026-10-30", "2026-10-29T09:00:00.000Z")],
+      today,
+      since,
+    );
+    expect(planned.map((p) => [p.id, p.carriedFrom])).toEqual([["carried", "2026-10-20"]]);
+    expect(rest.map((r) => r.id)).toEqual(["old", "moved-out", "later"]);
+  });
+});
+
+describe("keepDoneInToday", () => {
+  const today = "2026-10-29";
+  const since = "2026-10-29T06:00:00.000Z";
+  const state = (over: Partial<TaskState>): TaskState => ({ ...DEFAULT_TASK_STATE, ...over });
+
+  it("keeps a finished task still in Today that a refresh stopped listing, and nothing else it dropped", () => {
+    const states = new Map<string, TaskState>([
+      ["done-today", state({ status: "done", done: true, todayOn: today, doneAt: "2026-10-29T10:00:00.000Z" })],
+      ["done-out", state({ status: "done", done: true, todayOn: null, doneAt: "2026-10-29T10:00:00.000Z" })],
+      ["open", state({ todayOn: today })],
+      ["gone", state({ status: "done", done: true, todayOn: today, dismissed: true })],
+    ]);
+    const previous = ["done-today", "done-out", "open", "gone", "kept"].map((id) => ({ id }));
+    expect(keepDoneInToday(previous, [{ id: "kept" }, { id: "new" }], states, today, since).map((t) => t.id)).toEqual(["kept", "new", "done-today"]);
+  });
+});
+
+describe("carriedDoneDays", () => {
+  it("is the earlier days of finished tasks still in Today, for their meeting prep", () => {
+    const since = "2026-10-27T06:00:00.000Z";
+    const done = (todayOn: string | null, doneAt: string, over: Partial<TaskState> = {}): TaskState => ({ ...DEFAULT_TASK_STATE, status: "done", done: true, todayOn, doneAt, ...over });
+    const states = new Map<string, TaskState>([
+      ["a", done("2026-10-28", "2026-10-28T15:00:00.000Z")],
+      ["b", done("2026-10-27", "2026-10-27T15:00:00.000Z")],
+      ["c", done("2026-10-28", "2026-10-28T16:00:00.000Z")],
+      // Finished before finished tasks stayed, moved out, dismissed, today's, or still open: none of these.
+      ["old", done("2026-10-20", "2026-10-20T15:00:00.000Z")],
+      ["out", done(null, "2026-10-28T15:00:00.000Z")],
+      ["gone", done("2026-10-26", "2026-10-28T15:00:00.000Z", { dismissed: true })],
+      ["today", done("2026-10-29", "2026-10-29T15:00:00.000Z")],
+      ["open", { ...DEFAULT_TASK_STATE, todayOn: "2026-10-25" }],
+    ]);
+    expect(carriedDoneDays(states, "2026-10-29", since)).toEqual(["2026-10-27", "2026-10-28"]);
+  });
+});
+
+describe("stillOpen", () => {
+  it("leaves out the tasks you finished, so a refresh isn't told they're open", () => {
+    const states = new Map<string, TaskState>([
+      ["done", { ...DEFAULT_TASK_STATE, status: "done", done: true, todayOn: "2026-10-29" }],
+      ["started", { ...DEFAULT_TASK_STATE, status: "in_progress" }],
+    ]);
+    expect(stillOpen([{ id: "done" }, { id: "started" }, { id: "untouched" }], states).map((t) => t.id)).toEqual(["started", "untouched"]);
   });
 });
 
@@ -650,6 +708,14 @@ describe("slack threads", () => {
     const p = sendReplyPrompt("C1", "1700000000.000100", "Sounds good, shipping Friday.");
     expect(p).toContain('thread_ts "1700000000.000100"');
     expect(p).toContain("exactly once");
+    expect(p).toContain("Sounds good, shipping Friday.");
+  });
+
+  it("saves a reply as a draft in its thread instead, when asked", async () => {
+    const { sendReplyPrompt } = await import("./prompts");
+    const p = sendReplyPrompt("C1", "1700000000.000100", "Sounds good, shipping Friday.", true);
+    expect(p).toContain('call slack_send_message_draft exactly once, with channel_id "C1", thread_ts "1700000000.000100"');
+    expect(p).not.toContain("calling slack_send_message exactly once");
     expect(p).toContain("Sounds good, shipping Friday.");
   });
 });
