@@ -5,11 +5,11 @@
  * functions the rest of the app uses, then starts the refresh that brings the board up to date; the
  * refresh runs on in the background.
  */
-import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
+import { epicsOn, projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
 import { PROJECT_ACTIONS, TASK_ACTIONS } from "./openInClaude";
 import * as db from "./db";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, checkBlocker, continueTaskSession, linkProjectDoc, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
+import { assessPendingTasks, changeJiraIssue, checkBlocker, continueTaskSession, linkProjectDoc, refreshAdhoc, refreshAll, refreshCalendar, refreshProject, refreshReading, watchFromText } from "./jobs";
 import { epicKeyFrom, primaryChannel, projectContext, projectName } from "./projects";
 import { blockerKey } from "./tasks";
 import { setUserProfile } from "./prompts";
@@ -22,6 +22,30 @@ const quiet = (p: Promise<unknown>) => void p.catch(() => {});
 type Names = (id: string) => string;
 /** A project's blocker or active item, by project and item id, as the project shows it; null if it isn't there. */
 type Items = (projectId: string, itemId: string) => string | null;
+
+/** A YYYY-MM-DD date as "Dec 12" (with its year when it isn't this one); the text as given when it isn't a date. */
+function shortDate(date: string): string {
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return date;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.toLocaleDateString(undefined, d.getFullYear() === new Date().getFullYear() ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+}
+
+const isNone = (v: string) => v.trim().toLowerCase() === "none";
+
+/** What a change to a Jira issue does, each part in a few words; none when it changes nothing. */
+export function jiraChangeParts(a: Extract<GlobalAction, { type: "change_jira_issue" }>): string[] {
+  const parts: string[] = [];
+  if (a.status) parts.push(`move to ${a.status}`);
+  if (a.assignee) parts.push(isNone(a.assignee) ? "unassign it" : `assign to ${a.assignee}`);
+  if (a.due) parts.push(isNone(a.due) ? "clear its due date" : `due ${shortDate(a.due)}`);
+  if (a.summary) parts.push(`rename to "${a.summary}"`);
+  if (a.priority) parts.push(`${a.priority} priority`);
+  if (a.epic) parts.push(isNone(a.epic) ? "take it out of its epic" : `move into the epic ${a.epic.trim().toUpperCase()}`);
+  if (a.sprint) parts.push(a.sprint.trim().toLowerCase() === "backlog" ? "take it out of its sprint" : `move to ${a.sprint}`);
+  if (a.comment) parts.push(`comment "${a.comment.length > 140 ? `${a.comment.slice(0, 139)}…` : a.comment}"`);
+  return parts;
+}
 
 /** Names for describing changes: projects, channels, and a project's open items, from the projects as they are now. */
 export function actionNames(projects: db.Project[]): { project: Names; channel: Names; item: Items } {
@@ -181,6 +205,8 @@ export function describeAction(a: GlobalAction, project: Names, channel: Names, 
       return `Link the epic ${a.epic_key.toUpperCase()} to "${project(a.project_id)}"`;
     case "unlink_project_epic":
       return `Unlink the epic ${a.epic_key.toUpperCase()} from "${project(a.project_id)}"`;
+    case "change_jira_issue":
+      return `In Jira, ${a.key.trim().toUpperCase()}${a.title ? ` "${a.title}"` : ""}: ${jiraChangeParts(a).join("; ") || "nothing to change"}`;
     case "split_project": {
       const moving = [...(a.channel_ids.length ? [channelList(a.channel_ids.map(channel))] : []), ...a.epic_keys.map((k) => k.trim().toUpperCase())];
       const sharing = a.shared_channel_ids.length ? `, both reading ${channelList(a.shared_channel_ids.map(channel))}` : "";
@@ -402,6 +428,14 @@ async function apply(a: GlobalAction): Promise<string> {
       await db.linkEpic(a.project_id, { key }, "user");
       quiet(refreshProject(a.project_id));
       return `Linked ${key}; the project is being read again with it.`;
+    }
+    case "change_jira_issue": {
+      if (!projectsOn() && !epicsOn()) throw new Error("Jira changes need Projects or Epics on. Turn one on in Settings.");
+      if (!jiraChangeParts(a).length) throw new Error("This card doesn't say what to change");
+      const done = await changeJiraIssue(a);
+      const key = a.key.trim().toUpperCase();
+      const refused = done.not_changed.length ? ` Jira refused the ${done.not_changed.join(", ")} change${done.not_changed.length > 1 ? "s" : ""}${done.error ? `: ${done.error}` : "."}` : "";
+      return `Changed ${key} in Jira${done.changed.length ? ` (${done.changed.join(", ")})` : ""}.${refused}`;
     }
     case "unlink_project_epic": {
       const key = epicKeyFrom(a.epic_key) ?? a.epic_key.trim().toUpperCase();

@@ -25,6 +25,25 @@ export function isDark(theme: Theme): boolean {
   return theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 }
 
+/** Whether the page shows dark colors, followed as the theme changes (in Settings, or in macOS when it follows macOS). */
+export function useDarkPage(): boolean {
+  const read = () => isDark((document.documentElement.dataset.theme as Theme | undefined) ?? "system");
+  const [dark, setDark] = useState(read);
+  useEffect(() => {
+    const update = () => setDark(read());
+    const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+    scheme.addEventListener("change", update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    update();
+    return () => {
+      scheme.removeEventListener("change", update);
+      observer.disconnect();
+    };
+  }, []);
+  return dark;
+}
+
 export function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setTheme] = useState<Theme>(storedTheme);
   useEffect(() => {

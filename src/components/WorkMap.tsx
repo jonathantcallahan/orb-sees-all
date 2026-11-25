@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { JiraKey } from "./JiraIcons";
 import { oldMapDependencies } from "../db";
 import { planMap } from "../plan";
 import { itemLinks, layoutMap, type MapLayout, type MapPlace } from "../projectMap";
 import type { MapItem, MapLink, PathStep, PathToShip, ProjectMap } from "../schema";
 import { formatWhen } from "../scheduler";
-import { ExternalLink } from "./common";
 
 const STATUS_LABEL: Record<MapItem["status"], string> = { done: "Done", in_progress: "In progress", next: "Next", blocked: "Blocked" };
 
@@ -81,7 +81,7 @@ export function DependencyView({ path, tasks = [], projectId }: { path: PathToSh
         {!map.links.some((l) => !l.from.startsWith("task:")) && <span className="muted">No dependencies yet: the next refresh reads them.</span>}
         {!hasOwn && older.length > 0 && <span className="muted">Dependencies from the earlier map until the next refresh reads them.</span>}
       </div>
-      <WorkMapCanvas map={map} tracks={lanes} proposed={proposed} />
+      <WorkMapCanvas map={map} tracks={lanes} proposed={proposed} types={issueTypes(path)} />
     </div>
   );
 }
@@ -125,7 +125,12 @@ function MapLegend({ mine = false, proposed = false }: { mine?: boolean; propose
   );
 }
 
-function WorkMapCanvas({ map, tracks, proposed = [] }: { map: ProjectMap; tracks: string[]; proposed?: string[] }) {
+/** Each ticket's issue type, by its key, from the plan's work: for the mark before its key on a block's card. */
+function issueTypes(path: PathToShip): Map<string, string | null> {
+  return new Map(path.steps.flatMap((s) => (s.items ?? []).flatMap((i) => (i.key ? [[i.key.trim().toUpperCase(), i.type ?? null] as const] : []))));
+}
+
+function WorkMapCanvas({ map, tracks, proposed = [], types }: { map: ProjectMap; tracks: string[]; proposed?: string[]; types: Map<string, string | null> }) {
   const layout = useMemo(() => layoutMap(map, tracks), [map, tracks]);
   const geo = useMemo(() => geometry(layout), [layout]);
   const [hover, setHover] = useState<string | null>(null);
@@ -207,6 +212,7 @@ function WorkMapCanvas({ map, tracks, proposed = [] }: { map: ProjectMap; tracks
         {hovered && (
           <MapCard
             map={map}
+            types={types}
             box={hovered}
             canvas={geo}
             onEnter={() => show(hovered.place.item.id)}
@@ -222,7 +228,21 @@ function WorkMapCanvas({ map, tracks, proposed = [] }: { map: ProjectMap; tracks
 const linkWords = (l: MapLink) => (l.source === "jira" ? "Jira link" : l.reason ? `assumed: ${l.reason}` : "assumed");
 
 /** The hovered block in full: what it is, its ticket or why Demian assumes it, and what it waits on and holds up. */
-function MapCard({ map, box, canvas, onEnter, onLeave }: { map: ProjectMap; box: Box; canvas: { width: number; height: number }; onEnter: () => void; onLeave: () => void }) {
+function MapCard({
+  map,
+  types,
+  box,
+  canvas,
+  onEnter,
+  onLeave,
+}: {
+  map: ProjectMap;
+  types: Map<string, string | null>;
+  box: Box;
+  canvas: { width: number; height: number };
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
   const item = box.place.item;
   const { waitsOn, neededFor } = itemLinks(map, item.id);
   // Beside the block, on whichever side has room; from a block in the lower half it grows upward, so it stays on the canvas.
@@ -241,13 +261,9 @@ function MapCard({ map, box, canvas, onEnter, onLeave }: { map: ProjectMap; box:
       {item.mine ? (
         <span className="map-card-mine">Your task</span>
       ) : item.jira ? (
-        item.jira.link ? (
-          <ExternalLink href={item.jira.link} className="map-card-key">
-            {item.jira.key}
-          </ExternalLink>
-        ) : (
-          <span className="map-card-key">{item.jira.key}</span>
-        )
+        <JiraKey type={types.get(item.jira.key)} href={item.jira.link} className="map-card-key" size={12}>
+          {item.jira.key}
+        </JiraKey>
       ) : (
         <span className="map-card-assumed">{item.reason || "No ticket covers this work yet."}</span>
       )}

@@ -1,3 +1,4 @@
+import { PaperLamp } from "./PaperLamp";
 import { revealTask } from "./TaskCard";
 import { showDetailTab } from "../viewMode";
 import { useAreaOn } from "../features";
@@ -671,6 +672,7 @@ function useRestingScroll(restPx: number, onUserScroll: () => void) {
 export function TodayColumn({
   pressure,
   orbLook,
+  lamp = false,
   working,
   calendar,
   taskStates,
@@ -679,6 +681,8 @@ export function TodayColumn({
 }: {
   pressure: Pressure;
   orbLook: OrbLook;
+  /** A paper lamp shows at the top in place of the orb (while the Updates area's painting hangs). */
+  lamp?: boolean;
   /** Orb is busy (a refresh or task session): the orb gives off motes. */
   working: boolean;
   calendar: { day: CalendarDay; refreshed_at: string } | null;
@@ -696,7 +700,14 @@ export function TodayColumn({
 
   return (
     <section className="column today-column">
-      <PressureBlob pressure={pressure} look={orbLook} working={working} />
+      {/* The lamp in the orb's own box, so the day below doesn't move. */}
+      {lamp ? (
+        <div className="pressure">
+          <PaperLamp />
+        </div>
+      ) : (
+        <PressureBlob pressure={pressure} look={orbLook} working={working} />
+      )}
       {/* The day, "Tuesday November 10" with the weekday in the darker text color, and the pomodoro timer at the right. */}
       <header className="column-header">
         <div>

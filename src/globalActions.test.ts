@@ -12,6 +12,16 @@ const channel = (id: string) => id;
 const items = (projectId: string, itemId: string) => (projectId === "C1" && itemId === "b1" ? "Legal sign-off" : null);
 
 describe("action cards", () => {
+  it("say what a Jira change does to which issue", () => {
+    const a = { type: "change_jira_issue", key: "pay-8579", title: "Refund emails", status: "In Progress", assignee: "none", due: "2026-12-12", sprint: "backlog", comment: "Picked up." } as const;
+    const year = new Date(2026, 11, 12).getFullYear() === new Date().getFullYear();
+    expect(describeAction(a, project, channel, items)).toBe(
+      `In Jira, PAY-8579 "Refund emails": move to In Progress; unassign it; due ${year ? "Dec 12" : "Dec 12, 2026"}; take it out of its sprint; comment "Picked up."`,
+    );
+    expect(describeAction({ type: "change_jira_issue", key: "PAY-1" }, project, channel, items)).toBe("In Jira, PAY-1: nothing to change");
+    expect(describeAction({ type: "change_jira_issue", key: "PAY-2", epic: "none" }, project, channel, items)).toBe("In Jira, PAY-2: take it out of its epic");
+  });
+
   it("names a project item from its id, not the chat's words for it", () => {
     const a = { type: "resolve_project_item", project_id: "C1", item_id: "b1", what: "Something else" } as const;
     expect(describeAction(a, project, channel, items)).toBe('Mark "Legal sign-off" done in "Store"');

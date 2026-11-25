@@ -2,7 +2,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { Kbd, RefreshButton, ScrambleText, Spinner, updatedText } from "./components/common";
 import { DailyReading, openUpdates } from "./components/DailyReading";
-import { ArtWall } from "./components/ArtWall";
+import { ArtHeading, ArtWall } from "./components/ArtWall";
+import { LampGlow } from "./components/PaperLamp";
 import { Mist } from "./components/Mist";
 import { ProjectFilters, useProjectFilter } from "./components/TaskFilters";
 import { UpdateButton } from "./components/UpdateButton";
@@ -19,6 +20,7 @@ import { ProjectChat } from "./components/ProjectChat";
 import { ProjectDue } from "./components/ProjectRecord";
 import { revealTask } from "./components/TaskCard";
 import { WatchedTopics } from "./components/WatchedTopics";
+import { EpicsArea } from "./components/EpicsArea";
 import { needsYou } from "./watched";
 import { Inbox, openReplies } from "./components/Inbox";
 import { ChatDockProvider, InDock, type ChatDock } from "./components/chatDock";
@@ -32,8 +34,10 @@ import { TodayColumn } from "./components/TodayColumn";
 import { getNotes, getSetting, lastUpdated, markInterruptedJobs, saveSeen, setSetting } from "./db";
 import { seenAfter, toRecord, unreadIds, updateFacts } from "./unread";
 import { setStandingNotes } from "./claude";
-import { assessPendingTasks, checkWatchedTopics, maybeDistill, maybeRunMorning, pollSelfDm, refreshAdhoc, refreshAll, refreshCalendar, refreshReading, scanClaudeSessions } from "./jobs";
+import { jiraConnection } from "./jira";
+import { assessPendingTasks, checkWatchedTopics, maybeDistill, maybeRunMorning, pollSelfDm, refreshAdhoc, refreshAll, refreshCalendar, refreshReading, refreshSprints, scanClaudeSessions } from "./jobs";
 import { localDate } from "./scheduler";
+import { briefingRead } from "./reading";
 import { compareProjects, matchesProjectFilter, myBlockingIds, pressure, PRIORITY_RANK, stateOf, taskPriority, type PressureTask } from "./tasks";
 import { canonicalId } from "./registry";
 import { projectKind, projectPriority, projectStatus, projectName } from "./projects";
@@ -55,6 +59,8 @@ function useScheduler() {
       maybeDistill().catch(() => {});
     };
     markInterruptedJobs().then(check, check);
+    // Whether Demian reads Jira itself, which Epics can be on with alone.
+    jiraConnection().catch(() => {});
     // The Rust side emits a tick every minute, which reaches the webview even
     // while the window is hidden; the interval and focus check are backups.
     const interval = setInterval(check, 60_000);
@@ -180,6 +186,8 @@ export default function App() {
   // The shown project's own chat, under its details; it follows the project shown.
   const [projectChatOpen, setProjectChatOpen] = useState(false);
   const [dockTarget, setDockTarget] = useState<HTMLElement | null>(null);
+  // The Updates area's two columns, which the painting hangs across.
+  const [updatesSplit, setUpdatesSplit] = useState<HTMLElement | null>(null);
   const dock = useMemo(
     () => ({ owner: dockOwner, target: dockTarget, open: setDockOwner, close: (owner: string) => setDockOwner((cur) => (cur === owner ? null : cur)) }),
     [dockOwner, dockTarget],
@@ -263,10 +271,6 @@ export default function App() {
         { name: b.name, status: projectStatus(b) ?? null, priority: projectPriority(b)?.level },
       ),
     );
-  const counts = {
-    blocked: projects.filter((p) => projectStatus(p) === "blocked").length,
-    at_risk: projects.filter((p) => projectStatus(p) === "at_risk").length,
-  };
   const recommended = new Set(data.reading?.date === localDate(new Date()) ? (data.reading.recommended ?? []) : []);
   const shownProjects = projects.filter((p) =>
     matchesProjectFilter(
@@ -312,6 +316,16 @@ export default function App() {
   // What's in the Updates area's inbox, and the messages already on the task list (kept out of it).
   const replyIds = new Set(data.adhoc.replies.map((r) => r.id));
   const adhocTaskIds = new Set(data.adhoc.tasks.map((t) => t.id));
+  // Today's briefing and every update read and the inbox empty (and no chat open beside them): the
+  // Updates area hangs a painting across its two columns. Not before today's briefing is written (a first
+  // run, or a morning before its refresh), nor while a refresh that brings updates runs.
+  const showArt =
+    briefingRead(data.reading, data.taskStates, localDate(new Date())) &&
+    !running.includes("reading") &&
+    !running.includes("all") &&
+    openUpdates(withProjects ? data.projects : [], data.adhoc.news, data.taskStates, replyIds).length === 0 &&
+    openReplies(data.adhoc.replies, data.taskStates, adhocTaskIds).length === 0 &&
+    !dockOwner;
 
   // The project whose TDD chat is open in the Projects area's column, if any.
   const chatProject = data.projects.find((p) => p.channel_id === tddChatProject(projectChat)) ?? null;
@@ -336,11 +350,22 @@ export default function App() {
       {/* What's playing is only read on macOS. */}
       {!isWindows && <NowPlayingBar look={orbLook} />}
 
-      {/* The orb and calendar, a rule, a rail of icons for the three areas, then the open area in a
+      {/* The orb and calendar, a rule, a rail of icons for the areas, then the open area in a
           panel with rounded top corners, flush with the bottom of the window. */}
       <main className="detail-layout">
-        <OrbGlow look={orbLook} level={load.level} />
-        <TodayColumn pressure={load} orbLook={orbLook} working={running.length > 0} calendar={data.calendar} taskStates={data.taskStates} busy={running.includes("calendar")} onChange={reload} />
+        {/* While the Updates area's painting hangs, a paper lamp hangs in the orb's place, its own warm
+            light on the wall in place of the orb's glow. */}
+        {tab === "updates" && showArt ? <LampGlow /> : <OrbGlow look={orbLook} level={load.level} />}
+        <TodayColumn
+          pressure={load}
+          orbLook={orbLook}
+          lamp={tab === "updates" && showArt}
+          working={running.length > 0}
+          calendar={data.calendar}
+          taskStates={data.taskStates}
+          busy={running.includes("calendar")}
+          onChange={reload}
+        />
         {/* With one area on, no icons: the rail's column only holds the calendar's hours. */}
         {areas.length > 1 && (
         <nav className="detail-rail" aria-label="Areas">
@@ -366,30 +391,39 @@ export default function App() {
         <div className="detail-panel">
           {tab === "updates" && (
             <ChatDockProvider value={dock}>
-              <div className="detail-split">
+              <div className="detail-split updates-split" ref={setUpdatesSplit}>
+                {/* With everything read, the three sections (each saying "All caught up") give way to a
+                    line about the painting. */}
                 <section className="column detail-pane">
-                  <DailyReading
-                    alwaysOpen
-                    reading={data.reading}
-                    projects={withProjects ? data.projects : []}
-                    news={data.adhoc.news}
-                    states={data.taskStates}
-                    inbox={replyIds}
-                    busy={running.includes("reading")}
-                    updatesBusy={running.some((k) => k.startsWith("project:") || k === "adhoc")}
-                    onChange={reload}
-                  />
-                  <Inbox replies={data.adhoc.replies} states={data.taskStates} taskIds={adhocTaskIds} busy={running.includes("adhoc")} onChange={reload} />
-                  {/* Both clear: a painting fills the space they leave. */}
-                  {openUpdates(withProjects ? data.projects : [], data.adhoc.news, data.taskStates, replyIds).length === 0 &&
-                    openReplies(data.adhoc.replies, data.taskStates, adhocTaskIds).length === 0 && <ArtWall />}
+                  {showArt ? (
+                    <ArtHeading />
+                  ) : (
+                    <>
+                      <DailyReading
+                        alwaysOpen
+                        reading={data.reading}
+                        projects={withProjects ? data.projects : []}
+                        news={data.adhoc.news}
+                        states={data.taskStates}
+                        inbox={replyIds}
+                        busy={running.includes("reading")}
+                        updatesBusy={running.some((k) => k.startsWith("project:") || k === "adhoc")}
+                        onChange={reload}
+                      />
+                      <Inbox replies={data.adhoc.replies} states={data.taskStates} taskIds={adhocTaskIds} busy={running.includes("adhoc")} keepTitle onChange={reload} />
+                    </>
+                  )}
                 </section>
+                {/* A chat opened from an update or inbox item; with none open, a line about it, or nothing
+                    while the painting hangs. */}
                 <section className="detail-pane chat-dock" ref={setDockTarget}>
-                  {!dockOwner && <p className="muted small chat-dock-empty">Click Explain on an Update or Draft on an Inbox item to open a chat here</p>}
+                  {!dockOwner && !showArt && <p className="muted small chat-dock-empty">Click Explain on an Update or Draft on an Inbox item to open a chat here</p>}
                 </section>
+                {showArt && <ArtWall split={updatesSplit} />}
               </div>
             </ChatDockProvider>
           )}
+          {tab === "epics" && <EpicsArea running={running} />}
           {tab === "watched" && watchedOn && (
             <WatchedTopics
               topics={data.watched}
@@ -448,7 +482,6 @@ export default function App() {
           <header className="column-header">
             <div className="row">
               <h2>Projects</h2>
-              {counts.blocked > 0 && <span className="pill blocked">{counts.blocked} blocked</span>}
             </div>
             <ProjectFilters filter={projectFilter} onChange={setProjectFilter} />
           </header>
@@ -581,8 +614,9 @@ export default function App() {
 /**
  * The Detail view's areas, in the rail's order, each drawn like the layout icons (filled for the area
  * you're in, outlined for the others): Updates, one square split into three bands; Tasks, four small
- * squares making a larger one; Projects, a single square; Watched topics, a square split along its
- * diagonal. An area with something waiting on you has a dot at its top right.
+ * squares making a larger one; Projects, a single square; Epics, a lightning bolt, as Jira marks an
+ * epic; Watched topics, a square split along its diagonal. An area with something waiting on you has
+ * a dot at its top right.
  */
 const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[]; paths?: string[] }[] = [
   {
@@ -605,6 +639,8 @@ const DETAIL_TABS: { id: DetailTab; label: string; rects: Rect[]; paths?: string
     ],
   },
   { id: "projects", label: "Projects", rects: [[1, 1, 12, 12, 1.6]] },
+  // Jira's mark for an epic: a lightning bolt.
+  { id: "epics", label: "Epics", rects: [], paths: ["M8.4 1.2 2.9 8.1Q2.6 8.5 3.1 8.5H6.6L5.4 12.6Q5.3 13 5.6 12.7L11.1 5.9Q11.4 5.5 10.9 5.5H7.4L8.7 1.4Q8.8 0.9 8.4 1.2Z"] },
   {
     id: "watched",
     label: "Watched topics",
@@ -679,6 +715,7 @@ const REFRESH_AREAS: { label: string | ((on: Area[]) => string); jobs: string[];
   },
   // Each only while its area is on: the briefing is in Updates.
   { label: "Daily briefing", areas: ["updates"], jobs: ["reading"], logged: "reading", run: refreshReading },
+  { label: "Epics", areas: ["epics"], jobs: ["sprint:"], logged: "sprint", run: refreshSprints },
   { label: "Watched topics", areas: ["watched"], jobs: ["watch:"], logged: "watch", run: checkWatchedTopics },
 ];
 

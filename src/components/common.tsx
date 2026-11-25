@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { JiraLinkMark } from "./JiraIcons";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { setTaskState } from "../db";
@@ -95,6 +96,7 @@ export function Checklist({ tasks, onChange, empty }: { tasks: ViewTask[]; onCha
           />
           <div className="task-body">
             <ExternalLink href={t.link} className="task-title">
+              <JiraLinkMark href={t.link} />
               {t.title}
             </ExternalLink>
             {(t.detail || t.due) && (
@@ -272,6 +274,30 @@ export function CloseIcon({ size = 10 }: { size?: number }) {
     <svg className="close-icon" width={size} height={size} viewBox="0 0 10 10" aria-hidden>
       <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/** A section's folding label: its name in gray, how many it holds, and an arrow that turns as it opens (a project's details' Channels, Also called…). */
+export function FoldLabel({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button className="fold-label" aria-expanded={open} onClick={onToggle}>
+      {label}
+      <span className="timestamp">{count}</span>
+      <svg className="fold-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path d="M3.5 2 6.5 5l-3 3" />
+      </svg>
+    </button>
+  );
+}
+
+/** The arrow that folds a section away and opens it again. */
+export function Disclosure({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }) {
+  return (
+    <button className="task-toggle" aria-expanded={open} aria-label={open ? `Hide ${what}` : `Show ${what}`} onClick={onToggle}>
+      <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
   );
 }
 
@@ -596,7 +622,7 @@ export function BadgeSelect<T extends string>({
 }
 
 /** A small set of choices shown side by side, the picked one raised: for a setting with a few values (the visualizers have more). */
-export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void }) {
   return (
     // A long row of choices (the visualizers) sits a little tighter, so it fits beside its label.
     <div className={`segmented${options.length > 5 ? " many" : ""}`} role="radiogroup" aria-label={label}>

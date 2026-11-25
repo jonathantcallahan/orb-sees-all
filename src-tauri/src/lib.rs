@@ -1,3 +1,4 @@
+mod jira;
 mod listen;
 mod media;
 mod runs;
@@ -936,6 +937,34 @@ fn migrate_old_identifier() {
     }
 }
 
+/// Whether a page is the app's own: its bundled files, a blank page, or `dev`, the dev server (in a
+/// debug build only). Any other local server is someone else's.
+fn app_page(url: &tauri::Url, dev: Option<&tauri::Url>) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" | "ipc" | "about" => true,
+        "http" | "https" => matches!(url.host_str(), Some("tauri.localhost" | "asset.localhost" | "ipc.localhost")) || dev.is_some_and(|d| d.origin() == url.origin()),
+        _ => false,
+    }
+}
+
+/// Keeps the app's window on the app: anything that would take it to a web page (a middle click on a
+/// Jira link, say), which the window has no way back from, is stopped and opened in the browser instead.
+fn stay_on_app<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("stay-on-app")
+        .on_navigation(|webview, url| {
+            let dev = if cfg!(debug_assertions) { webview.app_handle().config().build.dev_url.clone() } else { None };
+            if app_page(url, dev.as_ref()) {
+                return true;
+            }
+            if matches!(url.scheme(), "http" | "https" | "mailto") {
+                use tauri_plugin_opener::OpenerExt;
+                let _ = webview.app_handle().opener().open_url(url.as_str(), None::<&str>);
+            }
+            false
+        })
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     migrate_old_identifier();
@@ -944,6 +973,7 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_notification::init());
     let app = builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(stay_on_app())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(
@@ -975,7 +1005,11 @@ pub fn run() {
             close_run_stdin,
             set_run_waiting,
             cancel_all_runs,
-            setup_login_command
+            setup_login_command,
+            jira::jira_request,
+            jira::jira_save_token,
+            jira::jira_forget_token,
+            jira::jira_has_token
         ])
         .manage(listen::Listening::default())
         .manage(runs::Runs::default())
@@ -1176,6 +1210,44 @@ mod tests {
         drop(guard);
         assert!(!file.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod stay_on_app_tests {
+    use super::app_page;
+
+    fn url(s: &str) -> tauri::Url {
+        tauri::Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn the_apps_own_pages_stay() {
+        let dev = url("http://localhost:1420");
+        for ok in ["tauri://localhost/index.html", "http://localhost:1420/", "http://tauri.localhost/", "about:blank", "ipc://localhost/plugin"] {
+            assert!(app_page(&url(ok), Some(&dev)), "{ok}");
+        }
+    }
+
+    #[test]
+    fn web_pages_leave_for_the_browser() {
+        let dev = url("http://localhost:1420");
+        for away in [
+            "https://example.atlassian.net/browse/ABC-1",
+            "http://example.com/",
+            "https://localhost.example.com/",
+            "mailto:a@example.com",
+            "file:///etc/hosts",
+            // Someone else's local server, and pages made from data.
+            "http://localhost:3000/",
+            "http://127.0.0.1:1420/",
+            "data:text/html,hi",
+            "blob:http://localhost:1420/1234",
+        ] {
+            assert!(!app_page(&url(away), Some(&dev)), "{away}");
+        }
+        // Without a dev server (a release build), not even its address.
+        assert!(!app_page(&url("http://localhost:1420/"), None));
     }
 }
 

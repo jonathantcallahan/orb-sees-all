@@ -1,4 +1,6 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { API_TOKENS_URL, forgetJiraToken, hasJiraToken, jiraConnection, jiraSettings, jiraWhoAmI, saveJiraSettings, siteOrigin } from "../jira";
 import { setStandingNotes } from "../claude";
 import { RELEASE_NOTES } from "../releaseNotes";
 import { label, loadWhyLevel, recordCorrection, saveWhyLevel, type WhyLevel } from "../feedback";
@@ -9,7 +11,7 @@ import { discoverProjects } from "../jobs";
 import { ORB_LOOK_NAMES, ORB_LOOKS } from "../orbLook";
 import { useListeningStatus, type ListeningState } from "../orbMusic";
 import { activeChannels, activeEpics, channelLabel, projectName } from "../projects";
-import { areaOn, projectConnectors, projectConnectorsReady, projectConnectorsRecent, projectsGate, saveProjectConnectors, setAreaOn, useAreasOn, useProjectConnectors, type Area } from "../features";
+import { areaOn, epicsGate, jiraDirect, useJiraDirect, projectConnectors, projectConnectorsReady, projectConnectorsRecent, projectsGate, saveProjectConnectors, setAreaOn, useAreasOn, useProjectConnectors, type Area } from "../features";
 import { checkProjectConnectors } from "../setup";
 import { clampMinutes, POMODORO_MAX_MIN, setPomodoroSettings, usePomodoroSettings } from "../pomodoro";
 import { ago } from "../tasks";
@@ -37,6 +39,11 @@ const AREA_ROWS: { area: Area; label: string; hint: string }[] = [
     area: "projects",
     label: "Projects",
     hint: "Your projects, with their people, plans, requirements and pull requests. Turned off, projects aren't found or refreshed, and refreshes find tasks in every Slack channel instead. Your projects are kept for when you turn it on.",
+  },
+  {
+    area: "epics",
+    label: "Epics",
+    hint: "A Jira project's current or upcoming sprint, by epic: the epics with work in it, and each one's issues and who they're assigned to. Turned off, its sprints aren't read.",
   },
   {
     area: "watched",
@@ -241,6 +248,164 @@ function SettingRow({ label, hint, note, children }: { label: string; hint?: Rea
   );
 }
 
+/** A Jira site the app has already seen (in an epic's link), to start the Site field with. */
+async function knownJiraSite(): Promise<string> {
+  const sprints = await db.getSprintEpics().catch(() => ({}));
+  const link = Object.values(sprints)
+    .flatMap((s) => s.epics)
+    .map((e) => e.link)
+    .find((l): l is string => !!l && !!siteOrigin(l));
+  return link ? siteOrigin(link)!.replace("https://", "") : "";
+}
+
+/** What went wrong, from an Error or the app's own message. */
+const failure = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Demian's own connection to Jira (see jira.ts): the site, the Atlassian account's email and an API
+ * token, which is kept in the Keychain. With all three, the Epics area reads Jira itself, and the
+ * changes applied from its chats are made the same way, rather than through Claude.
+ */
+function JiraConnection() {
+  const [site, setSite] = useState("");
+  const [email, setEmail] = useState("");
+  const [token, setToken] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    (async () => {
+      const s = await jiraSettings();
+      setSite(s.site || (await knownJiraSite()));
+      setEmail(s.email);
+      setSaved(await hasJiraToken(s.email));
+    })();
+  }, []);
+  const ready = !!siteOrigin(site) && email.includes("@");
+  // The site and email aren't secret: kept as they're typed. A token is kept per email.
+  const keep = async () => {
+    if (!ready) return;
+    await saveJiraSettings({ site, email });
+    setSaved(await hasJiraToken(email));
+  };
+  const test = async () => {
+    setBusy(true);
+    try {
+      const jira = await jiraConnection();
+      if (!jira) throw new Error("Add the site, your email and a token first.");
+      setCheck({ ok: true, text: `Connected as ${await jiraWhoAmI(jira)}. The Epics tab reads Jira itself.` });
+    } catch (e) {
+      setCheck({ ok: false, text: failure(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = async () => {
+    if (busy || !ready || !token.trim()) return;
+    setBusy(true);
+    try {
+      await saveJiraSettings({ site, email, token });
+      setToken("");
+      setSaved(true);
+    } catch (e) {
+      setCheck({ ok: false, text: failure(e) });
+      setBusy(false);
+      return;
+    }
+    await test();
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await forgetJiraToken(email);
+      setSaved(false);
+      setCheck(null);
+    } catch (e) {
+      setCheck({ ok: false, text: failure(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tokenNote = check ? (
+    <span className={check.ok ? undefined : "setting-note-error"}>{check.text}</span>
+  ) : saved ? (
+    "Kept in your Keychain."
+  ) : (
+    <>
+      Make one at{" "}
+      <button className="link-button small" onClick={() => openUrl(API_TOKENS_URL)}>
+        id.atlassian.com
+      </button>
+      , with as short an expiry as you can.
+    </>
+  );
+  return (
+    <section className="settings-section">
+      <h4>Jira</h4>
+      <div className="settings-group">
+        <SettingRow label="Site" hint="Your Jira Cloud address.">
+          <input
+            className="time-input setting-text-input"
+            aria-label="Jira site"
+            placeholder="your-site.atlassian.net"
+            spellCheck={false}
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+            onBlur={keep}
+          />
+        </SettingRow>
+        <SettingRow label="Email" hint="The email you sign in to Atlassian with.">
+          <input
+            type="email"
+            className="time-input setting-text-input"
+            aria-label="Atlassian email"
+            spellCheck={false}
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setCheck(null);
+            }}
+            onBlur={keep}
+          />
+        </SettingRow>
+        <SettingRow
+          label="API token"
+          hint="With a site, email and token, Demian reads the Epics tab straight from Jira, and makes the changes you apply from its chats there too: in a moment, and without a Claude run. Without them, Claude reads Jira through its connector. The token stays in your Keychain."
+          note={tokenNote}
+        >
+          {saved ? (
+            <>
+              <button className="cta-ghost" onClick={test} disabled={busy}>
+                Test
+              </button>
+              <button className="cta-ghost" onClick={remove} disabled={busy}>
+                Remove
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                type="password"
+                className="time-input setting-text-input short"
+                aria-label="Jira API token"
+                placeholder="Paste a token"
+                autoComplete="off"
+                spellCheck={false}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && save()}
+              />
+              <button className="cta-ghost" onClick={save} disabled={busy || !ready || !token.trim()}>
+                Save
+              </button>
+            </>
+          )}
+        </SettingRow>
+      </div>
+    </section>
+  );
+}
+
 /**
  * One project: shown or hidden, its channels, and (opened with Repos) the repos Orb reads for it
  * and a way to merge it into another project.
@@ -406,13 +571,17 @@ export function Settings({
   const pomodoro = usePomodoroSettings();
   const areas = useAreasOn();
   const connectors = useProjectConnectors();
-  // With Projects off (as Settings opens, or once you turn it off), check Jira and GitHub, so its
-  // switch can be turned on as soon as they're set up (it's left off until they are). A check from
-  // the last few minutes stands: each costs a turn. Check setup checks again whenever you ask.
-  const needsCheck = () => !areaOn("projects") && !projectConnectorsReady() && !projectConnectorsRecent(projectConnectors());
+  const direct = useJiraDirect();
+  // With Projects off without Jira and GitHub, or Epics off without Jira (Claude's or Demian's own; as
+  // Settings opens, or once you turn one off), check them, so its switch can be turned on as soon as they're set up (it's left
+  // off until they are). A check from the last few minutes stands: each costs a turn. Check setup
+  // checks again whenever you ask.
+  const needsCheck = () =>
+    ((!areaOn("projects") && !projectConnectorsReady()) || (!areaOn("epics") && !projectConnectors()?.jira && !jiraDirect())) && !projectConnectorsRecent(projectConnectors());
   const [checkingConnectors, setCheckingConnectors] = useState(needsCheck);
   const [connectorCheckFailed, setConnectorCheckFailed] = useState(false);
   const projectsShown = areas.includes("projects");
+  const epicsShown = areas.includes("epics");
   useEffect(() => {
     if (!needsCheck()) {
       setCheckingConnectors(false);
@@ -432,7 +601,7 @@ export function Settings({
     return () => {
       live = false;
     };
-  }, [projectsShown]);
+  }, [projectsShown, epicsShown]);
   const [time, setTime] = useState("07:30");
   const [weekdaysOnly, setWeekdaysOnly] = useState(true);
   const [whyLevel, setWhyLevel] = useState<WhyLevel>(loadWhyLevel);
@@ -545,13 +714,14 @@ export function Settings({
             <div className="settings-group">
               {AREA_ROWS.map(({ area, label, hint }) => {
                 const on = areas.includes(area);
-                // Projects needs Jira and GitHub: it can't be turned on until both are set up.
-                const gate = area === "projects" ? projectsGate({ on, connectors, checking: checkingConnectors, checkFailed: connectorCheckFailed }) : null;
+                // Projects needs Jira and GitHub, and Epics Jira: neither can be turned on until they're set up.
+                const check = { on, connectors, checking: checkingConnectors, checkFailed: connectorCheckFailed, direct };
+                const gate = area === "projects" ? projectsGate(check) : area === "epics" ? epicsGate(check) : null;
                 const blocked = !!gate?.blocked;
                 const note =
-                  area !== "projects" ? undefined : (
+                  area !== "projects" && area !== "epics" ? undefined : (
                     <>
-                      Requires connection to Jira and GitHub.
+                      {area === "projects" ? "Requires connection to Jira and GitHub." : "Requires connection to Jira: Atlassian Rovo, or Jira below."}
                       {gate?.why && ` ${gate.why}`}
                       {blocked && !checkingConnectors && (
                         <>
@@ -572,6 +742,8 @@ export function Settings({
               })}
             </div>
           </section>
+
+          <JiraConnection />
 
           <section className="settings-section">
             <h4>Pomodoro</h4>

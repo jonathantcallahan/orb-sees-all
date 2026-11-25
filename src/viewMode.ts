@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
 /**
- * The app's one layout: the orb and calendar, then one area at a time (Updates, Tasks, Projects
- * or Watched topics, each of which can be turned off; see features), picked from a rail of icons, or
+ * The app's one layout: the orb and calendar, then one area at a time (Updates, Tasks, Projects,
+ * Epics or Watched topics, each of which can be turned off; see features), picked from a rail of icons, or
  * with no rail when only one is on. The open area is kept in localStorage, so it shows from the first
  * frame.
  */
-export type DetailTab = "updates" | "tasks" | "projects" | "watched";
+export type DetailTab = "updates" | "tasks" | "projects" | "epics" | "watched";
 
 const TAB_KEY = "detail-tab";
 
@@ -24,7 +24,7 @@ export function useDetailTab(): [DetailTab, (tab: DetailTab) => void] {
     const t = localStorage.getItem(TAB_KEY);
     // An area that's off shows the first one on instead (see App), and the one kept here comes back
     // when it's on again.
-    return t === "tasks" || t === "projects" || t === "watched" || t === "updates" ? t : "updates";
+    return t === "tasks" || t === "projects" || t === "epics" || t === "watched" || t === "updates" ? t : "updates";
   });
   useEffect(() => localStorage.setItem(TAB_KEY, tab), [tab]);
   useEffect(() => {

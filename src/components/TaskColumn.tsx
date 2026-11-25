@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { TallyMarks } from "./TallyMarks";
+import { doneToday } from "../tally";
 import { TaskChatDockProvider, type TaskChatDock } from "./chatDock";
 import { isWindows, MOD } from "../platform";
 import { addManualTask, type AdhocStore, type ManualTask, type MergedTask, type Project, type StoredPlan } from "../db";
@@ -391,6 +393,8 @@ export function TaskColumn({
     (t) => !t.done,
   );
   const openTasks = openList.map((t) => ({ id: t.id, title: t.title }));
+  // How many were finished today, for the tally after the title (it starts again each day).
+  const finishedToday = doneToday([...mine.planned, ...mine.rest, ...projectTasks.planned, ...projectTasks.rest, ...inbox.planned, ...inbox.rest, ...prep.planned, ...prep.rest], today);
   // Likely duplicates among open tasks, for each card to offer a merge.
   const duplicates = findDuplicates(openList, notDuplicates);
   const [firstSeen, setFirstSeen] = useState<Record<string, string>>({});
@@ -571,6 +575,7 @@ export function TaskColumn({
       <header className="column-header">
         <div className="title-line">
           <h2>Tasks</h2>
+          <TallyMarks count={finishedToday} />
         </div>
         {/* Refreshed from the bottom bar's Refresh menu; a spinner here while it runs. */}
         {(running.includes("adhoc") || running.includes("assess") || running.includes("sessions")) && (

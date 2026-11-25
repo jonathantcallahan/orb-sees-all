@@ -12,18 +12,20 @@ import { useSyncExternalStore } from "react";
  * - Projects: needs Jira and GitHub (see projectConnectorsReady), so it can be turned on only once
  *   both are set up. Off, projects aren't found or refreshed, the chats leave out their changes, and
  *   refreshes find tasks in every channel, project channels too.
+ * - Epics: a Jira project's current or upcoming sprint, by epic (see EpicsArea). Needs Jira, so until
+ *   it's turned on or off it's on wherever Jira is set up. Off, its sprints aren't read.
  * - Watched topics: off until turned on. Off, its line in the Refresh menu, its checks in a refresh,
  *   and the chats' "watch a topic" change are left out.
  *
  * At least one area stays on: Settings won't turn off the last.
  */
-export type Area = "updates" | "tasks" | "projects" | "watched";
+export type Area = "updates" | "tasks" | "projects" | "epics" | "watched";
 
 /** In the rail's order. */
-export const AREAS: Area[] = ["updates", "tasks", "projects", "watched"];
+export const AREAS: Area[] = ["updates", "tasks", "projects", "epics", "watched"];
 
 /** Updates, Tasks and Projects are on until turned off; Watched topics is off until turned on. */
-const KEYS: Record<Area, { key: string; onByDefault: boolean }> = {
+const KEYS: Record<Exclude<Area, "epics">, { key: string; onByDefault: boolean }> = {
   updates: { key: "feature:updates-off", onByDefault: true },
   tasks: { key: "feature:tasks-off", onByDefault: true },
   projects: { key: "feature:projects-off", onByDefault: true },
@@ -52,7 +54,34 @@ function store(key: string, set: boolean) {
   }
 }
 
+/** Epics: "1" or "0" once turned on or off; until then it follows Jira (see projectConnectors and jiraDirect). */
+const EPICS_KEY = "feature:epics";
+
+function epicsChosen(): boolean {
+  let v: string | null = null;
+  try {
+    v = localStorage.getItem(EPICS_KEY);
+  } catch {
+    // Storage refused: as if never set.
+  }
+  return v === null ? projectConnectors()?.jira === true || jiraDirect() : v === "1";
+}
+
+/**
+ * Whether Demian has its own connection to Jira (a site, email and token in Settings › Jira; see
+ * jira.ts), as last found: Epics needs no other. Kept, so it's known from the first frame.
+ */
+const JIRA_DIRECT_KEY = "jira:direct";
+export const jiraDirect = () => stored(JIRA_DIRECT_KEY);
+
+export function setJiraDirect(on: boolean) {
+  if (on === jiraDirect()) return;
+  store(JIRA_DIRECT_KEY, on);
+  notify();
+}
+
 const chosen = (area: Area): boolean => {
+  if (area === "epics") return epicsChosen();
   const { key, onByDefault } = KEYS[area];
   return onByDefault ? !stored(key) : stored(key);
 };
@@ -66,6 +95,15 @@ export function areaOn(area: Area): boolean {
 export function setAreaOn(area: Area, on: boolean) {
   // The last area on stays on.
   if (!on && AREAS.every((a) => a === area || !areaOn(a))) return;
+  if (area === "epics") {
+    try {
+      localStorage.setItem(EPICS_KEY, on ? "1" : "0");
+    } catch {
+      // Storage refused: it stays as it was.
+    }
+    notify();
+    return;
+  }
   const { key, onByDefault } = KEYS[area];
   store(key, onByDefault ? !on : on);
   notify();
@@ -79,6 +117,9 @@ const subscribe = (l: () => void) => {
 /** Whether an area is on, kept current as Settings changes it. */
 export const useAreaOn = (area: Area) => useSyncExternalStore(subscribe, () => areaOn(area));
 
+/** Whether Demian reads Jira itself (see jiraDirect), kept current. */
+export const useJiraDirect = () => useSyncExternalStore(subscribe, jiraDirect);
+
 /** The areas that are on, in the rail's order. */
 export const areasOn = (): Area[] => AREAS.filter(areaOn);
 
@@ -91,6 +132,7 @@ export function useAreasOn(): Area[] {
 export const updatesOn = () => areaOn("updates");
 export const tasksOn = () => areaOn("tasks");
 export const projectsOn = () => areaOn("projects");
+export const epicsOn = () => areaOn("epics");
 export const watchedTopicsOn = () => areaOn("watched");
 
 export const useUpdatesOn = () => useAreaOn("updates");
@@ -136,18 +178,26 @@ export const CONNECTORS_RECHECK_MS = 5 * 60_000;
 /** Whether Projects' connectors were checked recently enough not to check again. */
 export const projectConnectorsRecent = (c: ProjectConnectors | null, now = Date.now()) => !!c && now - Date.parse(c.at) < CONNECTORS_RECHECK_MS;
 
+type GateInput = { on: boolean; connectors: ProjectConnectors | null; checking: boolean; checkFailed: boolean; direct?: boolean };
+
 /**
- * What Settings' Projects switch shows: whether it's blocked (it can't be turned on until Jira and
- * GitHub are set up; it can always be turned off), and the line saying why.
+ * What Settings' switch for an area that needs connectors shows: whether it's blocked (it can't be
+ * turned on until they're set up; it can always be turned off), and the line saying why.
  */
-export function projectsGate(o: { on: boolean; connectors: ProjectConnectors | null; checking: boolean; checkFailed: boolean }): { blocked: boolean; why: string | null } {
-  if (o.on || projectConnectorsReady(o.connectors)) return { blocked: false, why: null };
-  if (o.checking) return { blocked: true, why: "Checking them…" };
+function connectorsGate(o: GateInput, needs: ("jira" | "github")[]): { blocked: boolean; why: string | null } {
+  if (o.on || needs.every((n) => o.connectors?.[n])) return { blocked: false, why: null };
+  if (o.checking) return { blocked: true, why: needs.length > 1 ? "Checking them…" : "Checking it…" };
   // Not known: the check couldn't run (Claude Code unreachable, say), which isn't the same as missing.
-  if (o.checkFailed || !o.connectors) return { blocked: true, why: "Couldn't check them just now." };
-  const missing = [!o.connectors.jira && "Jira", !o.connectors.github && "GitHub"].filter(Boolean).join(" and ");
+  if (o.checkFailed || !o.connectors) return { blocked: true, why: needs.length > 1 ? "Couldn't check them just now." : "Couldn't check it just now." };
+  const missing = needs.filter((n) => !o.connectors![n]).map((n) => (n === "jira" ? "Jira" : "GitHub")).join(" and ");
   return { blocked: true, why: `Set up ${missing} to turn it on.` };
 }
+
+/** Settings' Projects switch: it needs Jira and GitHub. */
+export const projectsGate = (o: GateInput) => connectorsGate(o, ["jira", "github"]);
+
+/** Settings' Epics switch: it needs Jira, through Claude's connector or Demian's own connection (`direct`). */
+export const epicsGate = (o: GateInput) => (o.direct ? { blocked: false, why: null } : connectorsGate(o, ["jira"]));
 
 /** Projects' connectors as last checked, kept current. */
 export function useProjectConnectors(): ProjectConnectors | null {

@@ -5,7 +5,7 @@ vi.mock("./db", () => ({}));
 vi.mock("./jobs", () => ({}));
 vi.mock("./claude", () => ({}));
 
-const { areaOn, areasOn, CONNECTORS_RECHECK_MS, projectConnectors, projectConnectorsReady, projectConnectorsRecent, projectsGate, saveProjectConnectors, setAreaOn } = await import("./features");
+const { areaOn, areasOn, CONNECTORS_RECHECK_MS, epicsGate, setJiraDirect, projectConnectors, projectConnectorsReady, projectConnectorsRecent, projectsGate, saveProjectConnectors, setAreaOn } = await import("./features");
 const { globalActionDocs, globalTaskRules, GLOBAL_TASK_RULES, PROJECT_ACTIONS, TASK_ACTIONS } = await import("./openInClaude");
 const { adhocPrompt, selfDmActionsPrompt } = await import("./prompts");
 const { applyAction } = await import("./globalActions");
@@ -38,6 +38,40 @@ describe("the areas, each of which can be turned off", () => {
     // Storage that somehow has them all off still shows one.
     localStorage.setItem("feature:tasks-off", "1");
     expect(areasOn()).toEqual(["tasks"]);
+  });
+});
+
+describe("Epics needs Jira", () => {
+  it("is on wherever Jira is set up until it's turned on or off", () => {
+    expect(areaOn("epics")).toBe(false);
+    saveProjectConnectors({ jira: true, github: false });
+    expect(areasOn()).toEqual(["updates", "tasks", "projects", "epics"]);
+    setAreaOn("epics", false);
+    expect(areaOn("epics")).toBe(false);
+    saveProjectConnectors({ jira: false, github: false });
+    setAreaOn("epics", true);
+    expect(areaOn("epics")).toBe(true);
+  });
+
+  it("says why its switch can't be turned on", () => {
+    const noJira = { jira: false, github: true, at: new Date().toISOString() };
+    const gate = (o: Partial<Parameters<typeof epicsGate>[0]>) => epicsGate({ on: false, connectors: noJira, checking: false, checkFailed: false, ...o });
+    expect(gate({})).toEqual({ blocked: true, why: "Set up Jira to turn it on." });
+    expect(gate({ connectors: { ...noJira, jira: true, github: false } })).toEqual({ blocked: false, why: null });
+    expect(gate({ on: true })).toEqual({ blocked: false, why: null });
+    expect(gate({ checking: true })).toEqual({ blocked: true, why: "Checking it…" });
+    expect(gate({ connectors: null })).toEqual({ blocked: true, why: "Couldn't check it just now." });
+    // Demian's own connection to Jira is enough.
+    expect(gate({ direct: true })).toEqual({ blocked: false, why: null });
+  });
+
+  it("is on wherever Demian reads Jira itself until it's turned on or off", () => {
+    saveProjectConnectors({ jira: false, github: false });
+    expect(areaOn("epics")).toBe(false);
+    setJiraDirect(true);
+    expect(areaOn("epics")).toBe(true);
+    setJiraDirect(false);
+    expect(areaOn("epics")).toBe(false);
   });
 });
 
@@ -186,5 +220,13 @@ describe("Tasks off", () => {
   it("turns down a task change a chat begun before it was off still proposes", async () => {
     setAreaOn("tasks", false);
     await expect(applyAction({ type: "set_task_status", task_id: "manual:1", title: "Book venue", status: "done" })).rejects.toThrow("Tasks is off");
+  });
+});
+
+describe("Jira changes from a chat", () => {
+  it("are offered with Projects or Epics on, and not with both off", () => {
+    expect(globalActionDocs(false, true, true, true, false)).toContain('"type": "change_jira_issue"');
+    expect(globalActionDocs(false, false, true, true, true)).toContain('"type": "change_jira_issue"');
+    expect(globalActionDocs(false, false, true, true, false)).not.toContain('"type": "change_jira_issue"');
   });
 });

@@ -1,8 +1,24 @@
-import type { AdhocStore, ManualTask, Project } from "./db";
+import type { AdhocStore, ManualTask, Project, StoredReading } from "./db";
 import type { Blocker, ManualAssessment, Priority } from "./schema";
 import { projectName, projectPriority } from "./projects";
 import { newsKey, projectUpdateKey } from "./inboxMoves";
 import { blockerKey, myBlockingIds, PRIORITY_RANK, stateOf, taskPriority, type TaskState } from "./tasks";
+
+/**
+ * Where marking a briefing read is kept (as a dismissed task state): by when it was written, so one
+ * written again, from the Refresh menu, shows even on the same day.
+ */
+export const briefingKey = (r: Pick<StoredReading, "date" | "created_at">) => `briefing:${r.date}:${r.created_at}`;
+
+/** Today's briefing is there and not yet marked read. */
+export function briefingUnread(reading: StoredReading | null, states: Map<string, TaskState>, today: string): boolean {
+  return !!reading && reading.date === today && !stateOf(states, briefingKey(reading)).dismissed;
+}
+
+/** Today's briefing is there and marked read: not before one's written (a first run, or a morning before its refresh). */
+export function briefingRead(reading: StoredReading | null, states: Map<string, TaskState>, today: string): boolean {
+  return !!reading && reading.date === today && stateOf(states, briefingKey(reading)).dismissed;
+}
 
 export interface ReadingInput {
   projects: Project[];

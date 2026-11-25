@@ -1,4 +1,5 @@
-import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
+import type { SprintChatAbout } from "./sprintChat";
+import { epicsOn, projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "./features";
 import { actionLine, WATCH_CHAT } from "./watched";
 import { SAME_WORK_RULE, STEP_RULE, TITLE_RULE } from "./baseLessons";
 import type { TaskPlan } from "./schema";
@@ -259,6 +260,7 @@ const ACTION_DOC_LINES = [
   '- {"type": "unlink_channel", "project_id": "C111", "channel_id": "C222"}: unlinks one of a project\'s channels (its main one too; another takes over), or one it shares with another project.',
   '- {"type": "link_project_epic", "project_id": "C111", "epic_key": "ABC-123"}: links a Jira epic to a project, so its issues are read as the project\'s plan of record; an epic linked to another project moves to this one.',
   '- {"type": "unlink_project_epic", "project_id": "C111", "epic_key": "ABC-123"}: unlinks an epic from a project; refreshes and discovery leave it alone after.',
+  '- {"type": "change_jira_issue", "key": "ABC-123", "title": "its summary now", "status": "In Progress", "assignee": "Ana Lopez" or "none", "due": "2026-12-12" or "none", "summary": "a new summary", "priority": "High", "epic": "ABC-100" or "none", "sprint": "Sprint 25" or "backlog", "comment": "...", "reason": "..."}: changes one Jira issue or epic, in Jira, once I apply it. Give its key and title, and only the fields that change: its status (by the status\'s name; Jira gets there by a transition), who has it ("none" to unassign), its due date ("none" to clear it), its summary, its priority, the epic it moves into ("none" to take it out of its epic), the sprint it moves to ("backlog" to take it out of its sprint), or a comment to add (markdown). One card per issue, so for several issues propose several cards. Creating issues or epics is not one of these.',
   '- {"type": "add_note", "text": "..."}: a standing correction or piece of context every refresh will take into account (e.g. "Refunds is paused until Q3; don\'t treat it as at risk"). Write it as a plain fact about my work.',
   '- {"type": "update_profile", "text": "..."}: replaces the one- or two-sentence description of me.',
   '- {"type": "add_task", "title": "...", "project_id": "C111" or null, "description": "<what you found, with links>" or null, "today": true or null, "status": "in_progress" or null, "priority": "high" or null}: a new task of my own. A new task has no id until it\'s applied, so set Today, status and priority here, in the same card, rather than in separate ones. Its title: ' + TITLE_RULE + ' Before adding one, look through my open tasks for the same piece of work. ' + SAME_WORK_RULE + ' If there is one, use add_task_context, plan_today or set_task_status on it instead of adding a second.',
@@ -314,10 +316,12 @@ function refreshDoc(projects: boolean, updates: boolean, tasks: boolean): string
  * topic while Watched topics is off, anything about projects while Projects is off, and changes to
  * tasks while Tasks is off (see features).
  */
-export function globalActionDocs(watched = watchedTopicsOn(), projects = projectsOn(), updates = updatesOn(), tasks = tasksOn()): string {
+export function globalActionDocs(watched = watchedTopicsOn(), projects = projectsOn(), updates = updatesOn(), tasks = tasksOn(), epics = epicsOn()): string {
   return ACTION_DOC_LINES.filter((line) => {
     const type = /"type": "([a-z_]+)"/.exec(line)?.[1];
     if (type === "watch_topic") return watched;
+    // Changes in Jira, with a Jira area on.
+    if (type === "change_jira_issue") return projects || epics;
     if (!tasks && type && TASK_ACTIONS.has(type)) return false;
     // Projects off: the changes about projects, and what a project is (the one line that isn't a change).
     return projects || (!!type && !PROJECT_ACTIONS.has(type));
@@ -413,7 +417,38 @@ export function projectChatPrompt(key: string, project: { name: string; id: stri
     "The changes you can propose, as JSON:",
     globalActionDocs(),
     globalTaskRules(),
-    "Changes in Jira itself (creating epics, stories and tasks, or moving them) are made from the project's Work, full screen, where I review each one: point me there instead of proposing them.",
+    "To change an existing Jira issue or epic (its status, who has it, its due date, summary, priority, epic or sprint, or a comment on it), propose change_jira_issue: I apply it in Jira from its card. Creating epics, stories and tasks, or reshaping the plan, is done from the project's Work, full screen, where I review each one: point me there for that.",
+    "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
+    `My message: ${firstMessage}`,
+  ].join("\n");
+}
+
+/**
+ * The opening of a chat from the Epics area, about an epic or about a person's work in the sprint: a
+ * Demian chat that proposes the same changes, told each turn what the Epics area shows of its subject.
+ */
+export function sprintChatPrompt(key: string, about: SprintChatAbout, firstMessage: string): string {
+  const subject =
+    about.kind === "sprints"
+      ? `the Jira project ${about.project}'s sprints as a whole: how the current sprint is going, which epics are on track and which are at risk, who has what and whether anyone has too much, what's blocked, and what's planned for the next sprint`
+      : about.kind === "epic"
+      ? `one of my Jira epics, ${about.epic} ("${about.title}"): where it stands, its issues and who has them, what's left, what's blocked, and whether it'll make its due date`
+      : about.name
+        ? `${about.name}'s work in the Jira project ${about.project}'s sprints: their issues there, where each stands, what they're blocked on, and what's next for them`
+        : `the issues no one has in the Jira project ${about.project}'s sprints: what they are and who could take them`;
+  return [
+    sessionMarker(key),
+    "",
+    `You're the assistant inside my day planner, Demian. I'm talking to you about ${subject}.`,
+    "Each turn, my planner tells you what its Epics area shows about this (the sprints' issues, their status and who has them, and each epic's status, due date and counts), along with everything else it shows. Answer from that first. Read Jira (the issues themselves, their comments and links), Slack, email, the calendar and Drive when you need more, but keep it brief.",
+    "You can't change the planner yourself. Propose each change as its own block, which the planner shows me as a card to apply or turn down:",
+    "[orb] action",
+    '{"type": "...", ...}',
+    "[orb] end",
+    "The changes you can propose, as JSON:",
+    globalActionDocs(),
+    globalTaskRules(),
+    "To change an existing Jira issue or epic (move it to another status, assign or unassign it, set its due date, summary or priority, move it into or out of an epic, move it to another sprint, or comment on it), propose change_jira_issue: I apply it in Jira from its card, and the Epics area shows the change. Creating issues is done in Jira or from a project's Work, full screen: point me there for that.",
     "Propose only changes I asked for or would clearly want, and say in a sentence what each does. Don't assume a change happened until my planner lists it as applied. If what I mean is unclear, ask.",
     `My message: ${firstMessage}`,
   ].join("\n");

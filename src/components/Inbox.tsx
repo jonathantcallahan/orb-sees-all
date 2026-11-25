@@ -21,6 +21,7 @@ export function Inbox({
   states,
   taskIds,
   busy = false,
+  keepTitle = false,
   onChange,
 }: {
   replies: QuickReply[];
@@ -28,26 +29,32 @@ export function Inbox({
   taskIds: Set<string>;
   /** The task refresh that fills it is running: a spinner by its title. */
   busy?: boolean;
+  /** Shown when it's empty too, saying "All caught up" (the Updates area); otherwise it's left out. */
+  keepTitle?: boolean;
   onChange: () => void;
 }) {
   const open = openReplies(replies, states, taskIds);
-  if (open.length === 0) return null;
+  if (open.length === 0 && !keepTitle) return null;
 
   return (
     <section className="inbox">
       <h4 className="section-title">
-        Inbox <span className="muted">{open.length}</span>
+        Inbox {open.length > 0 && <span className="muted">{open.length}</span>}
         {busy && (
           <span className="section-spinner" title="Looking for new messages…" aria-label="Looking for new messages">
             <Spinner />
           </span>
         )}
       </h4>
-      <div className="inbox-list">
-      {open.map((r) => (
-        <InboxItem key={r.id} reply={r} onChange={onChange} />
-      ))}
-      </div>
+      {open.length > 0 ? (
+        <div className="inbox-list">
+        {open.map((r) => (
+          <InboxItem key={r.id} reply={r} onChange={onChange} />
+        ))}
+        </div>
+      ) : (
+        <p className="small caught-up">All caught up</p>
+      )}
     </section>
   );
 }

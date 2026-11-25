@@ -22,6 +22,10 @@ serde_json = "1"
 realfft = "3"
 # Hands the captured audio from Core Audio's thread to the analysis thread without locking.
 rtrb = "0.3"
+# Demian's own Jira connection (see jira.rs): the HTTP client and TLS the updater already brings, its
+# TLS asked for here too, so it doesn't depend on the updater's features (jira.rs installs ring for it).
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 # Stops a run's whole process group (see runs.rs).
 [target.'cfg(unix)'.dependencies]
@@ -39,7 +43,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary"] }
 block2 = "0.6"
 dispatch2 = "0.3"
+# Keeps the Jira API token in the Keychain (see jira.rs).
+security-framework = "3"
 
 # A notice that the app keeps running in the tray, the first time its window is closed.
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-notification = "2"
+# Keeps the Jira API token in Credential Manager (see jira.rs).
+keyring = { version = "3", features = ["windows-native"] }

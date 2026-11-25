@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { EpicIcon } from "./JiraIcons";
 import { createPortal } from "react-dom";
 import { linkEpic, setShipChoice, unlinkEpic, type Project } from "../db";
 import { runCli } from "../cli";
@@ -332,6 +333,7 @@ export function EpicLinks({ project, onChange }: { project: Project; onChange: (
         return (
           <Fragment key={e.epic_key}>
             <span className="chip epic-chip" title={e.title}>
+              <EpicIcon size={12} />
               {url ? (
                 <ExternalLink href={url} className="epic-chip-link">
                   {label}

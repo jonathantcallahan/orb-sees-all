@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { JiraLinkMark } from "./JiraIcons";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { MOD } from "../platform";
@@ -966,9 +967,12 @@ function ChatWords({ text, strip = true }: { text: string; strip?: boolean }) {
     <>
       {chatPieces(text, strip).map((p, i) =>
         p.href ? (
-          <ExternalLink key={i} href={p.href} className="chat-link" title={p.href}>
-            {p.text}
-          </ExternalLink>
+          <Fragment key={i}>
+            <JiraLinkMark href={p.href} />
+            <ExternalLink href={p.href} className="chat-link" title={p.href}>
+              {p.text}
+            </ExternalLink>
+          </Fragment>
         ) : p.title ? (
           <span key={i} className="chat-ref" title={p.title}>
             {p.text}

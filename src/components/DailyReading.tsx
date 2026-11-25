@@ -1,14 +1,15 @@
 import { shockOrb } from "../orbEvents";
+import { JiraLinkMark } from "./JiraIcons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NewsItem } from "../schema";
 import { moveToInbox, setTaskState, type Project, type StoredReading } from "../db";
 import { inboxItemFromUpdate, newsKey, projectUpdateKey, type UpdateItem } from "../inboxMoves";
 import { stateOf, type TaskState } from "../tasks";
 import { projectName } from "../projects";
-import { updateLabel } from "../reading";
+import { briefingKey, briefingUnread, updateLabel } from "../reading";
 import { formatWhen, localDate } from "../scheduler";
 import { useJobStatus } from "../useAppData";
-import { ExternalLink, Reveal, Spinner } from "./common";
+import { Disclosure, ExternalLink, Reveal, Spinner } from "./common";
 import { ExplainChat } from "./ExplainChat";
 import { DockedChat, useChatDock } from "./chatDock";
 
@@ -146,6 +147,7 @@ function UpdateStack({ updates, onRead, onMove }: { updates: Update[]; onRead: (
           <span className="update-links">
             {top.link && (
               <ExternalLink href={top.link} className="link-button small source-link">
+                <JiraLinkMark href={top.link} size={12} />
                 {sourceLabel(top.link)}
               </ExternalLink>
             )}
@@ -190,7 +192,7 @@ export function DailyReading({
 }: {
   /** A refresh that brings updates (a project's, or the task refresh's news) is running. */
   updatesBusy?: boolean;
-  /** Both sections always shown, with no way to fold them away (the Detail view's Updates area). */
+  /** Both sections always shown, Updates saying "All caught up" when there are none, with no way to fold them away (the Detail view's Updates area). */
   alwaysOpen?: boolean;
   reading: StoredReading | null;
   projects: Project[];
@@ -208,6 +210,8 @@ export function DailyReading({
   useEffect(() => localStorage.setItem("updates-open", updatesOpen ? "1" : "0"), [updatesOpen]);
   const status = useJobStatus("reading");
   const current = reading?.date === localDate(new Date()) ? reading : null;
+  // Marked read: "All caught up" in its place, until the next one is written.
+  const briefingRead = !!current && !briefingUnread(current, states, current.date);
   const updates = openUpdates(projects, news, states, inbox);
 
   return (
@@ -222,11 +226,24 @@ export function DailyReading({
                 <Spinner />
               </span>
             )}
+            {current && !briefingRead && (
+              <button
+                className="link-button small"
+                onClick={async () => {
+                  await setTaskState(briefingKey(current), { dismissed: true });
+                  onChange();
+                }}
+              >
+                Mark as read
+              </button>
+            )}
             {!alwaysOpen && <Disclosure open={open} what="the briefing" onToggle={() => setOpen(!open)} />}
           </div>
         </header>
         <Reveal open={alwaysOpen || open} className="reading-body">
-          {current ? (
+          {briefingRead ? (
+            <p className="small caught-up">All caught up</p>
+          ) : current ? (
             <div className="reading-text">
               {/* Spoken in a few short paragraphs. */}
               {current.text.split(/\n\s*\n/).map((para, i) => (
@@ -239,8 +256,8 @@ export function DailyReading({
         </Reveal>
       </section>
 
-      {/* Updates are their own section, folded away on their own. */}
-      {updates.length > 0 && (
+      {/* Updates are their own section, folded away on their own. Read them all and it stays, saying so. */}
+      {(updates.length > 0 || alwaysOpen) && (
         <section className="reading">
           <header className="column-header">
             <h4 className="section-title">
@@ -256,17 +273,21 @@ export function DailyReading({
             </div>
           </header>
           <Reveal open={alwaysOpen || updatesOpen} className="reading-body">
-            <UpdateStack
-              updates={updates}
-              onRead={async (u) => {
-                await setTaskState(u.key, { dismissed: true });
-                onChange();
-              }}
-              onMove={async (u) => {
-                await moveToInbox(inboxItemFromUpdate(u));
-                onChange();
-              }}
-            />
+            {updates.length > 0 ? (
+              <UpdateStack
+                updates={updates}
+                onRead={async (u) => {
+                  await setTaskState(u.key, { dismissed: true });
+                  onChange();
+                }}
+                onMove={async (u) => {
+                  await moveToInbox(inboxItemFromUpdate(u));
+                  onChange();
+                }}
+              />
+            ) : (
+              <p className="small caught-up">All caught up</p>
+            )}
           </Reveal>
         </section>
       )}
@@ -274,13 +295,3 @@ export function DailyReading({
   );
 }
 
-/** The arrow that folds a section away and opens it again. */
-function Disclosure({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }) {
-  return (
-    <button className="task-toggle" aria-expanded={open} aria-label={open ? `Hide ${what}` : `Show ${what}`} onClick={onToggle}>
-      <svg className={`disclosure${open ? " open" : ""}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-        <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </button>
-  );
-}

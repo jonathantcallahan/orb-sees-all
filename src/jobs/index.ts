@@ -1,23 +1,24 @@
-import { projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "../features";
+import { epicsOn, projectsOn, tasksOn, updatesOn, watchedTopicsOn } from "../features";
 import { ensureProjectsUpgrade, projectsUpgradeSettled } from "../projectsUpgrade";
 import { invoke } from "@tauri-apps/api/core";
 import type { z } from "zod";
 import { codeScope, placeLeftovers, unplacedRequirements, withEpicCreated, withInitiativeApplied, withItemCreated, withItemMoved, withRequirementIssue, withStoryApplied } from "../plan";
 import { projectChatKey, projectOfChat, projectRecordText } from "../projectChat";
+import { epicChatText, personChatText, sprintChatSubject, sprintsChatText } from "../sprintChat";
 import { activeChannels, activeEpics, channelSharers, jiraSite, readChannels, mergeProfile, withCloudJiraLinks, newRelatedChannels, planDiscovery, projectContext, projectName, projectKind, projectPriority, projectStatus, guideTitle, pathToShip, shipTarget, requirementCounts, requirementRows, requirementsDue, slackTarget, slackThread } from "../projects";
 import { acceptedRefinements, buildIndex, type IndexEntry } from "../taskIndex";
 import { ASK_PERMISSION_MODE, CHAT_PERMISSION_MODE, notesPrompt, runClaude, runSessionTurn, TOOLS } from "../claude";
 import { askInChat, clearAsks, dropAsk, setNoAutoMode } from "../chatAsks";
 import * as db from "../db";
-import { applyInitiativePrompt, applyStoryPrompt, createDocPrompt, createEpicPrompt, createEventPrompt, createItemPrompt, createTicketPrompt, moveIssuePrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, learnRolePrompt, recheckStepsPrompt, requirementsPrompt, sendToChannelPrompt, setUserProfile, unplacedNote } from "../prompts";
-import { actionDocsVersion, globalActionDocs, globalChatPrompt, globalTaskRules, hasOldActionDocs, projectChatPrompt, sessionMarker, tddChatNote, tddChatPrompt, updatedActionDocs } from "../openInClaude";
+import { applyInitiativePrompt, applyStoryPrompt, changeJiraIssuePrompt, createDocPrompt, createEpicPrompt, createEventPrompt, createItemPrompt, createTicketPrompt, moveIssuePrompt, distillPrompt, epicCheckPrompt, epicChildrenPrompt, sprintEpicsPrompt, issuesByKeyPrompt, learnRolePrompt, recheckStepsPrompt, requirementsPrompt, sendToChannelPrompt, setUserProfile, unplacedNote } from "../prompts";
+import { actionDocsVersion, sprintChatPrompt, globalActionDocs, globalChatPrompt, globalTaskRules, hasOldActionDocs, projectChatPrompt, sessionMarker, tddChatNote, tddChatPrompt, updatedActionDocs } from "../openInClaude";
 import { TITLE_RULE } from "../baseLessons";
 import { changedParts, codeRequests, connectSession, sentHashes, turnNote, type TurnPart, currentSessionSteps, latestNotes, listSessions, linkSession, parseActions, parseTaskLinks, withChatLinks, withEdit, ORB_NOTE, sendDestination, sendProblem, ticketFailure, type PendingSend, type PlanStep, type SessionLink, type SessionProgress, type StepProgress } from "../sessions";
 import { adhocPrompt, assessPrompt, tddDraftPrompt, calendarPrompt, checkBlockerPrompt, checkTaskPrompt, sendReplyPrompt, type CheckTaskInput, readingPrompt, sameWorkPrompt, sessionScanPrompt, shortenTitlesPrompt, selfDmActionsPrompt, selfDmPrompt, selfDmReplyPrompt, watchedEntryPrompt, watchedTopicPrompt, sendReminderPrompt, discoveryPrompt, planPrompt, projectPrompt, type PlanPromptInput } from "../prompts";
 import { localDate, shouldRunMorning } from "../scheduler";
 import { actionsFromPlan, openOutcomes, stillWatched, WATCH_CHAT } from "../watched";
 import { afterMissedRead, parseSelfDmState, SELF_DM_TRIES, selfDmEvery, selfDmOldest, selfDmReplies, takeFromPoll, unreadReason, type SelfDmOutcome } from "../selfDm";
-import { AdhocSnapshot, Distilled, EpicChildren, EpicCreated, InitiativeApplied, ItemCreated, StoryApplied, BlockerCheck, CalendarDay, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, RequirementsRead, TddDraft, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
+import { AdhocSnapshot, Distilled, EpicChildren, SprintEpics, type SprintChoice, EpicCreated, InitiativeApplied, ItemCreated, StoryApplied, BlockerCheck, CalendarDay, JiraIssueChanged, TaskCheck, DailyReading, Discovery, ManualAssessmentBatch, ProjectEpic, ProjectRefresh, RequirementsRead, TddDraft, LearnedRole, GlobalAction, SameWork, SessionScan, SelfDmActions, SelfDmPoll, SelfDmReplied, SentMessage, ShortTitles, WatchedCheck, WatchedEntry, StepRecheck, TaskPlan, type Blocker } from "../schema";
 import { blockerKey, keepDoneInToday, longTitled, sinceWhen, stateOf, stillOpen, workedOn } from "../tasks";
 import { doneStaysSince } from "../todayDone";
 import { readingContext } from "../reading";
@@ -25,6 +26,10 @@ import { asUserHasIt, keepDismissed, learningFor, lessonsFor, planLearning } fro
 import { codeFor, codeNote, githubReposOf, projectOfTask, resolveCheckout, type CodeSource } from "../code";
 import { acceptedMerges } from "../duplicates";
 import { acceptedSessionMatches, nextScanSince, scanCandidates, scanEntry, scanSkips } from "../sessionScan";
+import { childrenWithChange, EPICS_PROJECT_SETTING, sprintKey, sprintWithChange } from "../sprintEpics";
+import { sizeFieldSetting, SIZES_READ } from "../sizes";
+import { jiraConnection } from "../jira";
+import { changeIssue, readEpicChildren, readIssuesByKey, readSprintEpics } from "../jiraEpics";
 import { JobQueue } from "./queue";
 import { byRecency, collectTracking, epicItem, projectRepos, recheckGithubItem, type TrackedItem } from "./tracking";
 
@@ -564,6 +569,57 @@ export function applyStory(projectId: string, change: { key: string; into: strin
     await db.unlinkEpic(projectId, change.key);
     await db.updatePath(projectId, (path) => withStoryApplied(path, change.key, { key: data.key ?? change.key, link: data.link ?? null }, change.into));
   });
+}
+
+/**
+ * Makes a change to one Jira issue that a chat proposed, as the user applied it from its card (see
+ * changeJiraIssuePrompt), then brings what the Epics area has read up to date with it; a sprint read it
+ * can't bring up to date is read again. Throws when Jira made none of it.
+ */
+export async function changeJiraIssue(a: Extract<GlobalAction, { type: "change_jira_issue" }>): Promise<JiraIssueChanged> {
+  const key = a.key.trim().toUpperCase();
+  // Made through Demian's own connection to Jira when there is one (see jira.ts), else by Claude.
+  const jira = await jiraConnection();
+  return track(
+    `jira:${key}`,
+    (status) =>
+      logged("jira-change", key, async () => {
+        if (jira) status(`Changing ${key} in Jira`);
+        const { data, costUsd } = jira
+          ? { data: await changeIssue(jira, { ...a, key }), costUsd: 0 }
+          : await runClaude({
+              onStatus: (s) => status(s === "Working" ? `Changing ${key} in Jira` : s),
+              prompt: changeJiraIssuePrompt({ ...a, key }),
+              schema: JiraIssueChanged,
+              tools: TOOLS.jiraChange,
+              model: "sonnet",
+              maxTurns: 14,
+            });
+        if (!data.sent) throw new Error(data.error ?? "Jira didn't make the change");
+        if (data.issue) await updateEpicReads(data.before, data.issue, { epic: !!a.epic, sprint: !!a.sprint });
+        bump();
+        return { value: data, costUsd };
+      }),
+    !jira,
+  );
+}
+
+/** The Epics area's reads with an issue as a change left it (see sprintWithChange); those that can't be are read again. */
+async function updateEpicReads(before: JiraIssueChanged["before"], issue: NonNullable<JiraIssueChanged["issue"]>, moved: { epic: boolean; sprint: boolean }) {
+  const now = new Date().toISOString();
+  const [sprints, children] = await Promise.all([db.getSprintEpics(), db.getEpicChildren()]);
+  const again: string[] = [];
+  for (const [key, read] of Object.entries(sprints)) {
+    const next = sprintWithChange(read, before, issue, moved, now);
+    if (next === null) again.push(key);
+    else if (next !== read) await db.patchSprintEpics(key, next);
+  }
+  for (const [key, read] of Object.entries(childrenWithChange(children, issue, moved.epic, now))) await db.patchEpicChildren(key, read);
+  for (const key of again) {
+    const at = key.lastIndexOf(":");
+    const which = key.slice(at + 1);
+    if (which === "current" || which === "upcoming") loadSprintEpics(key.slice(0, at), which).catch(() => {});
+  }
 }
 
 /** Moves an issue into the epic the plan puts it in, as the user reviewed it. */
@@ -1390,7 +1446,7 @@ function runTaskSession(taskId: string, prompt: string, byUser: boolean): Promis
           {
             key: "planner",
             text: global
-              ? [await globalContext(link), chatProjectId && own ? projectRecordText(own, ((await db.getProjectTracking())[own.channel_id]?.items ?? []).filter((i) => i.kind !== "epic")) : ""]
+              ? [await globalContext(link), chatProjectId && own ? projectRecordText(own, ((await db.getProjectTracking())[own.channel_id]?.items ?? []).filter((i) => i.kind !== "epic")) : "", await sprintChatContext(taskId)]
                   .filter(Boolean)
                   .join("\n\n")
               : watched
@@ -1820,6 +1876,28 @@ export async function startGlobalChat(key: string, message: string, onTurn: () =
   runTaskSession(key, globalChatPrompt(key, message), true).then(onTurn, onTurn);
 }
 
+/** Starts a chat from the Epics area (see sprintChat.ts) with its first message. */
+export async function startSprintChat(key: string, about: Parameters<typeof sprintChatPrompt>[1], message: string, onTurn: () => void): Promise<void> {
+  await linkSession(key);
+  await db.updateSessionLink(key, { openedDocs: actionDocsVersion() });
+  bump();
+  runTaskSession(key, sprintChatPrompt(key, about, message), true).then(onTurn, onTurn);
+}
+
+/** What the Epics area shows of a chat's sprints, epic or person, told to its chat each turn; "" for any other chat. */
+async function sprintChatContext(taskId: string): Promise<string> {
+  const subject = sprintChatSubject(taskId);
+  if (!subject) return "";
+  const [sprints, children] = await Promise.all([db.getSprintEpics(), db.getEpicChildren()]);
+  const text =
+    subject.kind === "sprints"
+      ? sprintsChatText(subject.project, sprints, children)
+      : subject.kind === "epic"
+        ? epicChatText(subject.epic, sprints, children)
+        : personChatText(subject.project, subject.name, sprints, children);
+  return text ?? "The Epics area hasn't read this yet: read it from Jira.";
+}
+
 /**
  * Starts a project's chat (see projectChat.ts) with the user's first message; resolves once it's
  * linked, while the first answer is written.
@@ -1936,23 +2014,134 @@ export function refreshTracking(projectId: string): Promise<void> {
   });
 }
 
-/** Reads an epic's child issues and their assignees from Jira, for its row in the tracking feed. */
-export function loadEpicChildren(key: string): Promise<void> {
-  return track(`epic:${key}`, (status) =>
-    logged("epic", key, async () => {
-      const { data, costUsd } = await runClaude({
-        onStatus: status,
-        prompt: epicChildrenPrompt(key),
-        schema: EpicChildren,
-        tools: TOOLS.jiraRead,
-        model: "sonnet",
-        maxTurns: 8,
-      });
-      await db.saveEpicChildren(key, data);
-      bump();
-      return { value: undefined, costUsd };
-    }),
+/** The Jira field a project keeps T-shirt sizes in: its id, null when it has none, undefined when no sprint read has looked yet. */
+async function sizeField(project: string): Promise<string | null | undefined> {
+  const v = await db.getSetting(sizeFieldSetting(project)).catch(() => null);
+  return v === null || v === undefined ? undefined : v || null;
+}
+
+/**
+ * A read of issues as it's kept: each with its type, due date and size, null when it has none (so a
+ * read without one is told from an older read), and the field the sizes were read from.
+ */
+const keptIssues = (data: EpicChildren, field: string | null | undefined): EpicChildren => ({
+  ...data,
+  size_field: field ?? null,
+  issues: data.issues.map((i) => ({ ...i, type: i.type ?? null, due: i.due ?? null, size: field ? (i.size ?? null) : null })),
+});
+
+// The Epics area's reads go through Demian's own connection to Jira when one is set up (see jira.ts): a
+// few requests, done in a moment, without waiting for a free slot among Claude's runs. Otherwise Claude
+// reads Jira for them, through its connector.
+
+/**
+ * The details of some of a sprint's issues, by their keys, for one of the Epics area's lists of them
+ * (Unaffiliated, or a person's; see listStoreKey): kept with the epics' issues, under `key`. Their sizes
+ * are read from the field of `project`, the Jira project the Epics area follows.
+ */
+export async function loadIssuesByKey(key: string, issues: string[], project: string): Promise<void> {
+  const jira = await jiraConnection();
+  return track(
+    `epic:${key}`,
+    (status) =>
+      logged("epic", key, async () => {
+        const field = await sizeField(project);
+        if (jira) status("Reading the issues from Jira");
+        const { data, costUsd } = jira
+          ? { data: await readIssuesByKey(jira, issues, field), costUsd: 0 }
+          : await runClaude({
+              onStatus: status,
+              prompt: issuesByKeyPrompt(issues, field),
+              schema: EpicChildren,
+              tools: TOOLS.jiraRead,
+              model: "sonnet",
+              maxTurns: 10,
+            });
+        await db.saveEpicChildren(key, keptIssues(data, field));
+        bump();
+        return { value: undefined, costUsd };
+      }),
+    !jira,
   );
+}
+
+/**
+ * Reads an epic's issues from Jira, each for its card. Their sizes are read from the field of `project`,
+ * the Jira project the Epics area follows: the epic itself can be in another (a size field is the site's,
+ * not a project's).
+ */
+export async function loadEpicChildren(key: string, project: string): Promise<void> {
+  const jira = await jiraConnection();
+  return track(
+    `epic:${key}`,
+    (status) =>
+      logged("epic", key, async () => {
+        const field = await sizeField(project);
+        if (jira) status(`Reading ${key}'s issues from Jira`);
+        const { data, costUsd } = jira
+          ? { data: await readEpicChildren(jira, key, field), costUsd: 0 }
+          : await runClaude({
+              onStatus: status,
+              prompt: epicChildrenPrompt(key, field),
+              schema: EpicChildren,
+              tools: TOOLS.jiraRead,
+              model: "sonnet",
+              maxTurns: 10,
+            });
+        await db.saveEpicChildren(key, keptIssues(data, field));
+        bump();
+        return { value: undefined, costUsd };
+      }),
+    !jira,
+  );
+}
+
+/** Reads a Jira project's current or upcoming sprint and the epics with work in it, for the Epics area. */
+export async function loadSprintEpics(project: string, which: SprintChoice): Promise<void> {
+  const key = sprintKey(project, which);
+  const jira = await jiraConnection();
+  return track(
+    `sprint:${key}`,
+    (status) =>
+      logged("sprint", key, async () => {
+        const field = await sizeField(project);
+        if (jira) status(`Reading ${project}'s ${which} sprint from Jira`);
+        const { data, costUsd } = jira
+          ? { data: await readSprintEpics(jira, project, which, field), costUsd: 0 }
+          : await runClaude({
+              onStatus: status,
+              prompt: sprintEpicsPrompt(project, which, field),
+              schema: SprintEpics,
+              tools: TOOLS.jiraRead,
+              model: "sonnet",
+              // Finding the size field the first time takes a few turns more.
+              maxTurns: field === undefined ? 30 : 26,
+            });
+        // The size field, kept once found, so later reads go straight to it. One that holds none of the
+        // sprint's sizes is forgotten, so the next read looks again (sizes come in, or another field has them).
+        const found = field === undefined ? (data.size_field ?? null) : field;
+        const all = [...data.epics.flatMap((e) => e.issues), ...data.strays];
+        if (field === undefined && found && !data.error) await db.setSetting(sizeFieldSetting(project), found);
+        if (field && !data.error && all.length > 0 && !all.some((i) => i.size)) await db.deleteSetting(sizeFieldSetting(project));
+        const issue = (i: SprintEpics["strays"][number]) => ({ ...i, type: i.type ?? null, size: found ? (i.size ?? null) : null });
+        await db.saveSprintEpics(key, {
+          ...data,
+          size_field: found,
+          sizes_read: SIZES_READ,
+          epics: data.epics.map((e) => ({ ...e, sized: found ? (e.sized ?? null) : null, issues: e.issues.map(issue) })),
+          strays: data.strays.map(issue),
+        });
+        return { value: undefined, costUsd };
+      }),
+    !jira,
+  );
+}
+
+/** Both sprints of the Jira project the Epics area follows, if it follows one: Refresh's menu and Refresh everything. */
+export async function refreshSprints(): Promise<void> {
+  const project = await db.getSetting(EPICS_PROJECT_SETTING);
+  if (!project) return;
+  await Promise.allSettled([loadSprintEpics(project, "current"), loadSprintEpics(project, "upcoming")]);
 }
 
 /** Looks at one item in a project's tracking feed again: a PR or branch with gh, an epic through Jira. */
@@ -2192,6 +2381,7 @@ export function refreshAll(): Promise<void> {
         refreshCalendar(),
         ...(readMessages ? [refreshAdhoc(), assessPendingTasks()] : []),
         checkWatchedTopics(),
+        ...(epicsOn() ? [refreshSprints()] : []),
         ...projects.map((p) => refreshProject(p.channel_id)),
       ]);
       // Your own Claude Code sessions: connected to the tasks they're the work of (including any this

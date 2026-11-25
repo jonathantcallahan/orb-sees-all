@@ -198,6 +198,16 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The stats bars tuck up into the empty lower edge of the orb's box, closer to the orb itself. */
 .today-column .pressure-bars { margin-top: -18px; margin-bottom: 16px; position: relative; }
 .pressure-blob { width: 100%; height: 285px; }
+/* The paper lamp in the orb's place, in the orb's box (it turns and bobs itself; see PaperLamp). */
+.paper-lamp { position: relative; width: 100%; height: 285px; flex-shrink: 0; }
+.paper-lamp svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+/* The lamp's bob, 2.5px up and down every 9s, eased like a sine: moved by the compositor, so the paper
+   and its blurred bloom are painted once and never again as it bobs (see PaperLamp). */
+.paper-lamp-body { position: absolute; inset: 0; animation: lamp-bob 4.5s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate; }
+@keyframes lamp-bob { from { transform: translateY(-2.5px); } to { transform: translateY(2.5px); } }
+@media (prefers-reduced-motion: reduce) { .paper-lamp-body { animation: none; } }
+/* Its seams and ribs on a layer of their own, the only part drawn again as it turns. */
+.paper-lamp-lines { will-change: transform; }
 .pressure-blob canvas { display: block; width: 100%; height: 100%; }
 
 
@@ -674,29 +684,110 @@ td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid var(--bo
 /* The inbox takes the rest of its pane's height, its list scrolling inside it (above the fog, by the
    pane's bottom padding). */
 .inbox { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; flex: 1 1 auto; min-height: 0; }
+/* Updates or the inbox with nothing in it: "All caught up", lighter than the muted text (as timestamps
+   are), the same distance under either title. */
+.caught-up { margin: 0; color: color-mix(in srgb, var(--muted) 60%, var(--bg)); }
 
-/* The Updates area with its updates and inbox both clear: a painting in a gilt frame fills the space
-   they leave, with its museum label under it. */
-.column > .art-wall { flex: 1 1 0; min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+/* The Updates area with the briefing, its updates and its inbox all read: a painting in its frame hung
+   across both columns, over the line between them, centered in the area top to bottom (the room above
+   and below is set from ArtWall, to clear what's at the top of either), its details under it. Only the
+   painting and its details take the mouse; the columns under the rest work as before. */
+.updates-split { position: relative; }
+.updates-split > .art-wall { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding-inline: 18px; }
+.art-wall .art-link, .art-wall > .art-details-row, .art-wall > .error, .art-wall > .art-error { pointer-events: auto; }
+/* The line between the columns, redrawn while the painting hangs so it can fade out above the frame and
+   back in below its details, rather than run into them. */
+.art-divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; z-index: 1; pointer-events: none; }
+.updates-split:has(> .art-divider) > .detail-pane + .detail-pane { border-left-color: transparent; }
+.inbox:has(> .caught-up) { flex: none; }
+/* "Clean inbox. Take a breath, enjoy some art.", the left column's title while the painting hangs. */
+.art-heading { margin: 0; }
+.art-link { display: block; }
+.art-hover { display: block; pointer-events: auto; }
+/* A painting's card (see PaintingCard): Apple's glass, frosted enough to read over the painting it
+   overlaps, with a bright edge, a shine along its top and a soft shadow under it. It lets the pointer
+   through, and fades up from a touch smaller, toward the painting it comes from. */
+.art-card {
+  --card-fill: rgb(255 255 255 / 0.72); --card-edge: rgb(255 255 255 / 0.75); --card-shine: rgb(255 255 255 / 0.95);
+  position: fixed; z-index: 60; box-sizing: border-box; width: 300px; padding: 14px 16px 15px; border-radius: 18px;
+  color: var(--text); font-size: 12px; line-height: 1.5; pointer-events: none;
+  background: var(--card-fill);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8);
+  border: 1px solid var(--card-edge);
+  box-shadow: inset 0 1px 0 var(--card-shine), inset 0 -1px 1px rgb(255 255 255 / 0.25), 0 18px 40px -8px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.08);
+  animation: art-card-in 0.18s ease-out;
+}
+.art-card.on-right { transform-origin: left center; }
+:root[data-theme="dark"] .art-card { --card-fill: rgb(44 44 46 / 0.58); --card-edge: rgb(255 255 255 / 0.16); --card-shine: rgb(255 255 255 / 0.22); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .art-card { --card-fill: rgb(44 44 46 / 0.58); --card-edge: rgb(255 255 255 / 0.16); --card-shine: rgb(255 255 255 / 0.22); } }
+@keyframes art-card-in { from { opacity: 0; transform: scale(0.97); } }
+@media (prefers-reduced-motion: reduce) { .art-card { animation: none; } }
+.art-card p { margin: 0; }
+.art-card-title { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.art-card-date { font-weight: 400; color: var(--muted); }
+.art-card-by { margin-top: 2px !important; color: var(--muted); }
+.art-card-medium { color: var(--muted); }
+.art-card-blurb { margin-top: 10px !important; display: -webkit-box; -webkit-line-clamp: 14; -webkit-box-orient: vertical; overflow: hidden; }
+/* Its line runs the card's full width, out over the card's side padding (16px), the text kept where it was. */
+.art-card-fact { margin: 10px -16px 0 !important; padding: 10px 16px 0; border-top: 1px solid color-mix(in srgb, var(--muted) 22%, transparent); color: var(--muted); }
+.art-card-fact-label { color: var(--text); font-weight: 600; }
 .art-wall:hover .refresh, .art-wall:focus-within .refresh { visibility: visible; }
 .framed { position: relative; flex-shrink: 0; box-shadow: 0 10px 18px rgba(0, 0, 0, 0.24), 0 2px 3px rgba(0, 0, 0, 0.28); }
-.framed-canvas { position: absolute; overflow: hidden; background: #2b2520; }
+/* The painting sits behind the gilt frame's lip, so the moulding is drawn over its edge; in a floater
+   it's in front, floating in the gap inside the face. */
+.framed-canvas { position: absolute; z-index: 0; overflow: hidden; background: #2b2520; }
+.framed-gilt .framed-side { z-index: 1; }
+/* The strip of a floater's back that shows between its face and the canvas, flush against it, in
+   shadow: lightest across the top, where the light from above reaches in (though the face's lip still
+   shades it), deepening down the sides to darkest along the bottom, under the canvas. The frame's own
+   color, in shade. */
+.framed-gap {
+  position: absolute; background: linear-gradient(to bottom, var(--gap-top), var(--gap-bottom));
+  box-shadow: inset 0 2px 2px rgba(0, 0, 0, 0.3), inset 2px 0 2px rgba(0, 0, 0, 0.25), inset -2px 0 2px rgba(0, 0, 0, 0.25), inset 0 -3px 3px rgba(0, 0, 0, 0.45);
+}
+.framed-wood { --gap-top: #7d6d52; --gap-bottom: #211b13; }
+.framed-dark { --gap-top: #1f2125; --gap-bottom: #08090a; }
+.framed-white { --gap-top: #8e8e90; --gap-bottom: #2c2c2e; }
+/* Behind the sides, each frame's own tone, a little in shade: where two sides meet at a corner, the
+   pixels along the cut that neither quite covers show the frame there, not the page. */
+.framed-gilt { background: #9a7034; }
+.framed-wood { background: #ddc8a4; }
+.framed-dark { background: #282b33; }
+.framed-white { background: #f3f3f3; }
+/* The canvas, stretched over its board: rounded a little at the corners, its edges darkening as they
+   roll away, and its shadow in the gap. */
+/* A floater stands 1.5 to 2 inches off the wall, so it casts a deeper, starker shadow than the gilt
+   frame, straight down from the light above: dark where it meets the wall and falling well below it,
+   with a second, longer and fainter one under it, as from a weaker second light. */
+.framed.framed-floater {
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.3), 0 12px 6px -2px rgba(0, 0, 0, 0.38), 0 28px 20px -8px rgba(0, 0, 0, 0.16);
+}
+.framed-floater .framed-canvas { z-index: 1; border-radius: 2px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45), 0 0 1px rgba(0, 0, 0, 0.5); }
+.framed-floater .framed-canvas::after {
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.35), inset 0 0 3px 1px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.16);
+}
 .framed-canvas img { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; }
-/* The frame's lip shades the painting's edges, most along the top and left, where the light comes from. */
+/* The frame's lip shades the painting's edges, most along the top, under the light from above, and
+   the same at either side. */
 .framed-canvas::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  box-shadow: inset 0 4px 6px -2px rgba(0, 0, 0, 0.55), inset 3px 0 5px -3px rgba(0, 0, 0, 0.4), inset -2px 0 4px -3px rgba(0, 0, 0, 0.3), inset 0 -2px 4px -3px rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 4px 6px -2px rgba(0, 0, 0, 0.55), inset 3px 0 5px -3px rgba(0, 0, 0, 0.35), inset -3px 0 5px -3px rgba(0, 0, 0, 0.35), inset 0 -2px 4px -3px rgba(0, 0, 0, 0.25);
 }
 .framed-side { position: absolute; }
-.framed-miters { position: absolute; inset: 0; pointer-events: none; }
-.framed-miters path { fill: none; stroke: rgba(40, 22, 4, 0.55); stroke-width: 0.75; }
-/* The label centered under the frame, ↻ to its right. */
-.art-label { display: grid; grid-template-columns: 24px minmax(0, 1fr) 24px; align-items: start; width: 100%; text-align: center; }
-.art-label > .art-label-text { grid-column: 2; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.art-label > .refresh-wrap { grid-column: 3; justify-content: center; }
-p.art-label { display: block; }
-.art-title { font-style: italic; color: var(--text); }
-.art-date { white-space: nowrap; }
+/* Its details under it, lined up with the painting's edges, in the smallest type the app uses: the
+   title and date at the left with ↻ after them, sized to the small type, and the painter at the right. */
+.art-details-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 100%; margin-top: 2px; }
+.art-details-work-line { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.art-details-work-line > .hover-tip-anchor { display: block; min-width: 0; }
+.art-details-row .icon-button.refresh { font-size: 12px; }
+/* In the music player's two colors: the title as its title, the date and painter as its fainter artist.
+   Short of room the title is cut short with "…", never the painter. */
+.art-details { margin: 0; font-size: 10px; line-height: 1.4; color: color-mix(in srgb, var(--muted) 55%, transparent); white-space: nowrap; }
+.art-details-work { overflow: hidden; text-overflow: ellipsis; }
+.art-details-title { color: var(--muted); }
+.art-details-by { flex: none; }
+.art-error { margin: 0; text-align: center; }
 .inbox h4 { margin: 0; }
 .inbox-item { padding: 7px 10px; }
 .inbox-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
@@ -889,6 +980,13 @@ p.art-label { display: block; }
 
 /* A column title with its "updated" time on the same line */
 .title-line { display: flex; align-items: baseline; gap: 8px; }
+/* The Tasks title's tally of what's done today (see TallyMarks): pencil-gray strokes, each new one drawn
+   in from end to end. */
+.tally { flex: none; align-self: center; margin-left: 2px; overflow: visible; color: color-mix(in srgb, var(--text) 62%, transparent); }
+.tally path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tally path.tally-new { stroke-dasharray: 1 1; stroke-dashoffset: 1; animation: tally-draw 0.32s cubic-bezier(0.3, 0.1, 0.3, 1) forwards; }
+@keyframes tally-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .tally path.tally-new { animation: none; stroke-dashoffset: 0; } }
 .projects-column > .column-header { flex-wrap: wrap; row-gap: 4px; }
 
 .profile-goal { margin: 0; }
@@ -1084,14 +1182,15 @@ p.art-label { display: block; }
 
 /* Badges stay gray until you hover their card, so color draws the eye only where you're looking,
    except Working, Human and Blocked, which keep their color so work under way, work waiting on you
-   and work held up show at a glance. The
+   and work held up show at a glance, and the Epics tab's status lozenges (its epics' and issues'),
+   which are what you scan it for. The
    same in a project's details beside the list: its tags, link icons and Project context link stay gray
    until you hover the details. They're grayed by swapping the colors they're drawn with for grays,
    not with a grayscale filter: WebKit can cut the last row of pixels off a filtered element. Only
    the link icons, whose colors are drawn into them, keep the filter. */
 .card :is(.badge, .pill, .chip, .owner, .source, .p-badge),
 .project-detail-pane :is(.badge, .pill, .chip, .understanding-link) { transition: color 0.15s ease, background-color 0.15s ease; }
-.card:not(:hover) :is(.badge:not(.status-badge:is(.working, .human, .blocked)), .pill, .chip, .owner, .source, .p-badge),
+.card:not(:hover) :is(.badge:not(.status-badge:is(.working, .human, .blocked), .epic-row-status), .pill, .chip, .owner, .source, .p-badge),
 .project-detail-pane:not(:hover) :is(.badge, .pill, .chip, .understanding-link) {
   --red: var(--muted); --amber: var(--muted); --green: var(--muted); --accent: var(--muted);
   --red-bg: var(--grey-bg); --amber-bg: var(--grey-bg); --green-bg: var(--grey-bg); --blocking-bg: var(--blocking-gray);
@@ -1489,6 +1588,10 @@ body.task-dragging .task-card { transition: transform 200ms cubic-bezier(0.2, 0.
 /* A setting's line of gray text under its label (Projects: what it needs connected). */
 .setting-note { font-size: 11px; line-height: 1.4; color: var(--muted); }
 .setting-note .link-button { font-size: 11px; }
+.setting-note-error { color: var(--red); }
+/* A line of text in a setting (Jira's site and email): wide enough for an address. */
+.setting-text-input { width: 220px; }
+.setting-text-input.short { width: 150px; }
 /* A (?) beside a label; its explanation shows in a tooltip (see InfoTip). */
 .info-tip { display: inline-grid; place-items: center; color: color-mix(in srgb, var(--muted) 70%, var(--bg)); cursor: help; border-radius: 50%; line-height: 0; }
 .info-tip:hover, .info-tip:focus-visible { color: var(--muted); outline: none; }
@@ -1894,7 +1997,20 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
      rail and panel each keep their 16px instead. */
   padding: 0 16px 0 20px;
 }
-.detail-layout > :not(.orb-glow) { position: relative; z-index: 1; min-width: 0; }
+.detail-layout > :not(.orb-glow, .lamp-glow) { position: relative; z-index: 1; min-width: 0; }
+/* The paper lamp's light on the wall, where the orb's glow would be (see .orb-glow): centered a little
+   below and right of the lamp, wide and soft, as from a lamp hung well out from the wall, breathing
+   slowly. The lamp's center is 162px in (the 20px padding, then half the 302px first column less the
+   17px before the rail) and about 203px down (16px, the orb box's 35px margin, then 152px into it). */
+.lamp-glow {
+  position: absolute; z-index: 0; pointer-events: none;
+  left: 190px; top: 232px; width: 760px; height: 760px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, rgba(255, 204, 138, 0.3), rgba(255, 190, 112, 0.13) 40%, rgba(255, 182, 100, 0.04) 70%, rgba(255, 180, 100, 0));
+  animation: lamp-breathe 7s ease-in-out infinite;
+}
+@keyframes lamp-breathe { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lamp-glow { animation: none; } }
 /* The calendar column reaches across the rail, so the calendar's hour labels and lines can sit
    there and scroll with it. The rule beside the calendar stays where it was: drawn as a fixed
    1px background line at the rail's left edge (a scroll box's background doesn't scroll). */
@@ -1937,6 +2053,159 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 .projects-split { grid-template-columns: minmax(0, min(420px, 50%)) minmax(0, 1fr); }
 .projects-split > .detail-pane:first-child > .column-header { flex-wrap: wrap; row-gap: 4px; height: auto; min-height: 26px; }
 .projects-split > .detail-pane:first-child > .column-header > .task-filters { flex: 1 0 auto; }
+/* Epics: a Jira project's sprint by epic, its epics in a list a little wider than Projects' (room for
+   an epic's breadcrumb and its owner's name), the open one's issues beside it. The epics are drawn like project cards (see .card.project), two lines each: the
+   title, then the key and how much of its work in the sprint is done. */
+.epics-split { grid-template-columns: minmax(0, min(480px, 50%)) minmax(0, 1fr); }
+.epics-split .epic-issues-pane > .column-header.epic-issues-head { height: auto; min-height: 26px; align-items: flex-start; }
+.epics-project { color: var(--muted); }
+.epics-sprint-line { margin: 0; }
+/* A sprint's number beside its choice ("Current sprint 24"), in gray. */
+.segmented-note { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The sprint's burndown (see Burndown): issues left as a 2px line, stepping down as each goes done, then
+   dashed in the same blue at our pace to the sprint's end; the even pace dashed in gray behind it; its
+   dates under it. */
+/* The chart in a card, as the app's cards are: its surface, a hairline border and 10px corners. Its lines
+   run to the card's side borders, clear of its corners (see .burndown-area); today's line from its top
+   border to its bottom; its axis under the card, its dates under the chart's ends. */
+.burndown { margin: 12px 0 0; }
+.burndown-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+/* Tickets or points, small, in the corner the lines leave empty: top right early in the chart, bottom left late. */
+.burndown-unit { position: absolute; z-index: 2; }
+.burndown-unit.top-right { top: 6px; right: 6px; }
+.burndown-unit.bottom-left { bottom: 6px; left: 6px; }
+.burndown-unit .segmented { padding: 1px; gap: 1px; }
+.burndown-unit .segmented button { height: 17px; padding: 0 7px; font-size: 10px; }
+.burndown-plot { position: relative; height: 160px; cursor: crosshair; outline: none; border-radius: 9px; }
+.burndown-plot:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 2px; }
+/* The lines' area: across the card, side border to side border, but its top and bottom 10px inside,
+   below and above where the card's corners curve; its strokes kept within the sides. */
+.burndown-area { position: absolute; left: 0; right: 0; top: 10px; bottom: 10px; pointer-events: none; }
+.burndown-area svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; clip-path: inset(-4px 0); }
+.burndown-pace { fill: none; stroke: var(--muted); stroke-opacity: 0.5; stroke-width: 2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.burndown-actual { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.burndown-projection { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.burndown-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); transform: translate(-50%, -50%); pointer-events: none; }
+/* Today's line, a hairline: half a pixel, one device pixel on a Retina screen. */
+.burndown-today { position: absolute; top: 0; bottom: 0; width: 0.5px; transform: translateX(-0.25px); background: color-mix(in srgb, var(--muted) 45%, transparent); pointer-events: none; }
+.burndown-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--muted) 50%, transparent); pointer-events: none; }
+.burndown-tip { position: absolute; bottom: calc(100% + 8px); top: auto; pointer-events: none; white-space: nowrap; }
+.burndown-pace-key { display: inline-block; width: 12px; height: 0; border-top: 1.5px dashed var(--muted); vertical-align: middle; margin-right: 2px; }
+.burndown-axis { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; padding: 0 2px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.burndown-axis > span:first-child, .burndown-axis > span:last-child { flex: none; white-space: nowrap; }
+.burndown-done { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+/* Who has the sprint's issues, under the burndown (see SprintPeople): avatar, name, a bar of theirs done,
+   how many. One grid for all of them, so the names share a column and the bars line up and fill the
+   room to the counts; each row a button that shows their issues. */
+/* The Team's fold reaches 8px past the column's sides, so each row's highlight (which does too, keeping
+   the names and bars in line with the chart) isn't clipped by it. */
+.team > .reveal { margin: 0 -8px; }
+.team > .reveal > .reveal-inner { padding: 0 8px; }
+/* The Team's spacing is the list's, so folding it away leaves just the title; as much under its last
+   name to the rule as over its title from the chart's dates (20px). */
+.sprint-people {
+  list-style: none; margin: 6px 0 6px; padding: 0;
+  display: grid; grid-template-columns: 18px fit-content(55%) minmax(40px, 1fr) auto; column-gap: 8px; row-gap: 0;
+}
+.sprint-people > li { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+.sprint-person {
+  grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center;
+  margin: 0 -8px; padding: 4px 8px; border: none; border-radius: 8px; background: none;
+  font: inherit; font-size: 12px; color: var(--text); text-align: left; cursor: pointer;
+}
+.sprint-person:hover { background: var(--grey-bg); }
+.sprint-person.selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sprint-person:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sprint-person-who { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sprint-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* More points than one person can do in a sprint. */
+.warning-icon { flex: none; color: var(--text); }
+.warning-icon path { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.sprint-person.unassigned .sprint-person-name { color: var(--muted); }
+.sprint-person-none { flex: none; box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%; border: 1.2px dashed color-mix(in srgb, var(--muted) 70%, transparent); }
+.sprint-person .epic-bar { margin-left: 0; width: 100%; }
+/* The rule under the Team, across the whole column: out through the pane's 18px side padding to its
+   borders. The column's own gap spaces it above and below. */
+.epics-rule { margin: 0 -18px; border: none; border-top: 1px solid var(--border); }
+.sprint-person-count { min-width: 18px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.epics-project-form { display: flex; flex-direction: column; gap: 6px; }
+.epics-project-form > p { margin: 0; }
+.epic-row { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; text-align: left; }
+.epic-row { cursor: pointer; }
+.epic-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Its title, and its status at the right of its first line. */
+.epic-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.epic-row-top > .hover-tip-anchor { display: block; flex: 1 1 auto; min-width: 0; }
+.epic-row-status { flex: none; margin-top: 1px; white-space: nowrap; }
+.epic-row-meta a.epic-key { color: inherit; text-decoration: none; }
+.epic-row-meta a.epic-key:hover { color: var(--accent); text-decoration: underline; }
+.epic-row-meta > .epic-key { flex: none; }
+/* Who has the epic: a small face and their name, the name cut short before the date and count are. */
+.epic-row-owner { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.epic-row-owner > .avatar { flex: none; }
+.epic-row-owner-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.epic-row-due { flex: none; white-space: nowrap; }
+.epic-row-due.late { color: var(--red); }
+/* A card's title on one line, cut short with "…" when it's long; hovering shows all of it (see HoverTip). */
+.epic-row-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Everything under the title in the card's smaller text, as its status lozenge is. */
+.epic-row-meta, .epic-row-mid { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+/* An epic's middle rows, from the left: its tickets, then its points under them, each after its label:
+   how much of its work in the sprint is done (outlined), then of the whole epic, and its bar. One grid
+   for both, so their counts and bars line up. */
+.epic-row-mid { display: grid; grid-template-columns: auto auto auto 40px; justify-content: start; align-items: center; column-gap: 6px; row-gap: 3px; }
+.epic-row-set { display: contents; }
+.epic-row-unsized { grid-column: 2 / -1; }
+.epic-row-set > .epic-bar { flex: 0 0 40px; width: 40px; margin-left: 0; }
+.epic-row-set-label { color: var(--muted); }
+.epic-row-unsized { color: var(--muted); font-style: italic; }
+.epic-row-count { flex: none; white-space: nowrap; }
+.epic-row-in-sprint { flex: none; white-space: nowrap; padding: 0 6px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 999px; text-align: center; line-height: 14px; font-variant-numeric: tabular-nums; }
+.epic-row-mid > .epic-bar { margin-left: 0; }
+.epic-bar { flex: 0 0 48px; height: 4px; margin-left: auto; border-radius: 2px; background: var(--grey-bg); overflow: hidden; }
+/* Done in green, then in progress in blue (see ProgressBar), a pixel of the track between them. */
+.epic-bar { display: flex; }
+.epic-bar > span { display: block; flex: none; height: 100%; background: var(--green); }
+.epic-bar > span.started { background: var(--accent); }
+.epic-bar > span.done + span.started { margin-left: 1px; }
+/* Set in like the cards' text (see .project-list). */
+.epics-unparented { margin: 8px 9px 0; }
+.epic-issues-title { overflow-wrap: anywhere; }
+.epic-issues-sub { margin: 0; }
+/* A link to a Jira issue in running text, after its type's mark (see JiraLinkMark). */
+.jira-link-mark { display: inline-flex; vertical-align: -2px; margin-right: 3px; }
+.jira-link-mark > .hover-tip-anchor { display: inline-flex; }
+/* A Jira key after its issue type's mark (see JiraKey); the epic's key and status, and an issue's, in a line. */
+.jira-key { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+.jira-key > .hover-tip-anchor { display: inline-flex; }
+/* The column's title stays at its top while its issues scroll under it, the panel's color behind it
+   (.detail-panel's, as a project's head has; its offset is counted from inside the column's 16px top
+   padding). */
+.epics-split .epic-issues-pane > .column-header.epic-issues-head { position: sticky; top: -16px; z-index: 4; margin: -16px -18px 0; padding: 16px 18px 6px; background: var(--surface); }
+.epic-issues-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.epic-issues-sub > :last-child:not(.jira-key) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Each group's heading, with room above it, and its fold at the right. */
+.epic-issue-group { margin-top: 16px; }
+/* Its heading folds it away, as a project's details' Channels and Also called do (see FoldLabel). */
+.epic-issue-group-head { margin-bottom: 4px; font-size: 12px; }
+/* An epic's issues, each a card as an epic is (see .epic-row), their text in line with the headings
+   (the cards' 8px padding and 1px border out past the column's edge). The fold clips what's in it, so
+   it reaches out that far itself. */
+.epic-issue-group > .reveal { margin-inline: -9px; }
+.epic-issue-list { display: flex; flex-direction: column; }
+.epic-row.issue-card { cursor: default; }
+/* An issue's T-shirt size, after who has it: a badge with a T-shirt. */
+.size-badge { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+/* An issue's key after the issues it's under (its initiative, its epic), with a light gray "/" between them. */
+.issue-path { display: inline-flex; flex: none; align-items: center; gap: 5px; }
+.issue-path > .hover-tip-anchor { display: inline-flex; }
+.issue-path-sep { color: color-mix(in srgb, var(--muted) 45%, var(--bg)); }
+/* A card's breadcrumb has a line of its own, and wraps (between its keys) when it's longer than the card is wide. */
+.epic-row-path > .issue-path { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; row-gap: 2px; }
+/* An issue's line of who has it, its size and its due date wraps rather than cut the name short. */
+.issue-card .epic-row-meta { flex-wrap: wrap; row-gap: 2px; }
+.tshirt-icon { flex: none; }
+.tshirt-icon path { fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linejoin: round; }
 .detail-pane { min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 18px; }
 .detail-pane + .detail-pane { border-left: 1px solid var(--border); }
 /* The Updates area's chat dock: the chat fills it, inline rather than as a window. */
@@ -2268,20 +2537,22 @@ body .modal-backdrop:has(.understanding-modal) { z-index: 31; }
 :is(.plan-icon.code, .code-mark, .code-state).draft { color: var(--gh-draft); }
 :is(.plan-icon.code, .code-mark, .code-state).merged { color: var(--gh-merged); }
 :is(.plan-icon.code, .code-mark, .code-state).closed { color: var(--gh-closed); }
-/* A ticket's pull requests and branches on its row: solid when the ticket links one, dotted when Demian only matched its key. */
+/* A ticket's pull requests and branches on its row: solid when the ticket links one, dashed when Demian
+   only matched its key. Each is framed as the ticket's mark is (.plan-icon.item), at its size, its
+   dashes the same as a proposed ticket's. */
 .code-marks { display: inline-flex; flex: none; align-items: center; gap: 3px; }
 .code-marks > .hover-tip-anchor { display: inline-flex; }
-.code-mark {
-  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
-  width: 18px; height: 18px; border-radius: 4px; color: var(--muted);
-  border: 1px solid color-mix(in srgb, currentColor 65%, transparent);
-  background: color-mix(in srgb, currentColor 8%, transparent);
-  text-decoration: none;
+.code-mark { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; }
+.plan-icon.code.boxed .frame { fill: currentColor; fill-opacity: 0.08; stroke: currentColor; stroke-opacity: 0.65; stroke-width: 1.2; }
+.code-mark.suggested .plan-icon.code.boxed .frame { fill-opacity: 0; stroke-opacity: 1; stroke-dasharray: 2.2 1.8; }
+.code-mark:hover .plan-icon.code.boxed .frame { fill-opacity: 0.16; }
+/* Its glyph is drawn smaller in the frame: a thicker line, so it shows as thick as the frame's. */
+.plan-icon.code.boxed .glyph { stroke-width: 1.9; }
+.code-mark.more {
+  box-sizing: border-box; height: 14px; padding: 0 3px; border-radius: 3px;
+  border: 1.2px solid color-mix(in srgb, currentColor 65%, transparent); background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; cursor: default;
 }
-.code-mark.suggested { border-style: dotted; border-color: currentColor; background: transparent; }
-.code-mark:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
-.code-mark .plan-icon.code { width: 12px; height: 12px; }
-.code-mark.more { width: auto; padding: 0 4px; font-size: 10px; font-variant-numeric: tabular-nums; cursor: default; }
 /* A pull request's or branch's hover. */
 .code-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .code-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
@@ -2619,5 +2890,9 @@ a.plan-title:hover { color: var(--text); text-decoration: underline; }
 /* In the details pane its line runs edge to edge, across the pane's side padding. */
 .project-detail-pane > .understanding-row.detail-foot { margin-inline: -18px; padding-inline: 18px; }
 .detail-pane.project-detail-pane { padding-bottom: calc(var(--mist-height) + 24px); }
+/* An epic's or person's issues too, so the last card scrolls clear of the mist; with its chat under them
+   they end above the chat, not over the mist. */
+.detail-pane.epic-issues-pane { padding-bottom: calc(var(--mist-height) + 24px); }
+.project-pane.with-chat > .detail-pane.epic-issues-pane { padding-bottom: 16px; }
 /* Like the badges, the path's marks stay gray in the details beside the list until you hover them. */
 .project-detail-pane:not(:hover) :is(.path-steps, .path-tracks) { --green: var(--muted); --accent: var(--muted); --red: var(--muted); --red-bg: var(--grey-bg); }

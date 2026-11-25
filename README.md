@@ -108,13 +108,15 @@ To change things later:
 
    That takes a few minutes. Later refreshes only read what's new.
 3. **Projects:**
-   - Projects needs Atlassian Rovo and `gh`. Without both it's off, and Settings → **Features** turns it on once they're set up. The same switches turn Updates, Tasks and Watched topics on or off.
+   - Projects needs Atlassian Rovo and `gh`. Without both it's off, and Settings → **Features** turns it on once they're set up. The same switches turn Updates, Tasks, Epics and Watched topics on or off.
    - Channels named `#tmp-*` go straight onto the board, and a project can also come from its Jira epics. Other channels and epics that look like projects are kept as suggestions: Settings → **Projects** lists them, and the Demian chat can track one.
    - Settings → **Projects** lists each project's channels. You can unlink a channel or merge two projects there.
    - A project's pull requests and branches are the ones on GitHub that name its Jira tickets, read with `gh`.
-4. **Updates:** once you've read every update and your inbox is empty, a painting hangs in their place: a public-domain painting from the [Cleveland Museum of Art's Open Access collection](https://openaccess-api.clevelandart.org/), a new one each day. Hover over its label and click ↻ for another, or click its title to open it on the museum's site.
+4. **Epics:** one Jira project's current or upcoming sprint, by epic. Type the project's key (or paste a link to its board) the first time you open it. Clicking an epic lists all of its issues and who each is assigned to, the ones in the sprint first. It's on wherever Atlassian Rovo is set up, and Settings → **Features** turns it off.
+   - Settings → **Jira** can connect Demian to Jira directly: your Jira Cloud site, the email you sign in to Atlassian with, and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens), which is kept in the Keychain (Credential Manager on Windows). Then the Epics tab reads sprints and issues through Jira's REST API in a moment, without a Claude run, and the changes you apply from its chats are made the same way. The chats themselves still go through Claude and Rovo.
+5. **Updates:** **Mark as read** puts the Daily briefing away until the next one is written. Once today's briefing is read, every update is read and the inbox is empty, a painting hangs across the area (never during a full refresh, or before the day's briefing is written): a public-domain painting from the [Cleveland Museum of Art's Open Access collection](https://openaccess-api.clevelandart.org/), a new one each day, in a floating frame, white in the light theme and black in the dark. Hover over its title and click ↻ for another, or click the painting to open it on the museum's site.
 
-Each refresh is a Claude Code run, and it counts toward your claude.ai plan's usage. Settings shows the cost of recent refreshes.
+Each refresh is a Claude Code run (except the Epics tab's reads with a direct Jira connection), and it counts toward your claude.ai plan's usage. Settings shows the cost of recent refreshes.
 
 The app finds `claude`, `git` and `gh` in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`. If you installed any of them somewhere else, symlink them into one of those folders.
 

@@ -1,4 +1,5 @@
 import type { LinkKind, TaskLink } from "../links";
+import { IssueTypeIcon, useIssueType } from "./JiraIcons";
 import { COLORED_ICONS, MONO_ICONS } from "../linkIcons";
 import { ExternalLink } from "./common";
 
@@ -18,8 +19,14 @@ export function LinkIcon({ kind }: { kind: LinkKind }) {
   );
 }
 
+/** A chip's icon: for a Jira issue whose type the planner knows, its type's mark (as Jira's own smart links show it); else the product's. */
+function ChipIcon({ link }: { link: TaskLink }) {
+  const type = useIssueType(link.kind === "jira" ? link.url : null);
+  return type !== undefined ? <IssueTypeIcon type={type} size={14} /> : <LinkIcon kind={link.kind} />;
+}
+
 /**
- * Links as Google Docs–style smart chips: the product's icon, then the title. "list" puts one per
+ * Links as Google Docs–style smart chips: the product's icon (a Jira issue's type), then the title. "list" puts one per
  * line. "icons" shows just each chip's icon on its round background, inline with the text around it,
  * with the title on hover.
  */
@@ -30,7 +37,7 @@ export function LinkChips({ links, layout = "wrap" }: { links: TaskLink[]; layou
       <span className="link-chips icons">
         {links.map((l) => (
           <ExternalLink key={l.url} href={l.url} className={`link-chip icon-only ${l.kind}`} title={l.title} label={l.title}>
-            <LinkIcon kind={l.kind} />
+            <ChipIcon link={l} />
           </ExternalLink>
         ))}
       </span>
@@ -39,7 +46,7 @@ export function LinkChips({ links, layout = "wrap" }: { links: TaskLink[]; layou
     <div className={`link-chips ${layout}`}>
       {links.map((l) => (
         <ExternalLink key={l.url} href={l.url} className={`link-chip ${l.kind}`} title={l.url}>
-          <LinkIcon kind={l.kind} />
+          <ChipIcon link={l} />
           <span className="link-chip-title">{l.title}</span>
         </ExternalLink>
       ))}

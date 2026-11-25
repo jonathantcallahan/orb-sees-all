@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { JiraLinkMark } from "./JiraIcons";
 import { blockKey, parseMarkdown, type MdBlock } from "../markdown";
 import { ExternalLink } from "./common";
 
@@ -20,17 +21,23 @@ export function inline(text: string): ReactNode[] {
     else if (m[2] !== undefined) out.push(<strong key={key}>{inline(m[2])}</strong>);
     else if (m[3] !== undefined)
       out.push(
-        <ExternalLink key={key} href={m[4]} className="md-link" title={m[4]}>
-          {inline(m[3])}
-        </ExternalLink>,
+        <Fragment key={key}>
+          <JiraLinkMark href={m[4]} />
+          <ExternalLink href={m[4]} className="md-link" title={m[4]}>
+            {inline(m[3])}
+          </ExternalLink>
+        </Fragment>,
       );
     else if (m[5] !== undefined) out.push(<em key={key}>{inline(m[5])}</em>);
     else if (m[6] !== undefined) out.push(<em key={key}>{inline(m[6])}</em>);
     else if (m[7])
       out.push(
-        <ExternalLink key={key} href={m[7]} className="md-link" title={m[7]}>
-          {m[7]}
-        </ExternalLink>,
+        <Fragment key={key}>
+          <JiraLinkMark href={m[7]} />
+          <ExternalLink href={m[7]} className="md-link" title={m[7]}>
+            {m[7]}
+          </ExternalLink>
+        </Fragment>,
       );
     at = i + m[0].length;
   }

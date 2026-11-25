@@ -581,6 +581,33 @@ export const GlobalAction = z.discriminatedUnion("type", [
   z.object({ type: z.literal("link_project_epic"), project_id: z.string(), epic_key: z.string() }),
   /** Unlinks a Jira epic from a project; refreshes and discovery leave it alone after. */
   z.object({ type: z.literal("unlink_project_epic"), project_id: z.string(), epic_key: z.string() }),
+  /**
+   * Changes one Jira issue or epic, made in Jira when the user applies the card: each field given is
+   * changed, the rest left as they are. "none" clears the assignee or due date; sprint "backlog" takes
+   * it out of its sprint.
+   */
+  z.object({
+    type: z.literal("change_jira_issue"),
+    key: z.string(),
+    /** What it's called, for the card. */
+    title: z.string().nullish(),
+    /** Its new status, by name: Jira moves it there by a transition. */
+    status: z.string().nullish(),
+    /** Who it's assigned to, by name or email, or "none". */
+    assignee: z.string().nullish(),
+    /** Its due date, YYYY-MM-DD, or "none". */
+    due: z.string().nullish(),
+    /** A new summary (its title in Jira). */
+    summary: z.string().nullish(),
+    priority: z.string().nullish(),
+    /** The epic it moves into, by key, or "none" to take it out of its epic. */
+    epic: z.string().nullish(),
+    /** The sprint it moves to, by name, or "backlog". */
+    sprint: z.string().nullish(),
+    /** A comment to add to it, in markdown. */
+    comment: z.string().nullish(),
+    reason: z.string().nullish(),
+  }),
   z.object({
     type: z.literal("split_project"),
     project_id: z.string(),
@@ -670,14 +697,97 @@ export const EpicChildren = z.object({
       status: z.string(),
       /** Done, In progress or To do, from the status's category. */
       category: z.enum(["done", "in_progress", "todo"]).catch("todo"),
+      /** Its issue type's name (Story, Task, Bug…); missing from reads before types were kept. */
+      type: z.string().nullish().catch(null),
+      /** Its due date (YYYY-MM-DD), null when it has none; missing from reads before due dates were kept. */
+      due: z.string().nullish().catch(null),
+      /** Its T-shirt size (XS to XXL), null when it has none; missing from reads before sizes were kept. */
+      size: z.string().nullish().catch(null),
       assignee: z.string().nullish(),
+      /** The assignee's Jira avatar. */
+      avatar: z.string().nullish(),
       link: z.string().nullish(),
+      /** When it was created, and when it went done (for a done one): for an epic's burndown. */
+      created: z.string().nullish().catch(null),
+      done_at: z.string().nullish().catch(null),
     }),
   ),
   /** Why the issues couldn't be read (a failed or forbidden search), rather than there being none. */
   error: z.string().nullish(),
+  /** The Jira field their sizes were read from, null for none: read again when the sprint's is another. */
+  size_field: z.string().nullish(),
 });
 export type EpicChildren = z.infer<typeof EpicChildren>;
+
+/** Which of a Jira project's sprints the Epics area shows: the one under way, or the next. */
+export type SprintChoice = "current" | "upcoming";
+
+/** An issue in a sprint: whether it's done and when it went done (for the sprint's burndown), and who has it. */
+const SprintIssue = z.object({
+  key: z.string(),
+  category: z.enum(["done", "in_progress", "todo"]).catch("todo"),
+  /** When it moved to a Done status (its statuscategorychangedate), for a done issue. */
+  done_at: z.string().nullish().catch(null),
+  /** Who it's assigned to (their display name), and their Jira avatar: null when no one is. */
+  assignee: z.string().nullable().catch(null),
+  avatar: z.string().nullable().catch(null),
+  /** Its issue type's name (Story, Task, Bug…); missing from reads before types were kept. */
+  type: z.string().nullish().catch(null),
+  /** Its T-shirt size (XS to XXL, see sizes.ts), null when it has none. */
+  size: z.string().nullish().catch(null),
+});
+
+/** A Jira project's current or upcoming sprint, and the epics with work in it (see sprintEpicsPrompt). */
+export const SprintEpics = z.object({
+  /** Null when the project has no such sprint (none under way, or none planned yet). */
+  sprint: z
+    .object({
+      name: z.string(),
+      /** As Jira gives them: ISO timestamps. */
+      start: z.string().nullish(),
+      end: z.string().nullish(),
+    })
+    .nullable()
+    .catch(null),
+  epics: z
+    .array(
+      z.object({
+        key: z.string(),
+        title: z.string(),
+        status: z.string().nullish(),
+        category: z.enum(["done", "in_progress", "todo"]).catch("todo"),
+        link: z.string().nullish(),
+        /** Its due date in Jira (YYYY-MM-DD): when it's expected to be done. Null when it has none. */
+        due: z.string().nullish().catch(null),
+        /** Who it's assigned to in Jira (its owner), and their avatar; null when no one is. Missing from reads before it was kept. */
+        assignee: z.string().nullable().catch(null),
+        avatar: z.string().nullable().catch(null),
+        /** The issues it's under, from the top down (an initiative, and whatever is above that), each with its type, title and link; missing from reads before they were kept. */
+        parents: z
+          .array(z.object({ key: z.string(), type: z.string().nullish().catch(null), title: z.string().nullish().catch(null), link: z.string().nullish().catch(null) }))
+          .nullable()
+          .catch(null),
+        /** Every one of its issues that has a T-shirt size, in any sprint or none, as "<size>:<category>" ("M:done"); null when sizes weren't read. */
+        sized: z.array(z.string()).nullish().catch(null),
+        /** Its issues in the sprint. */
+        issues: z.array(SprintIssue).default([]),
+        /** All its issues, in any sprint or none: how many, how many are done and how many in progress. Null when they couldn't be counted. */
+        progress: z.object({ done: z.number().int().nonnegative(), started: z.number().int().nonnegative().catch(0), total: z.number().int().nonnegative() }).nullable().catch(null),
+      }),
+    )
+    .default([]),
+  /** Issues in the sprint that aren't in an epic. */
+  unparented: z.number().int().nonnegative().catch(0),
+  /** Those issues (the Epics area's Unaffiliated list), each with whether it's done. */
+  strays: z.array(SprintIssue).catch([]).default([]),
+  /** Why the sprint couldn't be read (a failed or forbidden search), rather than it being empty. */
+  error: z.string().nullish(),
+  /** The Jira field its T-shirt sizes were read from ("customfield_10001"), null when the project has none; missing from reads before sizes. */
+  size_field: z.string().nullish().catch(null),
+  /** Which way its sizes were read (see SIZES_READ). */
+  sizes_read: z.number().nullish().catch(null),
+});
+export type SprintEpics = z.infer<typeof SprintEpics>;
 
 /** What creating an epic the user reviewed did: the epic, and which stories went into it. */
 export const EpicCreated = z.object({
@@ -728,6 +838,40 @@ export const StoryApplied = z.object({
 export type StoryApplied = z.infer<typeof StoryApplied>;
 
 export const SentMessage = z.object({ sent: z.boolean(), link: z.string().nullish(), error: z.string().nullish(), moved: z.string().nullish() });
+
+/** An issue as Jira has it, read before or after a change (see changeJiraIssuePrompt). */
+const JiraIssueState = z.object({
+  category: z.enum(["done", "in_progress", "todo"]).catch("todo"),
+  /** Its epic's key, or null when it's in none. */
+  epic: z.string().nullable().catch(null),
+});
+
+/** What changing a Jira issue the user reviewed did: what took and what Jira refused, and the issue before and after. */
+export const JiraIssueChanged = z.object({
+  sent: z.boolean(),
+  changed: z.array(z.string()).catch([]).default([]),
+  not_changed: z.array(z.string()).catch([]).default([]),
+  /** Before the change; null when it couldn't be read. */
+  before: JiraIssueState.nullable().catch(null).default(null),
+  /** After it, as Jira now has it; null when it couldn't be read. */
+  issue: JiraIssueState.extend({
+    key: z.string(),
+    title: z.string().nullable().catch(null),
+    status: z.string().nullable().catch(null),
+    type: z.string().nullable().catch(null),
+    assignee: z.string().nullable().catch(null),
+    avatar: z.string().nullable().catch(null),
+    due: z.string().nullable().catch(null),
+    link: z.string().nullable().catch(null),
+    /** The open sprints it's in (active or future), by name. */
+    sprints: z.array(z.string()).catch([]).default([]),
+  })
+    .nullable()
+    .catch(null)
+    .default(null),
+  error: z.string().nullish(),
+});
+export type JiraIssueChanged = z.infer<typeof JiraIssueChanged>;
 
 /** New, short titles for long-titled tasks, by task id. */
 export const ShortTitles = z.object({ titles: z.array(z.object({ id: z.string(), title: z.string() })).default([]) });

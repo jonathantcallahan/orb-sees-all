@@ -1,4 +1,5 @@
 import { formatWhen } from "../scheduler";
+import { JiraLinkMark } from "./JiraIcons";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { logFeedback, saveFocus, setProjectPriority, type Project } from "../db";
@@ -12,7 +13,7 @@ import { Requirements } from "./ProjectRequirements";
 import { CardDue, PathToShip, StatusBox, WorkstreamWork } from "./ProjectRecord";
 import { People } from "./People";
 import { useJobStatus } from "../useAppData";
-import { CloseIcon, ExternalLink, RefreshButton, UnreadDot, updatedText } from "./common";
+import { CloseIcon, ExternalLink, FoldLabel, RefreshButton, UnreadDot, updatedText } from "./common";
 import { usePointerFocus } from "./TaskCard";
 import { label, recordCorrection } from "../feedback";
 
@@ -194,13 +195,7 @@ function FoldField({ label, count, open, onToggle, children }: { label: string; 
   return (
     <>
       <dt>
-        <button className="fold-label" aria-expanded={open} onClick={onToggle}>
-          {label}
-          <span className="timestamp">{count}</span>
-          <svg className="fold-chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-            <path d="M3.5 2 6.5 5l-3 3" />
-          </svg>
-        </button>
+        <FoldLabel label={label} count={count} open={open} onToggle={onToggle} />
       </dt>
       {open && <dd>{children}</dd>}
     </>
@@ -215,8 +210,6 @@ export function ProjectDetail({ project, onChange, taskStates }: { project: Proj
   const [field, setField] = useState<string | null>(null);
   useEffect(() => setField(null), [project.channel_id]);
   const toggleField = (name: string) => setField((open) => (open === name ? null : name));
-  // Its context changes with each refresh (Demian's entries) and with your edits; the later one.
-  const contextAt = [project.last_refreshed_at, project.focus?.updated_at].filter((t): t is string => !!t).sort().at(-1);
   // Its own channels, then ones it shares with other projects.
   const channels = readChannels(project);
   const permalinks = channelPermalinks(project);
@@ -284,6 +277,7 @@ export function ProjectDetail({ project, onChange, taskStates }: { project: Proj
                   <span className="muted milestone-date">{d.date ? formatWhen(d.date) : "No date"}</span>
                   {d.link ? (
                     <ExternalLink href={d.link} className="milestone-what">
+                      <JiraLinkMark href={d.link} size={12} />
                       {d.what}
                     </ExternalLink>
                   ) : (
@@ -301,9 +295,7 @@ export function ProjectDetail({ project, onChange, taskStates }: { project: Proj
           <button className="link-button small more-link understanding-link" onClick={() => setContextOpen(true)}>
             Project context
           </button>
-          <span className="timestamp">
-            How Demian understands this project.{contextAt && ` Updated ${updatedText(contextAt)}`}
-          </span>
+          <span className="timestamp">How Demian understands this project.</span>
         </div>
         {contextOpen && <UnderstandingModal project={project} onClose={() => setContextOpen(false)} onChange={onChange} />}
     </>

@@ -30,6 +30,7 @@ import { formatWhen } from "../scheduler";
 import { sinceWhen } from "../tasks";
 import { useJobStatus, useRunningJobs } from "../useAppData";
 import { ExternalLink, HoverTip, Spinner } from "./common";
+import { EpicIcon, InitiativeIcon, ItemIcon } from "./JiraIcons";
 import { FaceStack, faceFinder } from "./People";
 import { RequirementDetail, STATUS_LABEL } from "./ProjectRequirements";
 
@@ -43,55 +44,6 @@ const STATUS_TEXT: Record<PathStep["status"], string> = {
 
 function StatusLozenge({ status }: { status: PathStep["status"] }) {
   return <span className={`badge plan-status ${status}`}>{STATUS_TEXT[status]}</span>;
-}
-
-/** An initiative's mark: Jira's orange stack, outlined for one Demian proposes. */
-function InitiativeIcon({ proposed }: { proposed: boolean }) {
-  return (
-    <svg className={`plan-icon initiative${proposed ? " proposed" : ""}`} width="14" height="14" viewBox="0 0 14 14" aria-hidden>
-      <rect x="0.75" y="0.75" width="12.5" height="12.5" rx="2.5" />
-      <path d="M4 4.5h6M4 7h6M4 9.5h6" />
-    </svg>
-  );
-}
-
-/** An epic's mark: Jira's purple lightning bolt, outlined for one Demian proposes. */
-function EpicIcon({ proposed }: { proposed: boolean }) {
-  return (
-    <svg className={`plan-icon epic${proposed ? " proposed" : ""}`} width="14" height="14" viewBox="0 0 14 14" aria-hidden>
-      <rect x="0.75" y="0.75" width="12.5" height="12.5" rx="2.5" />
-      <path d="M7.9 2.6 4.4 7.6h2.5l-.8 3.8 3.5-5H7.1z" />
-    </svg>
-  );
-}
-
-/** The standard issue types' marks, as Jira draws them; any other type gets its first letter. */
-const TYPE_MARK: Record<string, string> = { story: "story", task: "task", bug: "bug", spike: "spike", "sub-task": "task", subtask: "task" };
-
-/**
- * A story or task's mark, by its issue type: Jira's green bookmark for a story, blue check for a task,
- * red dot for a bug, and a letter for the project's own types (Collaboration, Design…). Dashed for work
- * no ticket covers yet; its type shows on hover.
- */
-function ItemIcon({ type, ticket }: { type: string | null | undefined; ticket: boolean }) {
-  const name = type?.trim() || "Task";
-  const mark = TYPE_MARK[name.toLowerCase()] ?? "other";
-  return (
-    <HoverTip text={ticket ? name : `${name} (proposed, not in Jira yet)`}>
-      <svg className={`plan-icon item ${mark}${ticket ? "" : " untracked"}`} width="14" height="14" viewBox="0 0 14 14" role="img" aria-label={name}>
-        <rect x="1.25" y="1.25" width="11.5" height="11.5" rx="2.5" />
-        {mark === "task" && <path d="m4.3 7.2 1.9 1.9 3.6-4" />}
-        {mark === "story" && <path className="fill" d="M4.6 3.6h4.8v7l-2.4-1.7-2.4 1.7z" />}
-        {mark === "bug" && <circle className="fill" cx="7" cy="7" r="2.6" />}
-        {mark === "spike" && <path d="M5.2 3.8h3.6M6 3.8v2.5L4 10.2h6L8 6.3V3.8" />}
-        {mark === "other" && (
-          <text x="7" y="10" textAnchor="middle">
-            {name[0].toUpperCase()}
-          </text>
-        )}
-      </svg>
-    </HoverTip>
-  );
 }
 
 /** A key or title, linked when it has a link. */
@@ -321,8 +273,8 @@ const MARKS_SHOWN = 4;
 
 /**
  * The pull requests and branches of a ticket on its row, after its icon: one mark each, in its
- * state's look (see codeLook), with a solid border when the ticket links it itself and a dotted one
- * when Demian only matched it by the ticket's key. Each opens on GitHub, and its hover says more.
+ * state's look (see codeLook), framed like the ticket's own mark: solid when the ticket links it itself,
+ * dashed when Demian only matched it by the ticket's key. Each opens on GitHub, and its hover says more.
  */
 function CodeMarks({ marks, owner }: { marks: PlacedMark<TrackedItem>[]; owner: string | null }) {
   if (!marks.length) return null;
@@ -335,7 +287,7 @@ function CodeMarks({ marks, owner }: { marks: PlacedMark<TrackedItem>[]; owner: 
       {shown.map((m) => (
         <HoverTip key={m.code.id} text={<CodeCard mark={m} owner={owner} />}>
           <ExternalLink href={m.code.url} className={`code-mark ${m.tie === "linked" ? "linked" : "suggested"} ${codeLook(m.code).tone}`} label={codeName(m.code)}>
-            <CodeIcon look={codeLook(m.code)} />
+            <CodeIcon look={codeLook(m.code)} framed />
           </ExternalLink>
         </HoverTip>
       ))}
@@ -434,12 +386,18 @@ function codeLook(c: Pick<TrackedItem, "kind" | "state">): CodeLook {
   }
 }
 
-/** A pull request's or branch's icon, GitHub's for its state, in its state's color (see codeLook). */
-function CodeIcon({ look }: { look: CodeLook }) {
+/**
+ * A pull request's or branch's icon, GitHub's for its state, in its state's color (see codeLook).
+ * `framed`: smaller, in a square drawn as an issue's mark is (see ItemIcon), so the two sit side by side
+ * at one size, a dashed square drawn with the same dashes.
+ */
+function CodeIcon({ look, framed = false }: { look: CodeLook; framed?: boolean }) {
   const label = look.icon === "branch" ? "Branch" : `${look.label} pull request`;
   const right = look.icon === "branch" ? { cx: 10, cy: 4.2 } : look.icon === "merged" ? { cx: 10, cy: 7.6 } : { cx: 10, cy: 10.8 };
   return (
-    <svg className={`plan-icon code ${look.tone}`} width="14" height="14" viewBox="0 0 14 14" role="img" aria-label={label}>
+    <svg className={`plan-icon code ${look.tone}${framed ? " boxed" : ""}`} width="14" height="14" viewBox="0 0 14 14" role="img" aria-label={label}>
+      {framed && <rect className="frame" x="1.25" y="1.25" width="11.5" height="11.5" rx="2.5" />}
+      <g className="glyph" transform={framed ? "translate(7 7) scale(0.64) translate(-7 -7)" : undefined}>
       <circle cx="4" cy="3.2" r="1.5" />
       <circle cx="4" cy="10.8" r="1.5" />
       <circle {...right} r="1.5" />
@@ -454,6 +412,7 @@ function CodeIcon({ look }: { look: CodeLook }) {
           <circle className="dot" cx="10" cy="4.3" r="0.8" />
         </>
       )}
+      </g>
     </svg>
   );
 }

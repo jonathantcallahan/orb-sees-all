@@ -2,7 +2,7 @@ import { withUpdate, type WatchedOutcome, type WatchedStatus, type WatchedTopic,
 import type { SessionLink } from "./sessions";
 import type { SessionScanDecision } from "./sessionScan";
 import Database from "@tauri-apps/plugin-sql";
-import type { AdhocTask, EpicChildren, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, PathToShip, ProfilePerson, ProjectKind, ProjectPriority, ProjectProfile, ProjectSnapshot, QuickReply, Requirement, RequirementProgress, RequirementsRead, TaskPlan } from "./schema";
+import type { AdhocTask, EpicChildren, SprintEpics, BlockerCheck, CalendarDay, TaskCheck, ManualAssessment, Priority, NewsItem, PathToShip, ProfilePerson, ProjectKind, ProjectPriority, ProjectProfile, ProjectSnapshot, QuickReply, Requirement, RequirementProgress, RequirementsRead, TaskPlan } from "./schema";
 import { withMovedUpdates } from "./inboxMoves";
 import { avatarIndex, foldProfile, newProjectId, projectName, recordedPeople, withRequirementsRead, type DiscoveryPlan, type ProjectChannel, type ProjectEpicLink, type SharedChannel } from "./projects";
 import type { ProjectTracking } from "./jobs/tracking";
@@ -626,6 +626,10 @@ export async function getSetting(key: string): Promise<string | null> {
   return rows[0]?.value ?? null;
 }
 
+export async function deleteSetting(key: string) {
+  await (await db()).execute("DELETE FROM settings WHERE key = $1", [key]);
+}
+
 export async function setSetting(key: string, value: string) {
   await (await db()).execute(
     "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -688,6 +692,7 @@ type Store =
   | "not_duplicates"
   | "project_tracking"
   | "epic_children"
+  | "sprint_epics"
   | "merged_from"
   | "seen"
   | "inbox_moves"
@@ -803,6 +808,13 @@ export const getProjectTracking = () => getRows<ProjectTracking>("project_tracki
 export type StoredEpicChildren = EpicChildren & { at: string };
 export const getEpicChildren = () => getRows<StoredEpicChildren>("epic_children");
 export const saveEpicChildren = (key: string, children: EpicChildren) => putRow("epic_children", key, { ...children, at: nowIso() });
+/** A Jira project's current or upcoming sprint and its epics as last read, by sprintKey(project, which). */
+export type StoredSprintEpics = SprintEpics & { at: string };
+export const getSprintEpics = () => getRows<StoredSprintEpics>("sprint_epics");
+export const saveSprintEpics = (key: string, sprint: SprintEpics) => putRow("sprint_epics", key, { ...sprint, at: nowIso() });
+/** Puts back a read Demian brought up to date itself after a change it made in Jira, keeping when it was read. */
+export const patchSprintEpics = (key: string, sprint: StoredSprintEpics) => putRow("sprint_epics", key, sprint);
+export const patchEpicChildren = (key: string, children: StoredEpicChildren) => putRow("epic_children", key, children);
 export const saveProjectTracking = (projectId: string, tracking: ProjectTracking) => putRow("project_tracking", projectId, tracking);
 
 // ---- projects and workstreams, guiding docs and their requirements

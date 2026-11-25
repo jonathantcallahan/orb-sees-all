@@ -1,4 +1,5 @@
 import { ATLASSIAN_RULE, baseSection, PLAN_RULES, SAME_WORK_RULE, STEP_RULE, TASK_RULES, TITLE_RULE, WRITING_RULES } from "./baseLessons";
+import { sizeFieldJql } from "./sizes";
 import type { scanEntry } from "./sessionScan";
 import type { IndexEntry } from "./taskIndex";
 import { projectsOn, tasksOn, watchedTopicsOn } from "./features";
@@ -13,7 +14,7 @@ let profile = DEFAULT_PROFILE;
 export function setUserProfile(text: string | null | undefined) {
   profile = text?.trim() || DEFAULT_PROFILE;
 }
-import type { AdhocTask, Blocker, ProjectProfile, ProjectSnapshot, QuickReply } from "./schema";
+import type { AdhocTask, Blocker, ProjectProfile, ProjectSnapshot, QuickReply, SprintChoice } from "./schema";
 
 const READ_ONLY = "Never send, post, react, draft, or modify anything. Only read.";
 const JSON_ONLY = "Output ONLY the JSON object: no prose, no code fence.";
@@ -1257,6 +1258,66 @@ ${JIRA_APPLY_RULES}
 After, ${JSON_ONLY} Shape: {"sent": boolean, "key": string|null, "link": string|null, "changed_type": boolean, "moved": [string], "not_moved": [string], "error": string|null}. sent is true once the work is a story in ${a.into}; link is the story's webUrl, or https://<the site's host>/browse/<key>.`;
 }
 
+/**
+ * Changes one Jira issue as the user reviewed it on a chat's card (see the change_jira_issue action):
+ * each field given, once, and nothing else. It reads the issue before and after, so the planner can
+ * bring what it shows up to date without reading the sprint again.
+ */
+export function changeJiraIssuePrompt(c: {
+  key: string;
+  status?: string | null;
+  assignee?: string | null;
+  due?: string | null;
+  summary?: string | null;
+  priority?: string | null;
+  epic?: string | null;
+  sprint?: string | null;
+  comment?: string | null;
+}): string {
+  const none = (v: string) => v.trim().toLowerCase() === "none";
+  const steps: string[] = [];
+  if (c.status)
+    steps.push(
+      `Status: move it to "${c.status}". Get its transitions (getTransitionsForJiraIssue) and use transitionJiraIssue with the one whose target status is "${c.status}" (match the status it leads to, ignoring case, not the transition's own name). If none leads there, don't chain transitions to get there: put "status" in not_changed and name in error the statuses it can move to.`,
+    );
+  if (c.assignee)
+    steps.push(
+      none(c.assignee)
+        ? `Assignee: unassign it: editJiraIssue fields {"assignee": null}.`
+        : `Assignee: assign it to ${JSON.stringify(c.assignee)}. Find their account id with lookupJiraAccountId; if no one or more than one person matches, don't guess: put "assignee" in not_changed and say so in error. Then editJiraIssue fields {"assignee": {"accountId": "<their id>"}}.`,
+    );
+  if (c.due) steps.push(none(c.due) ? `Due date: clear it: editJiraIssue fields {"duedate": null}.` : `Due date: editJiraIssue fields {"duedate": "${c.due}"}.`);
+  if (c.summary) steps.push(`Summary: editJiraIssue fields {"summary": ${JSON.stringify(c.summary)}}, exactly.`);
+  if (c.priority) steps.push(`Priority: editJiraIssue fields {"priority": {"name": ${JSON.stringify(c.priority)}}}.`);
+  if (c.epic)
+    steps.push(
+      none(c.epic)
+        ? `Epic: take it out of its epic: editJiraIssue fields {"parent": null}. If Jira refuses that, or the issue is linked to its epic by the Epic Link field (customfield_10014) instead, clear that: fields {"customfield_10014": null}.`
+        : `Epic: put it in the epic ${c.epic}: editJiraIssue fields {"parent": {"key": "${c.epic}"}}.`,
+    );
+  if (c.sprint)
+    steps.push(
+      c.sprint.trim().toLowerCase() === "backlog"
+        ? `Sprint: take it out of its sprint, back to the backlog: editJiraIssue fields {"customfield_10020": null}.`
+        : `Sprint: move it to the sprint named ${JSON.stringify(c.sprint)}. Find that sprint's id: search \`sprint = ${JSON.stringify(c.sprint)}\` with fields ["customfield_10020"] and maxResults 1, and take the id of the sprint in customfield_10020 with that name (an active or future one). Then editJiraIssue fields {"customfield_10020": <its id, a number>}. If there's no such open sprint, put "sprint" in not_changed and say so in error.`,
+    );
+  if (c.comment) steps.push(`Comment: add this comment once with addCommentToJiraIssue (contentFormat "markdown"), exactly: ${JSON.stringify(c.comment)}`);
+  return `Make these changes to the Jira issue ${c.key}, which I reviewed and approved. ${ATLASSIAN_RULE}
+
+First read it once with getJiraIssue (fields ["status", "parent", "customfield_10014"]) for before: its category ("done", "in_progress" or "todo", from its status's category) and epic (the parent's key when the parent is an Epic, else its customfield_10014, else null).
+
+Then, each once (field changes can go in one editJiraIssue call together, but if Jira refuses that call, try each of its fields on its own once to see which it refuses):
+${steps.map((s) => `- ${s}`).join("\n")}
+
+${JIRA_APPLY_RULES}
+
+Last, read it once more with getJiraIssue (fields ["summary", "status", "issuetype", "assignee", "duedate", "parent", "customfield_10014", "customfield_10020"]) for issue: key, title (its summary), status (Jira's status name), category, type (its issue type's name), assignee (the assignee's displayName, or null), avatar (their 48x48 avatarUrl, or null), due (its duedate, YYYY-MM-DD, or null), link (https://<the site's host>/browse/<key>), epic (as for before), and sprints (the names of the sprints in customfield_10020 whose state is "active" or "future").
+
+List in changed the changes that took, and in not_changed those Jira refused, by their names here (status, assignee, due, summary, priority, epic, sprint, comment). sent is true when at least one took.
+
+${JSON_ONLY} Shape: {"sent": boolean, "changed": [string], "not_changed": [string], "before": {"category": "done"|"in_progress"|"todo", "epic": string|null}|null, "issue": {"key": string, "title": string|null, "status": string|null, "category": "done"|"in_progress"|"todo", "type": string|null, "assignee": string|null, "avatar": string|null, "due": string|null, "link": string|null, "epic": string|null, "sprints": [string]}|null, "error": string|null}`;
+}
+
 /** Moves a Jira issue into the epic the plan puts it in, as the user reviewed it. */
 export function moveIssuePrompt(key: string, into: string): string {
   return `Put the Jira issue ${key} in the epic ${into}: call editJiraIssue once on ${key} with fields {"parent": {"key": "${into}"}}. ${ATLASSIAN_RULE} ${JIRA_APPLY_RULES}
@@ -1265,13 +1326,71 @@ After, ${JSON_ONLY} Shape: {"sent": boolean, "link": string|null, "error": strin
 }
 
 /** An epic's child issues, each with its status and assignee. */
-export function epicChildrenPrompt(key: string): string {
-  return `List the child issues of the Jira epic ${key}: searchJiraIssuesUsingJql with \`parent = ${key} ORDER BY status ASC, updated DESC\` (fields summary, status, assignee; up to 50). ${ATLASSIAN_RULE} If that finds nothing, try \`"Epic Link" = ${key}\`, then \`parentEpic = ${key}\`, since projects link issues to epics differently.
+/** What a read of issues says of each (see epicChildrenPrompt and issuesByKeyPrompt), and when it failed. */
+const issuesOut = (sizeField: string | null | undefined) => `If every search fails (an error, or access denied), don't report an empty list: set error to what went wrong, in a few words, and issues to []. Only report no issues when a search worked and found none.
 
-If every search fails (an error, or access denied), don't report an empty list: set error to what went wrong, in a few words, and issues to []. Only report no issues when a search worked and found none.
-
-For each issue: key, title (its summary), status (Jira's status name), category ("done", "in_progress" or "todo", from the status's category), assignee (the person's display name, or null if unassigned) and link (its webUrl).
+For each issue: key, title (its summary), status (Jira's status name), category ("done", "in_progress" or "todo", from the status's category), type (its issue type's name: Story, Task, Bug…), size (${sizeField ? `its T-shirt size, the value of ${sizeField}: XS, S, M, L, XL or XXL, or null when it has none` : "null"}), due (its duedate, YYYY-MM-DD, or null when it has none), assignee (the person's display name, or null if unassigned), avatar (the assignee's 48x48 avatarUrl, or null), link (its webUrl), created (its created time as Jira gives it) and done_at (for a done one, its statuscategorychangedate as Jira gives it: when it went done; otherwise null).
 
 ${READ_ONLY}
-${JSON_ONLY} Shape: {"issues": [{"key": string, "title": string, "status": string, "category": "done"|"in_progress"|"todo", "assignee": string|null, "link": string|null}], "error": string|null}`;
+${JSON_ONLY} Shape: {"issues": [{"key": string, "title": string, "status": string, "category": "done"|"in_progress"|"todo", "type": string|null, "size": string|null, "due": string|null, "assignee": string|null, "avatar": string|null, "link": string|null, "created": string|null, "done_at": string|null}], "error": string|null}`;
+
+export function epicChildrenPrompt(key: string, sizeField?: string | null): string {
+  return `List the child issues of the Jira epic ${key}: searchJiraIssuesUsingJql with \`parent = ${key} ORDER BY status ASC, updated DESC\` (fields summary, status, issuetype, duedate, assignee, created, statuscategorychangedate${sizeField ? `, ${sizeField}` : ""}; maxResults 25, following nextPageToken for up to 4 pages: each issue's assignee and status make the results large). ${ATLASSIAN_RULE} If that finds nothing, try \`"Epic Link" = ${key}\`, then \`parentEpic = ${key}\`, since projects link issues to epics differently.
+
+${issuesOut(sizeField)}`;
+}
+
+/** The most issues a list read by key reads: four pages of 25, as an epic's issues. */
+export const BY_KEY_READ = 100;
+
+/** Issues by their keys: the Epics area's lists of a sprint's issues (Unaffiliated, and each person's). */
+export function issuesByKeyPrompt(keys: string[], sizeField?: string | null): string {
+  return `List these Jira issues: searchJiraIssuesUsingJql with \`key in (${keys.slice(0, BY_KEY_READ).join(", ")}) ORDER BY status ASC, updated DESC\` (fields summary, status, issuetype, duedate, assignee, created, statuscategorychangedate${sizeField ? `, ${sizeField}` : ""}; maxResults 25, following nextPageToken for up to 4 pages: each issue's assignee and status make the results large). ${ATLASSIAN_RULE}
+
+${issuesOut(sizeField)}`;
+}
+
+/**
+ * The epics with work in a Jira project's current or upcoming sprint, each with its issues there (keys,
+ * and whether each is done; the Epics area reads an epic's issues in full when it's opened, with
+ * epicChildrenPrompt). An epic isn't in a sprint itself: its issues are. Rovo's search results are
+ * large (an issue's parent alone is over a kilobyte), and a result over Claude Code's limit is put in a
+ * file the run can't read well, so every search asks for the least it needs.
+ */
+export function sprintEpicsPrompt(project: string, which: SprintChoice, sizeField?: string | null): string {
+  const base = `project = ${project} AND issuetype not in subTaskIssueTypes()`;
+  // The T-shirt size field, by id when it's known, found first when it isn't, left out when the project has none.
+  const sizes = sizeField !== null;
+  const field = sizeField ? `"${sizeField}"` : "<the size field from 1b>";
+  const fieldJql = sizeField ? sizeFieldJql(sizeField) : "cf[<its number>]";
+  const discover =
+    sizeField === undefined
+      ? `\n1b. Find the field the project keeps T-shirt sizes in (XS, S, M, L, XL, XXL): read one of the sprint's issues with getJiraIssue (fields ["*all"], expand "names"). Among its custom fields named for a T-shirt size or a size estimate ("T-Shirt Size", "Estimate (T-shirt)", "Estimated Task Size"…), count how many of this sprint's issues have each set, all at once: \`${base} AND sprint = <its id> AND cf[<its number>] is not EMPTY\` with searchResultMode "count". The size field is the one the most of the sprint's issues have (a project can have older size fields that only its old issues use: go by this sprint's); size_field is its id ("customfield_<number>"). If there's no such field, or none of the sprint's issues has any, size_field is null, and every size and sized below is null.`
+      : "";
+  const find =
+    which === "current"
+      ? `Search \`${base} AND sprint in openSprints()\` with fields ["customfield_10020"] and maxResults 5: the sprint is the active one. If the issues are in more than one active sprint (teams on separate boards), take the one with the most issues (searchResultMode "count" on \`${base} AND sprint = <its id>\`).`
+      : `Search \`${base} AND sprint in futureSprints()\` with fields ["customfield_10020"] and maxResults 10, and note the future sprints (state "future") the issues are in. Then search again adding \`AND sprint not in (<every future sprint you've seen>)\` (an issue is in at most one future sprint), and again, until a search finds nothing: then you've seen them all. A future sprint with no startDate is usually a backlog bucket ("Backlog", "Ready for refinement", "Icebox"), not a sprint. The upcoming sprint is the one with the earliest startDate; if none has one, the one whose name comes next after the sprint under way (e.g. "Sprint 25" after "Sprint 24"), never a bucket.`;
+  return `List the epics with work in the Jira project ${project}'s ${which === "current" ? "current sprint (the one under way)" : "upcoming sprint (the next one planned)"}. ${ATLASSIAN_RULE}
+
+Jira's search results are large, so ask only for the fields named here, with the maxResults given.
+
+1. Find the sprint. customfield_10020 is the Sprint field on Jira Cloud: the sprints an issue is in, each with id, name, state ("active", "future" or "closed"), startDate and endDate. ${find}${discover}
+2. Search \`${base} AND sprint = <its id>\` with fields ["customfield_10014", "assignee", "issuetype"${sizes ? `, ${field}` : ""}] and maxResults 50, following nextPageToken until you have every page. customfield_10014 (Epic Link) is the key of the issue's epic, or null when it's in none (an Epic's own is null); assignee is who has it. If no issue has the Epic Link field at all (some projects don't), search again with fields ["parent", "assignee", "issuetype"${sizes ? `, ${field}` : ""}] and maxResults 20 instead, every page, and use the parent's key when its issue type is Epic.
+3. Search \`${base} AND sprint = <its id> AND statusCategory = Done\` with fields ["statuscategorychangedate"] and maxResults 100, every page: those issues are done. An issue's statuscategorychangedate is when it went to Done.
+4. Search \`${base} AND sprint = <its id> AND statusCategory = "In Progress"\` with fields ["statuscategorychangedate"] and maxResults 100, every page: those issues are in progress. The rest are to do.
+5. Read the epics: search \`key in (<every epic key from 2, and every Epic that's in the sprint itself>)\` with fields ["summary", "status", "duedate", "assignee", "parent"] and maxResults 100.
+6. Count each epic's issues, all of them, in any sprint or none: for each epic from 5, search \`parent = <its key>\`, \`parent = <its key> AND statusCategory = Done\` and \`parent = <its key> AND statusCategory = "In Progress"\`, each with searchResultMode "count". Send every count search at once, in one turn. If an epic's first count is 0 though it has issues in the sprint, count with \`"Epic Link" = <its key>\` in place of \`parent = <its key>\` instead (some projects link issues to epics that way).${
+    sizes
+      ? `\n7. Weigh each epic's issues by size, all of them, in any sprint or none: search \`parent in (<every epic key from 5>) AND ${fieldJql} is not EMPTY\` with fields ["customfield_10014", ${field}, "statusCategory"] (or "parent" in place of customfield_10014, if 2 needed it) and maxResults 100, every page. Each issue's epic is its Epic Link, or its parent's key.`
+      : ""
+  }
+
+For the sprint: name, start and end (its startDate and endDate as Jira gives them, or null). If the project has no ${which === "current" ? "sprint under way" : "upcoming sprint"}, set sprint to null and epics to [].
+For each epic: key, title (its summary), status (Jira's status name), category ("done", "in_progress" or "todo", from its status's category), link (https://<the site's host>/browse/<key>), due (its duedate, YYYY-MM-DD, or null when it has none), assignee (the epic's own assignee's displayName, or null when no one has it) and avatar (their 48x48 avatarUrl, or null), parents (the issue it's under, from its parent field, as a one-item list with its key, type (its issue type's name, e.g. "Initiative"), title (its summary) and link (https://<the site's host>/browse/<key>); [] when it has no parent), issues: each of its issues in the sprint, with key, category ("done" if 3 found it, "in_progress" if 4 found it, otherwise "todo"), done_at (a done issue's statuscategorychangedate as Jira gives it, otherwise null), assignee (its assignee's displayName, or null when it's unassigned), avatar (the assignee's 48x48 avatarUrl, or null), type (its issue type's name) and size (its T-shirt size, the size field's value: XS, S, M, L, XL or XXL, or null when it has none), sized: from 7, each of its issues that has a size, as "<size>:<category>" (the category from its statusCategory: "done", "in_progress" or "todo"), e.g. ["M:done", "L:todo"], or null when 7 failed, and progress: its counts from 6, done (the Done count), started (the In Progress count) and total (the first), or null if its count searches failed. An Epic that's in the sprint itself is listed too, even with no issues of its own there. Every other issue in the sprint goes in exactly one epic's issues, or, when it's in no epic, in strays (with key, category, done_at, assignee, avatar, type and size, as an epic's issues have), and unparented is how many strays there are.
+
+If every search fails (an error, or access denied), don't report an empty sprint: set error to what went wrong, in a few words. Only report no epics when a search worked and found none.
+
+${READ_ONLY}
+${JSON_ONLY} Shape: {"sprint": {"name": string, "start": string|null, "end": string|null}|null, "epics": [{"key": string, "title": string, "status": string|null, "category": "done"|"in_progress"|"todo", "link": string|null, "due": string|null, "assignee": string|null, "avatar": string|null, "parents": [{"key": string, "type": string|null, "title": string|null, "link": string|null}], "sized": [string]|null, "issues": [{"key": string, "category": "done"|"in_progress"|"todo", "done_at": string|null, "assignee": string|null, "avatar": string|null, "type": string|null, "size": string|null}], "progress": {"done": number, "started": number, "total": number}|null}], "unparented": number, "strays": [{"key": string, "category": "done"|"in_progress"|"todo", "done_at": string|null, "assignee": string|null, "avatar": string|null, "type": string|null, "size": string|null}], "error": string|null${sizeField === undefined ? ', "size_field": string|null' : ""}}`;
 }

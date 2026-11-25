@@ -157,6 +157,16 @@ export const TOOLS = {
     ATLASSIAN_SITE,
     ...["createJiraIssue", "editJiraIssue", "getJiraIssue", "searchJiraIssuesUsingJql", "createIssueLink", "getIssueLinkTypes", "getJiraProjectIssueTypesMetadata"].map((t) => `${ATLASSIAN}${t}`),
   ],
+  /**
+   * Changing one Jira issue as a chat proposed it, used only for a change the user reviewed and clicked
+   * Apply on: its status, assignee, fields, epic or sprint, and a comment.
+   */
+  jiraChange: [
+    ATLASSIAN_SITE,
+    ...["getJiraIssue", "getTransitionsForJiraIssue", "transitionJiraIssue", "editJiraIssue", "lookupJiraAccountId", "addCommentToJiraIssue", "searchJiraIssuesUsingJql"].map(
+      (t) => `${ATLASSIAN}${t}`,
+    ),
+  ],
   /** Filing a Jira ticket, used only for one the user reviewed and clicked Create on: create it, put it in its epic, link it. */
   ticketCreate: [
     ATLASSIAN_SITE,
