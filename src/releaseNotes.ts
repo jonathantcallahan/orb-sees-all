@@ -11,6 +11,19 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "0.8.0",
+    date: "2026-11-25",
+    notes: [
+      "Epics: a new area for one Jira project's current or upcoming sprint, by epic. A burndown in tickets or T-shirt points, who has the sprint's issues and who has too much, and each epic's issues with who has them and what they're under. Type the project's key the first time you open it. It's on wherever Jira is set up, and Settings turns it off.",
+      "Chat about the sprint, an epic or a person's work from the Epics area. Chats can now change an existing Jira issue: its status, who has it, its due date, summary, priority, epic or sprint, or add a comment. Each change is a card you apply.",
+      "Settings › Jira connects Demian to Jira directly, with your site, email and an API token kept in the Keychain (Credential Manager on Windows). Then the Epics area reads Jira in a moment, without a Claude run, and the changes you apply are made the same way.",
+      "Mark the Daily briefing as read. Once it's read, every update is read and the inbox is empty, a public-domain painting from the Cleveland Museum of Art hangs across Updates, a new one each day. Point at it for the museum's words about it.",
+      "A tally after the Tasks title of the tasks you've finished today.",
+      "Links to Jira issues show the issue's type (epic, story, task, bug) before them, wherever Demian knows it.",
+      "Fix: middle-clicking a link no longer opens it inside the app, with no way back. It opens in your browser.",
+    ],
+  },
+  {
     version: "0.7.3",
     date: "2026-11-24",
     notes: [
